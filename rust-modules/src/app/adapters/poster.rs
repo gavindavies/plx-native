@@ -4174,7 +4174,7 @@ mod tests {
                 let k = key(n);
                 g.slots.iter().any(|s| s.state == P_READY && key_bytes(s) == k.as_bytes())
             };
-            for &n in showing.iter().filter(|n| on_screen.contains(n)) {
+            for &n in showing.iter().filter(|&&n| on_screen.contains(&n)) {
                 if !is_ready(&g, n) {
                     lost.push((frame, n));
                 }
