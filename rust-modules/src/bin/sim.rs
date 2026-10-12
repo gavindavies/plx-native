@@ -19,6 +19,7 @@
 //!
 //! Usage:
 //!   plxnative-sim [pms-host] [pms-port]
+//!   plxnative-sim <media-file>              (`gst` build: play a file on this machine's disk)
 //! Environment:
 //!   PLXNATIVE_PMS_HOST / PLXNATIVE_PMS_PORT   server to talk to (argv wins)
 //!   PLXNATIVE_RUNTIME_DIR                     this instance's trigger/FIFO/log root
@@ -64,6 +65,18 @@ fn main() {
         if let Err(reason) = result { eprintln!("synthetic initial input: {reason}"); std::process::exit(2); }
         return;
     }
+    // `plxnative-sim <file>` (the GStreamer build): play a file on this machine's own disk, with
+    // no server. Anything that names an existing regular file is taken as one.
+    #[cfg_attr(not(feature = "gst"), allow(unused_mut))]
+    let mut launching_file = false;
+    #[cfg(feature = "gst")]
+    let host = if std::path::Path::new(&host).is_file() {
+        launching_file = true;
+        plxnative_modules::set_launch_file(std::fs::canonicalize(&host).unwrap_or_else(|_| host.clone().into()));
+        String::new()
+    } else {
+        host
+    };
     let port: u16 = args
         .next()
         .or_else(|| std::env::var("PLXNATIVE_PMS_PORT").ok())
@@ -78,7 +91,7 @@ fn main() {
     // The dev loop keeps its loud failure where it belongs: the Makefile's `SIM_PRE` refuses to
     // launch when `SIM_PMS` is empty, so `make sim-run` still says "no PMS host" rather than
     // silently booting a sign-in screen at somebody expecting Home.
-    if host.is_empty() {
+    if host.is_empty() && !launching_file {
         eprintln!(
             "plxnative-sim: no PMS host given — starting the plex.tv sign-in flow.\n\
              (pass one as `plxnative-sim <numeric-ip> [port]`, or set PLXNATIVE_PMS_HOST, to boot\n\

@@ -36,6 +36,12 @@ mod textinput; // the TV's own on-screen keyboard, via plain SDL_StartTextInput 
 /// directory and truncate the event log inside it before the app starts. Exposing the resolver
 /// keeps ONE definition of where that is — a second `env::var` read in the binary would be a
 /// second answer waiting to drift from this one.
+/// Play `path` once the app is running — `plxnative-sim <file>` (see `app::local_launch`).
+#[cfg(feature = "gst")]
+pub fn set_launch_file(path: std::path::PathBuf) {
+    app::local_launch::set(path);
+}
+
 #[cfg(feature = "hostsim")]
 pub fn sim_runtime_dir() -> std::path::PathBuf {
     plx_base::paths::runtime_dir().to_path_buf()

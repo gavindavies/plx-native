@@ -186,6 +186,8 @@ pub(crate) unsafe fn run(app: &mut App) {
             let _ = plx_base::diag::spans::take();
             continue;
         }
+        #[cfg(feature = "gst")]
+        crate::app::local_launch::tick(app, fr.now);
         plx_base::diag::spans::span("pump", || unsafe { playback_tick(app, fr) });
         clock_and_press(app, fr);
         plx_base::diag::spans::span("land", || unsafe { land_results(app, fr) });

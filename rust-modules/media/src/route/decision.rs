@@ -5526,6 +5526,15 @@ pub fn source_decodable(ps: &PlaybackSession) -> bool {
 pub fn source_acodec(ps: &PlaybackSession) -> String {
     ps.src_acodec.clone()
 }
+/// Name what the player shows when there is no library item behind it (a local file): the HUD's
+/// title and the context line under it, truncated to their fixed buffers like every other title.
+pub fn set_hud_title(ps: &mut PlaybackSession, title: &str, ctxline: &str) {
+    // SAFETY: the buffers and their lengths come from the same arrays, as in `request_play`.
+    unsafe {
+        set_c(ps.title.as_mut_ptr(), ps.title.len(), title);
+        set_c(ps.ctxline.as_mut_ptr(), ps.ctxline.len(), ctxline);
+    }
+}
 /// pointers into the module-owned HUD buffers (valid for the whole frame draw_text uses them)
 pub fn title_cptr(ps: &PlaybackSession) -> *const c_char {
     ps.title.as_ptr()

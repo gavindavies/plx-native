@@ -120,6 +120,8 @@ mod window_activity;
 pub(crate) mod events;
 pub(crate) mod lifecycle;
 pub(crate) mod playback;
+#[cfg(feature = "gst")]
+pub(crate) mod local_launch; // `plxnative-sim <file>`: play a file from the command line
 mod preferences;
 pub(crate) mod input;
 pub(crate) mod bridge;

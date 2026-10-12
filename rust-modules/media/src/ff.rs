@@ -105,6 +105,12 @@ const OFF_STREAM_TIME_BASE: usize = 32;
 const OFF_STREAM_METADATA: usize = 72;
 #[cfg(target_pointer_width = "64")]
 const OFF_STREAM_METADATA: usize = 80;
+/// `AVStream.avg_frame_rate`, directly after `metadata` — the frame rate a local file declares when
+/// its demuxer leaves `codecpar.framerate` unset (`probe_local`).
+#[cfg(target_pointer_width = "32")]
+const OFF_STREAM_AVG_FRAME_RATE: usize = 76;
+#[cfg(target_pointer_width = "64")]
+const OFF_STREAM_AVG_FRAME_RATE: usize = 88;
 /// `AVFormatContext.duration`, in AV_TIME_BASE units. By offset — see the struct's closing note.
 #[cfg(target_pointer_width = "32")]
 const OFF_FMT_DURATION: usize = 64;
@@ -680,6 +686,11 @@ unsafe fn track_names(fmt: *mut AVFormatContext) -> (Vec<String>, Vec<String>) {
         }
     }
     (audio, subs)
+}
+
+#[inline]
+unsafe fn stream_avg_frame_rate(s: *mut AVStream) -> AVRational {
+    *((s as *const u8).add(OFF_STREAM_AVG_FRAME_RATE) as *const AVRational)
 }
 
 #[inline]
@@ -1469,6 +1480,87 @@ fn probe(url: &str) {
             !av_bsf_get_by_name(an.as_ptr()).is_null()
         ));
         avformat_close_input(&mut fmt);
+    }
+}
+
+/// What [`probe_local`] learned about a file on this machine's disk: everything the Load
+/// declaration needs, which for a Plex item comes from the server's decision instead.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LocalProbe {
+    /// FFmpeg's codec name of the video stream the demuxer will pick (`h264`, `hevc`, ...).
+    pub vcodec: String,
+    /// FFmpeg's codec name of the first audio stream, in file order, that the pipeline can carry
+    /// (see [`LOCAL_AUDIO_CODECS`]); empty when the file has none.
+    pub acodec: String,
+    /// Every audio stream's codec name, in file order — what the refusal names when none fits.
+    pub audio_codecs: Vec<String>,
+    pub width: u16,
+    pub height: u16,
+    /// Frames per second, 0 when the container does not say.
+    pub fps: f64,
+    pub duration_ns: i64,
+}
+
+/// The audio codecs the demuxer frames for the sink (`engine::audio_payload_codec`'s vocabulary,
+/// in FFmpeg's spelling).
+pub const LOCAL_AUDIO_CODECS: [&str; 4] = ["eac3", "ac3", "dts", "aac"];
+
+/// Open a local file with the bundled libavformat (its one protocol is `file`) and read what a
+/// Load declaration needs. Blocking — call it off the frame thread.
+pub fn probe_local(path: &std::path::Path) -> Result<LocalProbe, String> {
+    if !ABI_OK.load(Ordering::Relaxed) {
+        return Err("FFmpeg is unavailable".into());
+    }
+    ensure_registered();
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| "path contains a NUL byte".to_string())?;
+    unsafe {
+        let mut fmt: *mut AVFormatContext = std::ptr::null_mut();
+        let r = avformat_open_input(&mut fmt, c.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut());
+        if r < 0 || fmt.is_null() {
+            return Err(format!("not a readable media file (avformat_open_input {r})"));
+        }
+        let result = (|| {
+            if avformat_find_stream_info(fmt, std::ptr::null_mut()) < 0 {
+                return Err("could not read the streams".to_string());
+            }
+            let vi = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, std::ptr::null_mut(), 0);
+            if vi < 0 {
+                return Err("no video stream".to_string());
+            }
+            let vcp = stream_codecpar(*(*fmt).streams.add(vi as usize));
+            let name = |id: c_int| std::ffi::CStr::from_ptr(avcodec_get_name(id)).to_string_lossy().into_owned();
+            let mut audio_codecs = Vec::new();
+            for i in 0..(*fmt).nb_streams {
+                let cp = stream_codecpar(*(*fmt).streams.add(i as usize));
+                if (*cp).codec_type == AVMEDIA_TYPE_AUDIO {
+                    audio_codecs.push(name((*cp).codec_id));
+                }
+            }
+            // FILE order, not codec preference: the first track is the one the file's author
+            // put first (usually the main mix), and a commentary must never win on its codec.
+            let acodec = audio_codecs
+                .iter()
+                .find(|a| LOCAL_AUDIO_CODECS.contains(&a.as_str()))
+                .cloned()
+                .unwrap_or_default();
+            let as_fps = |r: AVRational| (r.num > 0 && r.den > 0).then(|| r.num as f64 / r.den as f64);
+            let fps = as_fps((*vcp).framerate)
+                .or_else(|| as_fps(stream_avg_frame_rate(*(*fmt).streams.add(vi as usize))))
+                .unwrap_or(0.0);
+            let clamp = |v: c_int| u16::try_from(v.max(0)).unwrap_or(u16::MAX);
+            Ok(LocalProbe {
+                vcodec: name((*vcp).codec_id),
+                acodec,
+                audio_codecs,
+                width: clamp((*vcp).width),
+                height: clamp((*vcp).height),
+                fps,
+                duration_ns: fmt_duration(fmt).max(0).saturating_mul(1_000),
+            })
+        })();
+        avformat_close_input(&mut fmt);
+        result
     }
 }
 
