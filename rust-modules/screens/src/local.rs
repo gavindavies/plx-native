@@ -192,6 +192,7 @@ impl Page {
     /// The read-out for a page with nothing to show.
     fn status_overlay<'a>(&self, tick: u32) -> StatusOverlay<'a> {
         match &self.listing {
+            // placeholder-exempt: builds the value only; counted where drawn (StatusOverlay::draw_geometry, Working)
             Listing::Loading => StatusOverlay::new(STATUS_FRAME, plx_platform::i18n::msg::browse_local_loading_c(), StatusKind::Working).phase(tick),
             Listing::Ready(_) => StatusOverlay::new(STATUS_FRAME, plx_platform::i18n::msg::browse_local_empty_c(), StatusKind::Empty),
             Listing::Failed(_) => StatusOverlay::new(STATUS_FRAME, plx_platform::i18n::msg::browse_local_failed_c(), StatusKind::Failed)
