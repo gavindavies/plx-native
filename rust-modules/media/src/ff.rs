@@ -1508,6 +1508,9 @@ enum Src {
     /// `curlio`'s registry instead of a pointer the engine holds. `curlio`'s module doc says why
     /// that is not the accident it looks like.
     Curl(Box<crate::curlio::CurlSource>),
+    /// A file on this machine's disk ([`crate::localfile`]): positional reads, so a seek moves
+    /// `AvioState::off` and reopens nothing, and nothing is ever in flight between two reads.
+    File(Box<crate::localfile::LocalFile>),
     Idle,
 }
 
@@ -1518,7 +1521,7 @@ impl Src {
         match self {
             Src::Socket { hs, .. } => plx_net::stream::http_body_receipt(*hs),
             Src::Curl(cs) => cs.body_receipt(),
-            Src::Idle => plx_net::stream::BodyReceipt {
+            Src::File(_) | Src::Idle => plx_net::stream::BodyReceipt {
                 ahead: 0,
                 finished: false,
                 stepped: false,
@@ -2231,7 +2234,7 @@ impl AvioState {
 
     fn transfer_finished(&self) -> bool {
         match &self.src {
-            Src::Idle => true,
+            Src::Idle | Src::File(_) => true,
             Src::Socket { hs, .. } => plx_net::stream::http_body_done(*hs),
             Src::Curl(cs) => cs.body_complete(),
         }
@@ -2247,7 +2250,7 @@ impl AvioState {
     /// redials on `Transport`. Do not raise CAP.
     fn drain_wire(&mut self) -> bool {
         const CAP: usize = 384 * 1024;
-        if matches!(self.src, Src::Idle) {
+        if matches!(self.src, Src::Idle | Src::File(_)) {
             return false;
         }
         if unsafe { crate::aq::aq_is_aborted(self.aq) } {
@@ -2277,7 +2280,7 @@ impl AvioState {
                     plx_net::stream::http_drain_available(*hs, &mut self.bounce[start..])
                 }
                 Src::Curl(cs) => cs.drain_available(&mut self.bounce[start..]),
-                Src::Idle => 0,
+                Src::File(_) | Src::Idle => 0,
             };
             if n > 0 {
                 self.bounce.truncate(start + n as usize);
@@ -2465,6 +2468,14 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
                     live_deadline,
                     checkpoint,
                 ),
+                Src::File(_) if dst.is_null() || n <= 0 => 0,
+                Src::File(f) => {
+                    let r = f.read_at(std::slice::from_raw_parts_mut(dst, n as usize), s.off);
+                    if r < 0 {
+                        crate::player::log(&format!("ff: local read FAILED at {} (errno {})", s.off, -r));
+                    }
+                    r
+                }
                 Src::Idle => return AVERROR_EOF,
             };
             let wake =
@@ -2668,6 +2679,8 @@ extern "C" fn seek_cb(op: *mut c_void, offset: i64, whence: c_int) -> i64 {
             // deliberate: bytes from the head of the file, delivered as though they were the bytes
             // at `target`, are corruption that looks like success.
             Src::Curl(cs) => cs.seek(target),
+            // Positional reads: the next one simply starts at `target`.
+            Src::File(_) => true,
             Src::Idle => false,
         };
         if let Some(cs) = hopped_to_tls {
@@ -3879,6 +3892,7 @@ fn hls_source_read(
             &mut plx_base::checkpoint::NoCheckpoint,
         ),
         Src::Curl(cs) => cs.read_until(dst, deadline, &mut plx_base::checkpoint::NoCheckpoint),
+        Src::File(_) => return Err(HlsExit::Failed("HLS over a local file")),
         Src::Idle => return Err(HlsExit::Failed("HLS source idle")),
     };
     // The wake used to interrupt a blocked body read is deliberately transport-shaped (EOF for
@@ -8150,6 +8164,12 @@ mod pre_audio_headroom_tests {
     }
 }
 
+/// What [`demux`] reads: a PMS part over http(s), or a file on this machine's disk.
+pub enum MediaInput {
+    Http { origin: plx_plex::plex::Origin, path: String },
+    File(std::path::PathBuf),
+}
+
 /// The demux thread body (spawned by `engine::start_bufferfeed`).
 ///
 /// Takes an [`Origin`](plx_plex::plex::Origin) rather than a `(host, port)` pair because **the scheme
@@ -8160,8 +8180,7 @@ mod pre_audio_headroom_tests {
 /// unused (fd = -1, published as `SHARED.hs_ptr`) when the origin turns out to be https.
 pub fn demux(
     off: &plx_base::task::OffFrame,
-    origin: plx_plex::plex::Origin,
-    path: String,
+    input: MediaInput,
     acodec: String,
     abr: Option<(crate::route::HlsAbrControl, crate::route::WorkerTicket)>,
     auto_original: Option<crate::route::AutoOriginalWatch>,
@@ -8185,15 +8204,21 @@ pub fn demux(
     let aq_p = aq.0; // VIDEO lane (also the AVIO abort ptr + EOF marker)
     let aqa_p = aqa.0; // AUDIO lane (es=2) — always a distinct queue on the ff (two-lane) path
     let hs_p = hs.0;
-    if path
+    // A local file reads through `localfile` and never touches the network or the HLS arm; an
+    // http(s) part keeps every line below exactly as it was.
+    let (origin, path, local) = match input {
+        MediaInput::Http { origin, path } => (Some(origin), path, None),
+        MediaInput::File(p) => (None, String::new(), Some(p)),
+    };
+    if let Some(origin) = origin.as_ref().filter(|_| path
         .split_once('?')
         .map_or(path.as_str(), |(plain, _)| plain)
         .to_ascii_lowercase()
-        .ends_with(".m3u8")
+        .ends_with(".m3u8"))
     {
         crate::player::log("hls: segmented demux start");
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            hls_demux(off, &origin, &path, &acodec, abr, aq_p, aqa_p, hs_p)
+            hls_demux(off, origin, &path, &acodec, abr, aq_p, aqa_p, hs_p)
         }));
         match outcome {
             Ok(Ok(())) | Ok(Err(HlsExit::Aborted)) => {}
@@ -8279,7 +8304,12 @@ pub fn demux(
     let mut original_since = std::time::Instant::now();
     // `base()` re-brackets a v6 host, which is what a URL needs; the plaintext arm hands the
     // `Origin` itself to `open_plain_progressive`, which dials its BARE `host()`.
-    let url = format!("{}{}", origin.base(), path); // delivery identity; may carry a token, never logged
+    // delivery identity; may carry a token, never logged
+    let url = match (&origin, &local) {
+        (_, Some(p)) => crate::localfile::file_url(p),
+        (Some(origin), None) => format!("{}{}", origin.base(), path),
+        (None, None) => unreachable!("a demux input is http(s) or a file"),
+    };
 
     // PANIC BARRIER around the whole producer body. Not about the unwind itself — this thread is
     // started by `task::spawn`, so std already catches a panic at the thread boundary and turns it
@@ -8316,7 +8346,8 @@ pub fn demux(
                 // aborts the lane first and this check refuses to start I/O. Creating/registering the
                 // source only after the check leaves a window where teardown's one wake sees nothing
                 // and the demuxer then opens a fresh connection under the main thread's join.
-                let mut curl_open = if origin.is_tls() {
+                let tls = origin.as_ref().is_some_and(|o| o.is_tls());
+                let mut curl_open = if tls {
                     match crate::curlio::CurlSource::reserve_open() {
                         Ok(r) => Some(r),
                         Err(e) => {
@@ -8339,7 +8370,21 @@ pub fn demux(
                 // redirected to https, which `open_plain_progressive` hands to curl. Both arms publish the same two diagnostics (`dg_http_status`, `file_size`)
                 // before anything else can fail, because the read-out panel is the first thing anybody
                 // looks at when a part will not play and it must mean the same thing either way.
-                let (src, size) = if origin.is_tls() {
+                let (src, size) = if let Some(p) = &local {
+                    match crate::localfile::LocalFile::open(p) {
+                        Ok(f) => {
+                            let size = f.size();
+                            SHARED.file_size.store(size, Ordering::Release);
+                            crate::player::log(&format!("ff: open local size={size}"));
+                            (Src::File(Box::new(f)), size)
+                        }
+                        Err(e) => {
+                            crate::player::log(&format!("ff: local open FAILED: {e}"));
+                            SHARED.demux_failed.store(true, Ordering::Release);
+                            break;
+                        }
+                    }
+                } else if tls {
                     let reservation = curl_open
                         .take()
                         .expect("TLS reserved its abort handle above");
@@ -8364,7 +8409,8 @@ pub fn demux(
                     }
                 } else {
                     // Redirects followed; an https hop comes back as the curl source.
-                    match open_plain_progressive(hs_p, &origin, &path, aq_p) {
+                    let origin = origin.as_ref().expect("a non-file input has an origin");
+                    match open_plain_progressive(hs_p, origin, &path, aq_p) {
                         Ok(opened) => opened,
                         Err(MediaOpenFail::Aborted) => {
                             crate::player::log("ff: aborted during open");

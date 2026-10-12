@@ -1406,22 +1406,33 @@ fn start_bufferfeed_inner(
     let side_target = if stream { crate::route::side_reader_target(ps) } else { None };
 
     if stream {
-        let su = plx_plex::plex::StreamUrl::parse(&url); // the typed layer's URL splitter
-                                                      // **The whole ORIGIN goes down, not a `(host, port)` pair, because the SCHEME chooses the
-                                                      // transport**: `ff::demux` reads http through `plx_net::stream`'s cleartext socket and https
-                                                      // through `crate::curlio`. This used to REFUSE an https origin outright — cleartext to a
-                                                      // TLS port is a hang or a garbage response with nothing in the log — and that refusal is
-                                                      // what a remote QA reviewer, with no PMS on their LAN, would have hit on every Play.
-                                                      // Rebuilding the origin from an address would put the refusal back in a subtler form: the
-                                                      // certificate is issued for the `plex.direct` NAME, so a TLS connection to the dotted quad
-                                                      // behind it fails validation however well the packets flow (`net/origin.rs`).
-        if !plx_plex::http::credential_transport_allowed(&su.origin, &su.path, &[]) {
-            plx_base::eventlog::log("stream: refused insecure credential transport");
-            return Err(crate::route::RouteStartResult::StartFailed);
-        }
-        let path = su.path;
-        log(&stream_open_log_line(&su.origin.log_form(), &path));
-        let origin = su.origin;
+        // A `file://` location is this machine's own disk (`crate::localfile`), read by the
+        // demuxer directly; there is no origin, credential or transport choice to make for it.
+        let input = if let Some(local) = crate::localfile::path_of(&url) {
+            log(&format!(
+                "stream: local file {}",
+                local.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+            ));
+            crate::ff::MediaInput::File(local)
+        } else {
+            // **The whole ORIGIN goes down, not a `(host, port)` pair, because the SCHEME chooses the
+            // transport**: `ff::demux` reads http through `plx_net::stream`'s cleartext socket and https
+            // through `crate::curlio`. This used to REFUSE an https origin outright — cleartext to a
+            // TLS port is a hang or a garbage response with nothing in the log — and that refusal is
+            // what a remote QA reviewer, with no PMS on their LAN, would have hit on every Play.
+            // Rebuilding the origin from an address would put the refusal back in a subtler form: the
+            // certificate is issued for the `plex.direct` NAME, so a TLS connection to the dotted quad
+            // behind it fails validation however well the packets flow (`net/origin.rs`).
+            let su = plx_plex::plex::StreamUrl::parse(&url); // the typed layer's URL splitter
+            if !plx_plex::http::credential_transport_allowed(&su.origin, &su.path, &[]) {
+                plx_base::eventlog::log("stream: refused insecure credential transport");
+                return Err(crate::route::RouteStartResult::StartFailed);
+            }
+            let path = su.path;
+            log(&stream_open_log_line(&su.origin.log_form(), &path));
+            let origin = su.origin;
+            crate::ff::MediaInput::Http { origin, path }
+        };
         // Two-lane feed: the demuxer routes es=1 video to aq_video and es=2 audio to
         // aq_audio, each with its own cap + feeder.
         let mut qv = crate::aq::aq_new(AQ_VIDEO_BYTES);
@@ -1447,7 +1458,7 @@ fn start_bufferfeed_inner(
             let auto_original = crate::route::auto_original_watch(ps);
             SHARED.side_subs_owner.store(side_target.is_some(), Ordering::Release);
             stream_th = plx_base::task::spawn_off_frame_keeping("demux", move |off| {
-                crate::ff::demux(off, origin, path, acodec, abr, auto_original, aqp, aqap, hsp)
+                crate::ff::demux(off, input, acodec, abr, auto_original, aqp, aqap, hsp)
             });
             if stream_th.is_none() {
                 SHARED.side_subs_owner.store(false, Ordering::Release);

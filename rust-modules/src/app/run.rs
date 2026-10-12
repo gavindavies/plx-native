@@ -564,6 +564,11 @@ unsafe fn present_and_swap(
         if fr.player {
             plx_media::player::sim_video::composite_under();
         }
+        // The Linux build's decoded picture, under the UI the same way (`player::gst_sink`).
+        #[cfg(feature = "gst")]
+        if fr.player {
+            plx_media::player::gst_sink::composite_under();
+        }
         // Before the swap, never after: the back buffer is undefined once presented.
         // A dump decides here whether this frame is written (`dev::framedump`); otherwise the
         // ordinary screenshot seam.

@@ -34,6 +34,8 @@ pub mod preview;
 pub mod ffi;
 #[cfg(feature = "hostsim")]
 pub mod ffi_host;
+#[cfg(feature = "gst")]
+pub mod gst_sink; // the Linux build's player: the fed AUs decoded by the system GStreamer
 mod pump;
 pub mod report;
 #[cfg(all(test, feature = "hostsim"))]

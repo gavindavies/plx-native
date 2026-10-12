@@ -16,6 +16,7 @@
 
 pub mod abr; // client-managed fixed-session HLS controller: estimate, propose, prime, then commit
 pub mod aq;
+pub mod localfile; // the local-disk media plane: a file on this machine read by pread (the Linux build's library)
 pub mod curlio; // the HTTPS media plane: a remote file pulled by byte range over libcurl-multi (stream.rs is the plaintext-socket twin)
 #[macro_use]
 pub mod ff; // THE demuxer -- the FFmpeg 9.0 this app BUNDLES and pins (majors 63/63/61), dlopen'd by absolute path beside the binary, never the television's

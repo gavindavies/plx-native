@@ -8,8 +8,10 @@ use std::os::raw::{c_char, c_int};
 
 #[cfg(all(not(feature = "hostsim"), not(test)))]
 const SINK: &dyn plx_platform::tv::sink::VideoSink = &plx_media::player::ffi::StarfishSink;
-#[cfg(feature = "hostsim")]
+#[cfg(all(feature = "hostsim", not(feature = "gst")))]
 const SINK: &dyn plx_platform::tv::sink::VideoSink = &plx_media::player::ffi_host::HostSink;
+#[cfg(feature = "gst")]
+const SINK: &dyn plx_platform::tv::sink::VideoSink = &plx_media::player::gst_sink::GstSink;
 #[cfg(all(not(feature = "hostsim"), test))]
 const SINK: &dyn plx_platform::tv::sink::VideoSink = &plx_platform::tv::sink::NoSink;
 
