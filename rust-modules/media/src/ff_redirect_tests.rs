@@ -138,6 +138,7 @@ fn hls_open_plain(
             Ok((path.to_string_lossy().into_owned(), size))
         }
         Ok((Src::Curl(_), size, _)) => Ok(("<curl>".into(), size)),
+        Ok((Src::File(_), _, _)) => Err("file".into()),
         Ok((Src::Idle, _, _)) => Err("idle".into()),
         Err(e) => Err(format!("{e:?}")),
     };
@@ -155,6 +156,7 @@ fn progressive_open(port: u16, path: &str) -> Result<(String, i64), String> {
     let outcome = match opened {
         Ok((Src::Socket { path, .. }, size)) => Ok((path.to_string_lossy().into_owned(), size)),
         Ok((Src::Curl(_), size)) => Ok(("<curl>".into(), size)),
+        Ok((Src::File(_), _)) => Err("file".into()),
         Ok((Src::Idle, _)) => Err("idle".into()),
         Err(e) => Err(format!("{e:?}")),
     };
