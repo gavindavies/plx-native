@@ -569,6 +569,7 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                 // press that asked for it is this frame's only work.
                 if let Err(e) = plx_media::localplay::prepare(&mut app.player.session, std::path::Path::new(&path)) {
                     plx_base::eventlog::log(&format!("local play: refused: {e}"));
+                    super::toast::raise(e.message());
                     continue;
                 }
                 start_playback(&mut app.player.session, &mut app.adapters.player, 0,

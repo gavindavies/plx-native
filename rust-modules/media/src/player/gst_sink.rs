@@ -10,7 +10,9 @@
 //!   synced to the pipeline clock, whose frames the render thread uploads and composites UNDER
 //!   the finished UI with the same `(ONE_MINUS_DST_ALPHA, ONE)` arithmetic the television's
 //!   compositor applies to its video plane ([`composite_under`]);
-//! * audio → decoded to PCM → `audioconvert ! audioresample` → the system audio sink
+//! * audio → decoded to PCM (LG's four codecs by name; FLAC, Opus, Vorbis, TrueHD, MP3/MP2 and PCM
+//!   from the parameters the demuxer reports, [`note_audio`]) → `audioconvert ! audioresample` →
+//!   the system audio sink
 //!   (`autoaudiosink`, or `PLXNATIVE_GST_AUDIOSINK`), which also provides the clock both lanes
 //!   present against.
 //!
@@ -64,6 +66,14 @@ struct Session {
     pipeline: gst::Pipeline,
     video: gst_app::AppSrc,
     audio: Option<gst_app::AppSrc>,
+    /// The audio lane is [`AudioLane::Described`] and its caps are still to be set.
+    audio_undescribed: AtomicBool,
+    /// End-of-stream was signalled while the audio lane may still have frames to come; the
+    /// ticker ends it once its feed has run dry ([`end_drained_audio`]).
+    audio_ending: AtomicBool,
+    /// The last audio frame fed: its timestamp (fed timeline) and when, in [`now_ms`].
+    audio_last_pts: AtomicI64,
+    audio_fed_at_ms: AtomicU64,
     /// The first fed timestamp, `i64::MIN` until one arrives. Shared with the ticker.
     base: Arc<AtomicI64>,
     generation: u64,
@@ -135,21 +145,227 @@ fn video_branch(codec: &str) -> Option<(&'static str, &'static str)> {
     })
 }
 
-/// `(appsrc caps, parser)` for the payload's audio codec, in LG's vocabulary
-/// (`engine::audio_payload_codec`). The demuxer frames AAC as ADTS for exactly this reason.
-fn audio_branch(codec: &str) -> Option<(&'static str, &'static str)> {
+/// Whether this machine's GStreamer has a decoder for the payload's video codec — the Linux
+/// build's answer to the television's codec table (`devcaps`), which describes a set, not this
+/// machine. Only the media type is asked: the parser in front of the decoder settles the rest.
+pub fn decodes_video(codec: &str) -> bool {
+    let Some((caps, _)) = video_branch(codec) else { return false };
+    if !gst_ready() {
+        return false;
+    }
+    let media_type = caps.split(',').next().unwrap_or(caps);
+    let caps = gst::Caps::new_empty_simple(media_type);
+    gst::ElementFactory::factories_with_type(gst::ElementFactoryType::DECODER, gst::Rank::MARGINAL)
+        .iter()
+        .any(|f| f.can_sink_any_caps(&caps))
+}
+
+/// How the audio lane's `appsrc` is described.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum AudioLane {
+    /// LG's own vocabulary (`engine::audio_payload_codec`): the codec name is the whole
+    /// description, with the codec's parser in front of `decodebin`. The demuxer frames AAC as
+    /// ADTS for exactly this reason.
+    Named { caps: &'static str, parser: &'static str },
+    /// A codec the name alone does not describe (FLAC's STREAMINFO, Opus's and Vorbis's headers,
+    /// PCM's sample format): the caps are built from the stream's parameters
+    /// ([`note_audio`]) when its first frame is fed, and `decodebin` plugs the parser.
+    Described,
+}
+
+/// The audio lane for the payload's audio codec.
+fn audio_branch(codec: &str) -> Option<AudioLane> {
+    let named = |caps, parser| AudioLane::Named { caps, parser };
     Some(match codec {
-        "AC3" => ("audio/x-ac3,framed=true", "ac3parse"),
-        "AC3 PLUS" => ("audio/x-eac3,framed=true", "ac3parse"),
-        "AAC" => ("audio/mpeg,mpegversion=4,stream-format=adts", "aacparse"),
-        "DTS" => ("audio/x-dts,framed=true", "dcaparse"),
+        "AC3" => named("audio/x-ac3,framed=true", "ac3parse"),
+        "AC3 PLUS" => named("audio/x-eac3,framed=true", "ac3parse"),
+        "AAC" => named("audio/mpeg,mpegversion=4,stream-format=adts", "aacparse"),
+        "DTS" => named("audio/x-dts,framed=true", "dcaparse"),
+        c if crate::player::engine::GST_AUDIO_PAYLOAD_CODECS.iter().any(|g| g.1 == c) => AudioLane::Described,
         _ => return None,
+    })
+}
+
+// ---- described audio ----------------------------------------------------------------------------
+
+/// What the demuxer knows about the audio stream it feeds: FFmpeg's codec name, the codec's
+/// extradata (FLAC's metadata, the Opus head, Vorbis's three headers), and the PCM shape.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioParams {
+    pub codec: String,
+    pub extradata: Vec<u8>,
+    pub rate: i32,
+    pub channels: i32,
+}
+
+/// The audio stream the demuxer opened last. A Load reads it when its first audio frame arrives,
+/// which is always after the demuxer chose that stream; a seek's fresh Load reads the same one.
+static AUDIO_PARAMS: Mutex<Option<AudioParams>> = Mutex::new(None);
+
+/// The demuxer's report of the audio stream it is about to feed (`ff::demux`).
+pub fn note_audio(params: AudioParams) {
+    *AUDIO_PARAMS.lock().unwrap_or_else(|e| e.into_inner()) = Some(params);
+}
+
+/// GStreamer's raw-audio format for an FFmpeg PCM codec whose packets are plain interleaved
+/// samples. The framed variants (`pcm_bluray`, `pcm_dvd`) carry headers of their own and are not.
+pub fn pcm_format(codec: &str) -> Option<&'static str> {
+    Some(match codec {
+        "pcm_u8" => "U8",
+        "pcm_s8" => "S8",
+        "pcm_s16le" => "S16LE",
+        "pcm_s16be" => "S16BE",
+        "pcm_s24le" => "S24LE",
+        "pcm_s24be" => "S24BE",
+        "pcm_s32le" => "S32LE",
+        "pcm_s32be" => "S32BE",
+        "pcm_f32le" => "F32LE",
+        "pcm_f32be" => "F32BE",
+        "pcm_f64le" => "F64LE",
+        "pcm_f64be" => "F64BE",
+        _ => return None,
+    })
+}
+
+/// GStreamer's channel mask for FFmpeg's default layout of `channels`. Both enumerate the
+/// positions used here in the same relative order (FL FR FC LFE, back, back-centre, side), so
+/// the interleaving FFmpeg delivers is the order the mask names.
+fn channel_mask(channels: i32) -> Option<u64> {
+    const FL: u64 = 1 << 0;
+    const FR: u64 = 1 << 1;
+    const FC: u64 = 1 << 2;
+    const LFE: u64 = 1 << 3;
+    const RL: u64 = 1 << 4;
+    const RR: u64 = 1 << 5;
+    const RC: u64 = 1 << 8;
+    const SL: u64 = 1 << 10;
+    const SR: u64 = 1 << 11;
+    Some(match channels {
+        1 => 0,
+        2 => FL | FR,
+        3 => FL | FR | FC,
+        4 => FL | FR | RL | RR,
+        5 => FL | FR | FC | SL | SR,
+        6 => FL | FR | FC | LFE | SL | SR,
+        7 => FL | FR | FC | LFE | RC | SL | SR,
+        8 => FL | FR | FC | LFE | RL | RR | SL | SR,
+        _ => return None,
+    })
+}
+
+/// FLAC's stream header as GStreamer's FLAC parser takes it in caps: the `fLaC` marker, then
+/// each metadata block. FFmpeg's extradata is either the bare 34-byte STREAMINFO or the whole
+/// `fLaC`-prefixed header.
+fn flac_headers(extradata: &[u8]) -> Option<Vec<Vec<u8>>> {
+    const STREAMINFO_LEN: usize = 34;
+    let mut out = vec![b"fLaC".to_vec()];
+    if let Some(mut rest) = extradata.strip_prefix(b"fLaC") {
+        while rest.len() >= 4 {
+            let len = usize::from(rest[1]) << 16 | usize::from(rest[2]) << 8 | usize::from(rest[3]);
+            let block = rest.get(..4 + len)?;
+            out.push(block.to_vec());
+            rest = &rest[4 + len..];
+            if block[0] & 0x80 != 0 {
+                break;
+            }
+        }
+    } else if extradata.len() == STREAMINFO_LEN {
+        let mut block = vec![0x80, 0, 0, STREAMINFO_LEN as u8];
+        block.extend_from_slice(extradata);
+        out.push(block);
+    }
+    (out.len() > 1 && out[1][0] & 0x7f == 0).then_some(out)
+}
+
+/// The packets of a Xiph-laced extradata (Vorbis's identification, comment and setup headers):
+/// a count less one, the lacing of every packet but the last, then the packets.
+fn xiph_headers(extradata: &[u8]) -> Option<Vec<Vec<u8>>> {
+    let (&count, mut rest) = extradata.split_first()?;
+    let mut sizes = Vec::new();
+    for _ in 0..count {
+        let mut size = 0usize;
+        loop {
+            let (&b, r) = rest.split_first()?;
+            rest = r;
+            size += usize::from(b);
+            if b != 255 {
+                break;
+            }
+        }
+        sizes.push(size);
+    }
+    let mut out = Vec::new();
+    for size in sizes {
+        out.push(rest.get(..size)?.to_vec());
+        rest = &rest[size..];
+    }
+    if rest.is_empty() {
+        return None;
+    }
+    out.push(rest.to_vec());
+    Some(out)
+}
+
+/// An empty OpusTags packet: the decoder wants a comment header beside the head, and a Matroska
+/// or MP4 Opus track carries only the head.
+const OPUS_TAGS: &[u8] = b"OpusTags\0\0\0\0\0\0\0\0";
+
+/// The caps a [`AudioLane::Described`] lane is given, from the demuxer's report.
+fn described_caps(p: &AudioParams) -> Result<gst::Caps, String> {
+    fn headers(caps: gst::caps::Builder<gst::caps::NoFeature>, packets: Vec<Vec<u8>>) -> gst::Caps {
+        let array = gst::Array::new(packets.into_iter().map(|b| {
+            let mut buf = gst::Buffer::from_mut_slice(b);
+            buf.get_mut().map(|m| m.set_flags(gst::BufferFlags::HEADER));
+            buf.to_send_value()
+        }));
+        caps.field("streamheader", array).build()
+    }
+    let bad = |what: &str| format!("{} stream has no usable {what}", p.codec);
+    Ok(match p.codec.as_str() {
+        "flac" => headers(
+            gst::Caps::builder("audio/x-flac").field("framed", true),
+            flac_headers(&p.extradata).ok_or_else(|| bad("STREAMINFO"))?,
+        ),
+        "vorbis" => {
+            let packets = xiph_headers(&p.extradata).filter(|h| h.len() == 3).ok_or_else(|| bad("Vorbis headers"))?;
+            headers(gst::Caps::builder("audio/x-vorbis"), packets)
+        }
+        "opus" => {
+            let head = p.extradata.clone();
+            if !head.starts_with(b"OpusHead") || head.len() < 19 {
+                return Err(bad("OpusHead"));
+            }
+            let family = i32::from(head[18]);
+            headers(gst::Caps::builder("audio/x-opus").field("channel-mapping-family", family), vec![head, OPUS_TAGS.to_vec()])
+        }
+        "mp3" => gst::Caps::builder("audio/mpeg").field("mpegversion", 1).field("layer", 3).build(),
+        "mp2" => gst::Caps::builder("audio/mpeg").field("mpegversion", 1).field("layer", 2).build(),
+        // The decoder negotiates its output from these before the first frame is parsed; without
+        // them it never produces a sample and the pipeline never prerolls.
+        "truehd" if p.rate > 0 && p.channels > 0 => {
+            gst::Caps::builder("audio/x-true-hd").field("rate", p.rate).field("channels", p.channels).build()
+        }
+        "truehd" => return Err(bad("sample rate or channel count")),
+        c => {
+            let format = pcm_format(c).ok_or_else(|| format!("no GStreamer description for audio codec {c:?}"))?;
+            let mask = channel_mask(p.channels).ok_or_else(|| bad("channel layout"))?;
+            if p.rate <= 0 {
+                return Err(bad("sample rate"));
+            }
+            gst::Caps::builder("audio/x-raw")
+                .field("format", format)
+                .field("layout", "interleaved")
+                .field("rate", p.rate)
+                .field("channels", p.channels)
+                .field("channel-mask", gst::Bitmask::new(mask))
+                .build()
+        }
     })
 }
 
 /// The `gst-launch` description of the whole pipeline: the video lane always, the audio lane when
 /// the payload declares one.
-fn describe(video: (&str, &str), audio: Option<(&str, &str)>, audio_sink: &str) -> String {
+fn describe(video: (&str, &str), audio: Option<AudioLane>, audio_sink: &str) -> String {
     let mut d = format!(
         "appsrc name=v format=time is-live=false stream-type=stream block=false max-bytes={VIDEO_QUEUE_BYTES} caps=\"{}\" \
          ! {} ! decodebin ! videoconvert ! videoscale add-borders=true \
@@ -157,11 +373,12 @@ fn describe(video: (&str, &str), audio: Option<(&str, &str)>, audio_sink: &str) 
          ! appsink name=vsink sync=true max-buffers=2 drop=false",
         video.0, video.1
     );
-    if let Some((caps, parser)) = audio {
-        d.push_str(&format!(
-            " appsrc name=a format=time is-live=false stream-type=stream block=false max-bytes={AUDIO_QUEUE_BYTES} caps=\"{caps}\" \
-             ! {parser} ! decodebin ! audioconvert ! audioresample ! {audio_sink}"
-        ));
+    let head = format!("appsrc name=a format=time is-live=false stream-type=stream block=false max-bytes={AUDIO_QUEUE_BYTES}");
+    let tail = format!("decodebin ! audioconvert ! audioresample ! {audio_sink}");
+    match audio {
+        Some(AudioLane::Named { caps, parser }) => d.push_str(&format!(" {head} caps=\"{caps}\" ! {parser} ! {tail}")),
+        Some(AudioLane::Described) => d.push_str(&format!(" {head} ! {tail}")),
+        None => {}
     }
     d
 }
@@ -296,6 +513,10 @@ fn build_session(payload: &str) -> Result<Session, String> {
         pipeline,
         video: video_src,
         audio: audio_src,
+        audio_undescribed: AtomicBool::new(audio == Some(AudioLane::Described)),
+        audio_ending: AtomicBool::new(false),
+        audio_last_pts: AtomicI64::new(i64::MIN),
+        audio_fed_at_ms: AtomicU64::new(0),
         base: Arc::new(AtomicI64::new(i64::MIN)),
         generation: GENERATION.fetch_add(1, Relaxed) + 1,
     })
@@ -338,9 +559,11 @@ fn start_ticker(pipeline: gst::Pipeline, base: Arc<AtomicI64>, generation: u64) 
             if b == i64::MIN {
                 continue;
             }
-            if let Some(pos) = pipeline.query_position::<gst::ClockTime>() {
-                callback(0, b.saturating_add(pos.nseconds() as i64), c"");
+            let position = pipeline.query_position::<gst::ClockTime>().map(|pos| b.saturating_add(pos.nseconds() as i64));
+            if let Some(p) = position {
+                callback(0, p, c"");
             }
+            end_drained_audio(generation, position);
         }
     });
     if spawned.is_err() {
@@ -413,6 +636,20 @@ unsafe fn sf_feed(p: *const u8, size: c_uint, pts: i64, es_data: c_int) -> c_cha
     if src.current_level_bytes() >= budget {
         return FEED_FULL;
     }
+    if es_data == 2 && s.audio_undescribed.swap(false, Relaxed) {
+        let params = AUDIO_PARAMS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        match params.ok_or_else(|| "the demuxer reported no audio stream".to_owned()).and_then(|p| described_caps(&p)) {
+            Ok(caps) => {
+                // The media type only: a stream header in the caps runs to kilobytes.
+                log(&format!("audio caps {}", caps.structure(0).map_or("?", |st| st.name().as_str())));
+                src.set_caps(Some(&caps));
+            }
+            Err(e) => {
+                log(&format!("audio refused: {e}"));
+                return FEED_ERROR;
+            }
+        }
+    }
     let base = match s.base.compare_exchange(i64::MIN, pts, Relaxed, Relaxed) {
         Ok(_) => pts,
         Err(b) => b,
@@ -423,6 +660,10 @@ unsafe fn sf_feed(p: *const u8, size: c_uint, pts: i64, es_data: c_int) -> c_cha
     let mut buffer = gst::Buffer::from_mut_slice(std::slice::from_raw_parts(p, size as usize).to_vec());
     if let Some(b) = buffer.get_mut() {
         b.set_pts(gst::ClockTime::from_nseconds((pts - base) as u64));
+    }
+    if es_data == 2 {
+        s.audio_last_pts.store(pts, Relaxed);
+        s.audio_fed_at_ms.store(now_ms(), Relaxed);
     }
     match src.push_buffer(buffer) {
         Ok(_) => FEED_OK,
@@ -445,15 +686,48 @@ unsafe fn sf_flush() -> c_int {
     .unwrap_or(0)
 }
 
+/// The engine signals end-of-stream when the VIDEO lane drains (Kodi's convention, and what LG's
+/// pipeline expects), and goes on feeding whatever audio is still queued behind it. So only the
+/// video lane ends here; the audio lane ends when [`end_drained_audio`] sees its feed run dry.
 unsafe fn sf_push_eos() -> c_int {
     with_session(|s| {
         let _ = s.video.end_of_stream();
-        if let Some(a) = &s.audio {
-            let _ = a.end_of_stream();
+        if s.audio.is_some() {
+            s.audio_ending.store(true, Relaxed);
         }
         1
     })
     .unwrap_or(0)
+}
+
+/// Milliseconds on a monotonic clock private to this module.
+fn now_ms() -> u64 {
+    static START: OnceLock<std::time::Instant> = OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
+}
+
+/// How long the audio feed must be quiet before an ending audio lane is ended.
+const AUDIO_DRY_MS: u64 = 500;
+/// How close the playhead must be to the last audio fed. The engine throttles a lane that is far
+/// ahead of the playhead, so a quiet feed alone can be a pause; a feed that is quiet with the
+/// playhead this close to its end is a lane with nothing left (the throttle would be feeding it).
+const AUDIO_DRY_LEAD_NS: i64 = 1_000_000_000;
+
+/// End the audio lane of an ending session once its feed has run dry: quiet for
+/// [`AUDIO_DRY_MS`] with `position` (fed timeline) within [`AUDIO_DRY_LEAD_NS`] of its last frame.
+fn end_drained_audio(generation: u64, position: Option<i64>) {
+    with_session(|s| {
+        let Some(a) = &s.audio else { return };
+        if s.generation != generation || !s.audio_ending.load(Relaxed) {
+            return;
+        }
+        let quiet = now_ms().saturating_sub(s.audio_fed_at_ms.load(Relaxed)) >= AUDIO_DRY_MS;
+        let last = s.audio_last_pts.load(Relaxed);
+        let caught_up = last == i64::MIN || position.is_some_and(|p| p.saturating_add(AUDIO_DRY_LEAD_NS) >= last);
+        if quiet && caught_up && s.audio_ending.swap(false, Relaxed) {
+            let _ = a.end_of_stream();
+        }
+    });
 }
 
 unsafe fn sf_unload() {
@@ -601,10 +875,59 @@ mod tests {
         assert_eq!(payload_str(p, "video"), Some("H265"));
         assert_eq!(payload_str(p, "audio"), Some("AC3 PLUS"));
         assert_eq!(video_branch("H265").unwrap().1, "h265parse");
-        assert_eq!(audio_branch("AC3 PLUS").unwrap().0, "audio/x-eac3,framed=true");
-        assert_eq!(audio_branch("AAC").unwrap().1, "aacparse");
+        assert_eq!(audio_branch("AC3 PLUS"), Some(AudioLane::Named { caps: "audio/x-eac3,framed=true", parser: "ac3parse" }));
+        assert_eq!(audio_branch("AAC"), Some(AudioLane::Named { caps: "audio/mpeg,mpegversion=4,stream-format=adts", parser: "aacparse" }));
+        assert_eq!(audio_branch("TRUEHD"), Some(AudioLane::Described));
+        assert_eq!(audio_branch("FLAC"), Some(AudioLane::Described));
         assert!(video_branch("MPEG2").is_none());
-        assert!(audio_branch("TRUEHD").is_none());
+        assert!(audio_branch("WMA").is_none());
+    }
+
+    #[test]
+    fn a_described_audio_lane_leaves_its_caps_and_parser_to_the_feed() {
+        let d = describe(video_branch("H264").unwrap(), audio_branch("OPUS"), "fakesink");
+        let lane = &d[d.find("appsrc name=a").unwrap()..];
+        assert!(!lane.contains("caps=") && lane.contains("! decodebin ! audioconvert"), "{lane}");
+    }
+
+    #[test]
+    fn flac_metadata_becomes_a_marker_and_its_blocks() {
+        let info = [7u8; 34];
+        let bare = flac_headers(&info).unwrap();
+        assert_eq!(bare[0], b"fLaC");
+        assert_eq!(bare[1][..4], [0x80, 0, 0, 34]);
+        assert_eq!(bare[1].len(), 38);
+        // The whole header: STREAMINFO (not last), then a 2-byte padding block flagged last.
+        let mut full = b"fLaC".to_vec();
+        full.extend_from_slice(&[0x00, 0, 0, 34]);
+        full.extend_from_slice(&info);
+        full.extend_from_slice(&[0x81, 0, 0, 2, 0, 0]);
+        let h = flac_headers(&full).unwrap();
+        assert_eq!(h.len(), 3);
+        assert_eq!(h[2], [0x81, 0, 0, 2, 0, 0]);
+        assert!(flac_headers(&info[..20]).is_none());
+        assert!(flac_headers(b"fLaC\x00\x00\x00\x22").is_none(), "a block cut short");
+    }
+
+    #[test]
+    fn xiph_lacing_splits_the_three_vorbis_headers() {
+        let mut ed = vec![2u8, 255, 3, 4];
+        ed.extend(std::iter::repeat_n(1u8, 258));
+        ed.extend([2u8; 4]);
+        ed.extend([3u8; 5]);
+        let h = xiph_headers(&ed).unwrap();
+        assert_eq!(h.iter().map(Vec::len).collect::<Vec<_>>(), [258, 4, 5]);
+        assert_eq!(h[2], [3u8; 5]);
+        assert!(xiph_headers(&[2, 10, 10, 1, 2]).is_none(), "lacing longer than the data");
+    }
+
+    #[test]
+    fn pcm_is_described_only_when_its_packets_are_plain_samples() {
+        assert_eq!(pcm_format("pcm_s24le"), Some("S24LE"));
+        assert_eq!(pcm_format("pcm_bluray"), None);
+        assert_eq!(channel_mask(2), Some(0b11));
+        assert_eq!(channel_mask(6), Some(0b1100_0000_1111));
+        assert_eq!(channel_mask(9), None);
     }
 
     #[test]

@@ -11,8 +11,13 @@
 
 use std::path::Path;
 
-/// The video codecs the Load payload can declare (`engine`'s `LoadVideo`).
-const VIDEO_CODECS: [&str; 4] = ["h264", "hevc", "av1", "vp9"];
+/// The video codecs the Load payload can declare (`engine`'s `LoadVideo`), FFmpeg's name first.
+const VIDEO_CODECS: [(&str, &str); 4] = [("h264", "H264"), ("hevc", "H265"), ("av1", "AV1"), ("vp9", "VP9")];
+
+/// The Load payload's name for an FFmpeg video codec name.
+fn payload_video(codec: &str) -> Option<&'static str> {
+    VIDEO_CODECS.iter().find(|(f, _)| *f == codec).map(|(_, p)| *p)
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LocalPlayError {
@@ -20,7 +25,7 @@ pub enum LocalPlayError {
     Unreadable(String),
     /// Its video is in a codec the player does not decode.
     VideoCodec(String),
-    /// None of its audio tracks is in a codec the player carries; lists what it has.
+    /// It has audio, and none of its tracks is in a codec the player carries; lists them.
     AudioCodecs(Vec<String>),
 }
 
@@ -29,7 +34,6 @@ impl std::fmt::Display for LocalPlayError {
         match self {
             LocalPlayError::Unreadable(why) => write!(f, "This file can't be played ({why})."),
             LocalPlayError::VideoCodec(c) => write!(f, "{} video isn't supported.", c.to_uppercase()),
-            LocalPlayError::AudioCodecs(cs) if cs.is_empty() => f.write_str("This file has no audio track."),
             LocalPlayError::AudioCodecs(cs) => write!(
                 f,
                 "Its audio ({}) isn't supported yet.",
@@ -39,12 +43,30 @@ impl std::fmt::Display for LocalPlayError {
     }
 }
 
+impl LocalPlayError {
+    /// What the viewer is told, in the interface language. The [`Display`](std::fmt::Display)
+    /// form is the event log's, and keeps FFmpeg's own reason for an unreadable file.
+    pub fn message(&self) -> String {
+        use plx_platform::i18n::msg;
+        let upper = |c: &String| c.to_uppercase();
+        match self {
+            LocalPlayError::Unreadable(_) => msg::browse_local_unplayable().to_owned(),
+            LocalPlayError::VideoCodec(c) => msg::browse_local_video_unsupported(&upper(c)),
+            LocalPlayError::AudioCodecs(cs) => {
+                msg::browse_local_audio_unsupported(&cs.iter().map(upper).collect::<Vec<_>>().join(", "))
+            }
+        }
+    }
+}
+
 /// The checks a probe must pass before a Load is attempted. Pure, so the host suite pins them.
 pub fn admit(probe: &crate::ff::LocalProbe) -> Result<(), LocalPlayError> {
-    if !VIDEO_CODECS.contains(&probe.vcodec.as_str()) {
+    if payload_video(&probe.vcodec).is_none() {
         return Err(LocalPlayError::VideoCodec(probe.vcodec.clone()));
     }
-    if probe.acodec.is_empty() {
+    // A file with no audio at all plays silent; one whose every track is unplayable does not,
+    // since its sound is the point of it.
+    if probe.acodec.is_empty() && !probe.audio_codecs.is_empty() {
         return Err(LocalPlayError::AudioCodecs(probe.audio_codecs.clone()));
     }
     Ok(())
@@ -61,6 +83,14 @@ pub fn title_of(path: &Path) -> String {
 /// Blocking (it opens and reads the file's headers); the caller decides which thread pays.
 pub fn prepare(ps: &mut crate::route::PlaybackSession, path: &Path) -> Result<crate::ff::LocalProbe, LocalPlayError> {
     let probe = crate::ff::probe_local(path).map_err(LocalPlayError::Unreadable)?;
+    // The Linux build asks this machine's GStreamer, so an AV1 or VP9 file on a machine without
+    // that decoder is refused here, with a reason, rather than by a Load that never shows a frame.
+    #[cfg(feature = "gst")]
+    if let Some(name) = payload_video(&probe.vcodec) {
+        if !crate::player::gst_sink::decodes_video(name) {
+            return Err(LocalPlayError::VideoCodec(probe.vcodec.clone()));
+        }
+    }
     install(ps, path, &probe)?;
     Ok(probe)
 }
@@ -118,13 +148,22 @@ mod tests {
     }
 
     #[test]
+    fn the_viewer_is_told_in_the_catalog_s_words() {
+        assert_eq!(LocalPlayError::Unreadable("avformat_open_input -1094995529".into()).message(), "This file can’t be played.");
+        assert_eq!(LocalPlayError::VideoCodec("vc1".into()).message(), "VC1 video can’t be played here.");
+        assert_eq!(
+            LocalPlayError::AudioCodecs(vec!["cook".into(), "wmav2".into()]).message(),
+            "Its audio (COOK, WMAV2) can’t be played here."
+        );
+    }
+
+    #[test]
     fn refusals_name_what_is_wrong() {
         let e = admit(&probe("mpeg2video", "ac3", &["ac3"])).unwrap_err();
         assert_eq!(e.to_string(), "MPEG2VIDEO video isn't supported.");
-        let e = admit(&probe("hevc", "", &["truehd", "flac"])).unwrap_err();
-        assert_eq!(e.to_string(), "Its audio (TRUEHD, FLAC) isn't supported yet.");
-        let e = admit(&probe("hevc", "", &[])).unwrap_err();
-        assert_eq!(e.to_string(), "This file has no audio track.");
+        let e = admit(&probe("hevc", "", &["cook", "wmav2"])).unwrap_err();
+        assert_eq!(e.to_string(), "Its audio (COOK, WMAV2) isn't supported yet.");
+        assert_eq!(admit(&probe("hevc", "", &[])), Ok(()), "a silent file plays");
     }
 
     #[test]

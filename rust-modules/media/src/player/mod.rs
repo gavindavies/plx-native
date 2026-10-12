@@ -1423,6 +1423,8 @@ impl Diag {
             2 => "AC3 PLUS",
             3 => "AAC",
             4 => "DTS",
+            #[cfg(feature = "gst")]
+            n if n >= 5 => engine::GST_AUDIO_PAYLOAD_CODECS.iter().find(|c| c.2 == n).map_or("NONE (needAudio:false)", |c| c.1),
             _ => "NONE (needAudio:false)",
         }
     }

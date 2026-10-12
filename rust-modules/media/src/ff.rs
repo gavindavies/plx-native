@@ -1490,7 +1490,7 @@ pub struct LocalProbe {
     /// FFmpeg's codec name of the video stream the demuxer will pick (`h264`, `hevc`, ...).
     pub vcodec: String,
     /// FFmpeg's codec name of the first audio stream, in file order, that the pipeline can carry
-    /// (see [`LOCAL_AUDIO_CODECS`]); empty when the file has none.
+    /// (`engine::audio_payload_codec` names it); empty when the file has none.
     pub acodec: String,
     /// Every audio stream's codec name, in file order — what the refusal names when none fits.
     pub audio_codecs: Vec<String>,
@@ -1500,10 +1500,6 @@ pub struct LocalProbe {
     pub fps: f64,
     pub duration_ns: i64,
 }
-
-/// The audio codecs the demuxer frames for the sink (`engine::audio_payload_codec`'s vocabulary,
-/// in FFmpeg's spelling).
-pub const LOCAL_AUDIO_CODECS: [&str; 4] = ["eac3", "ac3", "dts", "aac"];
 
 /// Open a local file with the bundled libavformat (its one protocol is `file`) and read what a
 /// Load declaration needs. Blocking — call it off the frame thread.
@@ -1541,7 +1537,7 @@ pub fn probe_local(path: &std::path::Path) -> Result<LocalProbe, String> {
             // put first (usually the main mix), and a commentary must never win on its codec.
             let acodec = audio_codecs
                 .iter()
-                .find(|a| LOCAL_AUDIO_CODECS.contains(&a.as_str()))
+                .find(|a| crate::player::engine::audio_payload_codec(a).is_some())
                 .cloned()
                 .unwrap_or_default();
             let as_fps = |r: AVRational| (r.num > 0 && r.den > 0).then(|| r.num as f64 / r.den as f64);
@@ -8668,6 +8664,19 @@ pub fn demux(
                     crate::player::log(&format!(
                         "ff: AAC → ADTS reframing on (freq_idx={fi} ch={ch})"
                     ));
+                }
+                // The GStreamer sink describes FLAC, Opus, Vorbis and PCM from the stream's own
+                // parameters rather than a codec name; hand them over before any audio is pushed.
+                #[cfg(feature = "gst")]
+                if ai >= 0 {
+                    let acp = stream_codecpar(*streams.add(ai as usize));
+                    let (ed, n) = ((*acp).extradata, (*acp).extradata_size);
+                    crate::player::gst_sink::note_audio(crate::player::gst_sink::AudioParams {
+                        codec: std::ffi::CStr::from_ptr(avcodec_get_name((*acp).codec_id)).to_string_lossy().into_owned(),
+                        extradata: if ed.is_null() || n <= 0 { Vec::new() } else { std::slice::from_raw_parts(ed, n as usize).to_vec() },
+                        rate: (*acp).sample_rate,
+                        channels: (*acp).ch_layout.nb_channels,
+                    });
                 }
                 let dur = fmt_duration(fmt);
                 if dur > 0 {

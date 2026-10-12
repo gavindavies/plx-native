@@ -128,6 +128,8 @@ pub(crate) mod lifecycle;
 pub(crate) mod playback;
 #[cfg(feature = "gst")]
 pub(crate) mod local_launch; // `plxnative-sim <file>`: play a file from the command line
+#[cfg(feature = "gst")]
+pub(crate) mod toast; // the Linux build's toast, drawn by the app (the port delivers to it)
 mod preferences;
 pub(crate) mod input;
 pub(crate) mod bridge;

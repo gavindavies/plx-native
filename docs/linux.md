@@ -62,10 +62,16 @@ media-folder conventions: `poster`, `folder` or `cover` (`.jpg`/`.jpeg`/`.png`) 
 that folder's picture; `<name>-poster.jpg` or `<name>.jpg` beside a video is the video's; a video
 alone in its folder wears the folder's.
 
+## What plays
+
+Video: H.264, HEVC, AV1 and VP9, each when this machine's GStreamer has a decoder for it.
+Audio: AC3, E-AC3, DTS (core), AAC, FLAC, Opus, Vorbis, TrueHD, MP3, MP2 and plain PCM — the
+first track in the file in one of these is played, decoded to PCM. A file with no audio track
+plays silent. A file that cannot play is refused with the reason shown on screen (the Linux
+build draws the toasts a television would show) and written to the event log.
+
 ## What does not work yet
 
-- **Audio** must be AC3, E-AC3, DTS or AAC (the first such track in the file is played). A file
-  with only FLAC, TrueHD, Opus or MP3 audio is refused; the reason is in the event log.
 - No resume position or watched state, no external subtitles, no HDMI-CEC remote.
 - Video is copied to the GPU as RGBA each frame, scaled to fit 1920×1080 first: fine for 1080p on a
   PC, not yet measured on a small ARM board.

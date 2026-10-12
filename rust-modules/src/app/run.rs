@@ -2218,6 +2218,8 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         app.diagnostics.update(&app.player.session, fr.now);
         // …and the lab upload's toast, which expires on a clock rather than a spring.
         crate::lab::update(fr.now);
+        #[cfg(feature = "gst")]
+        super::toast::update();
         #[cfg(feature = "threadcheck")]
         plx_ui::runtime_warning::update(app.boot_initial.is_some());
         // The Up Next countdown and the control row's focus pop are the PLAYER INSTANCE's and
@@ -2615,6 +2617,8 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                                                      // The lab upload read-out, over everything, on every route — including the
                                                      // player, where the two branches above diverge and this one must not.
                     crate::lab::draw(app.diagnostics.frame_if_shown());
+                    #[cfg(feature = "gst")]
+                    super::toast::draw();
                     #[cfg(feature = "threadcheck")]
                     plx_ui::runtime_warning::draw(app.boot_initial.is_some());
                 });
