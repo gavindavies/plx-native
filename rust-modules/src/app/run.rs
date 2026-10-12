@@ -2219,7 +2219,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // …and the lab upload's toast, which expires on a clock rather than a spring.
         crate::lab::update(fr.now);
         #[cfg(feature = "gst")]
-        super::toast::update();
+        super::toast::update(fr.now);
         #[cfg(feature = "threadcheck")]
         plx_ui::runtime_warning::update(app.boot_initial.is_some());
         // The Up Next countdown and the control row's focus pop are the PLAYER INSTANCE's and
