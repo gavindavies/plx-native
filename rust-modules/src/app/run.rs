@@ -2712,6 +2712,8 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
                 AppArg::Content(plx_screens::registry::ContentArg::Collection(_)) =>
                     crate::focusprobe::Screen::Collection,
                 AppArg::Search => crate::focusprobe::Screen::Search,
+                #[cfg(feature = "gst")]
+                AppArg::Local(_) => crate::focusprobe::Screen::Local,
                 // The same words the heartbeat's `overlay=` uses, and — since phase 9 — from the
                 // same place: the SURFACE that is up. There is no second table; see
                 // `heartbeat_word_tests::focusprobe_player_overlay_delegates_to_the_shared_overlay_word_function`.

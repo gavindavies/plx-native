@@ -545,6 +545,9 @@ pub(crate) enum BootTo {
     Home,
     Login,
     Profiles,
+    /// The Linux build's local library: no account, no server, no sign-in.
+    #[cfg(feature = "gst")]
+    Local,
 }
 
 /// Pure capture boundary shared by actual boot and owner bootstrap regression fixtures.
@@ -1027,6 +1030,7 @@ pub(crate) unsafe fn construct(
             plx_telemetry::telemetry::consent::current().unwrap_or_default(), &mt)
     };
     // Construct the one dispatcher before bootstrap commands; move this same queue into App.
+    #[cfg_attr(feature = "gst", allow(unused_mut))]
     let mut pages = plx_ui::dispatch::Dispatcher::with_transition(Box::new(
         plx_ui::containers::transition::PageDip::new(),
     ));
@@ -1142,6 +1146,14 @@ pub(crate) unsafe fn construct(
     }
     };
     // Controlled Home constructs its App before executing the same bootstrap command path.
+    // The Linux build plays the machine's own disk and has no Plex account to activate.
+    #[cfg(feature = "gst")]
+    let boot_to = {
+        let _ = &activate_session;
+        log("boot: local library (no Plex session)");
+        BootTo::Local
+    };
+    #[cfg(not(feature = "gst"))]
     let boot_to = if controlled { BootTo::Home } else {
         activate_session(&mut bridge, &mut pages, &mut super::recorder::Recplay::Off)
     };
@@ -1488,6 +1500,8 @@ pub(crate) unsafe fn construct(
         // soon as the account is authorized — earlier than here, and before the picker.
         BootTo::Login => AppArg::Login,
         BootTo::Profiles => AppArg::Profiles,
+        #[cfg(feature = "gst")]
+        BootTo::Local => AppArg::Local(plx_screens::registry::LocalArg { path: String::new() }),
     };
     // (dev: /tmp/plxnative-acct used to open the profile menu HERE, beside a
     // `route = Route::Account { over: BarHost::Home }`. The menu is a `ModalStack` surface since

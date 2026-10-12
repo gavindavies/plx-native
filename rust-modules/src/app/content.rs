@@ -554,6 +554,26 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                     if crate::dev::scenarios::detailplay_forces_headless_hud() { HUD_HEADLESS_MS } else { HUD_LINGER_MS },
                     Some(ret), &mut app.pages, &mut app.bridge);
             }
+            #[cfg(feature = "gst")]
+            ContentReq::LocalOpen(arg) => {
+                bridge::nav_push_with_return(&mut app.pages, AppArg::Local(arg), ret);
+            }
+            #[cfg(feature = "gst")]
+            ContentReq::LocalPlay(path) => {
+                let mounted = bridge::player(&app.pages).is_some();
+                if !clear_engine_for_play(&mut app.player.session, &mut app.adapters.player, mounted) {
+                    continue;
+                }
+                plx_media::route::clear_url(&mut app.player.session);
+                // Probing reads the file's headers: a local disk answers in milliseconds, and the
+                // press that asked for it is this frame's only work.
+                if let Err(e) = plx_media::localplay::prepare(&mut app.player.session, std::path::Path::new(&path)) {
+                    plx_base::eventlog::log(&format!("local play: refused: {e}"));
+                    continue;
+                }
+                start_playback(&mut app.player.session, &mut app.adapters.player, 0,
+                    super::playback::Origin::Here, HUD_LINGER_MS, Some(ret), &mut app.pages, &mut app.bridge);
+            }
             ContentReq::PreviewStart { sid, rk, part, vcodec, acodec, title } => {
                 if part.is_empty() {
                     plx_media::player::preview::note_no_extra(sid, &rk);

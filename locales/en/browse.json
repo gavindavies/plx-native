@@ -1971,6 +1971,26 @@
     "value": "Its library isn’t shared with you, or the server owner has restricted it.",
     "description": "Reason under the collection page's unavailable verdict"
   },
+  "browse.local.title": {
+    "value": "Library",
+    "description": "Heading of the local library's top level (the Linux build's folder browser)"
+  },
+  "browse.local.folder": {
+    "value": "Folder",
+    "description": "Caption under a focused folder card in the local library"
+  },
+  "browse.local.loading": {
+    "value": "Reading folder…",
+    "description": "Local library read-out while a folder's listing is pending"
+  },
+  "browse.local.empty": {
+    "value": "No videos or folders here",
+    "description": "Local library read-out for a folder with no videos and no subfolders"
+  },
+  "browse.local.failed": {
+    "value": "This folder can’t be read",
+    "description": "Local library read-out when a folder cannot be listed (missing, unmounted or no permission)"
+  },
   "browse.collection.kind": {
     "value": "Collection",
     "description": "The collection page meta line before its size is known; the kind of page shown"
