@@ -88,6 +88,24 @@ fn request_scan(path: &str) {
     plx_data::local::request(Path::new(path));
 }
 
+/// Where a folder is, as the reader walked to it: its path below the library root that holds it,
+/// one name per step (`Movies › Alien (1979)`), with the root's own name first when the library
+/// has several. A folder under no root (a path handed over from elsewhere) reads as its path.
+fn trail(path: &str, roots: &[PathBuf]) -> String {
+    let path = Path::new(path);
+    let Some(root) = roots.iter().find(|r| path.starts_with(r)) else {
+        return path.display().to_string();
+    };
+    let mut steps: Vec<String> = Vec::new();
+    if roots.len() > 1 {
+        steps.push(root.file_name().map_or_else(|| root.display().to_string(), |n| n.to_string_lossy().into_owned()));
+    }
+    if let Ok(rest) = path.strip_prefix(root) {
+        steps.extend(rest.components().map(|c| c.as_os_str().to_string_lossy().into_owned()));
+    }
+    steps.join(" › ")
+}
+
 /// The caption under a focused card: what the entry is.
 fn caption(entry: &Entry) -> String {
     match entry.kind {
@@ -306,7 +324,7 @@ impl LocalScreen {
         let shown = if arg.path.is_empty() {
             plx_data::local::roots().iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join("  ·  ")
         } else {
-            arg.path.clone()
+            trail(&arg.path, plx_data::local::roots())
         };
         let mut page = Page {
             entry,
@@ -430,6 +448,15 @@ mod tests {
 
     fn entry(title: &str, kind: EntryKind, size: u64) -> Entry {
         Entry { title: title.into(), path: PathBuf::from(format!("/m/{title}.mkv")), kind, art: None, size }
+    }
+
+    #[test]
+    fn a_folder_is_named_by_its_walk_from_the_library_root() {
+        let one = [PathBuf::from("/srv/media")];
+        assert_eq!(trail("/srv/media/Movies/Alien (1979)", &one), "Movies › Alien (1979)");
+        let two = [PathBuf::from("/srv/films"), PathBuf::from("/srv/tv")];
+        assert_eq!(trail("/srv/tv/Show A/Season 1", &two), "tv › Show A › Season 1");
+        assert_eq!(trail("/elsewhere/x", &one), "/elsewhere/x");
     }
 
     #[test]

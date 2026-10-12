@@ -772,6 +772,28 @@ pub(crate) unsafe fn construct(
     let window_flags = if crate::dev::framedump::requested() { SDL_WINDOW_FLAGS & !0x2000 } else { SDL_WINDOW_FLAGS };
     #[cfg(not(all(feature = "hostsim", feature = "devtriggers")))]
     let window_flags = SDL_WINDOW_FLAGS;
+    // The Linux build is a media player on a television: full screen on the display it opens on
+    // (`SDL_WINDOW_FULLSCREEN_DESKTOP`, no mode switch), unless `PLXNATIVE_FULLSCREEN=0` asks for
+    // the desktop window. A fixed `PLXNATIVE_WIN` size (screenshots) keeps the window too.
+    #[cfg(feature = "gst")]
+    let fullscreen = !(std::env::var_os("PLXNATIVE_FULLSCREEN").is_some_and(|v| v == "0")
+        || std::env::var_os("PLXNATIVE_WIN").is_some());
+    #[cfg(feature = "gst")]
+    let window_flags = if fullscreen { window_flags | 0x1001 } else { window_flags };
+    // Created AT the display's size, not resized to it afterwards: the GL surface of a window that
+    // goes full screen after creation can stay at the requested size for the first frames (seen
+    // under X11 without a window manager), which draws the canvas into one corner.
+    #[cfg(feature = "gst")]
+    let (wx, wy, ww_req, wh_req) = if fullscreen {
+        let mut r = [0 as c_int; 4];
+        if SDL_GetDisplayBounds(0, r.as_mut_ptr()) == 0 && r[2] > 0 && r[3] > 0 {
+            (r[0], r[1], r[2], r[3])
+        } else {
+            (wx, wy, ww_req, wh_req)
+        }
+    } else {
+        (wx, wy, ww_req, wh_req)
+    };
     let win = SDL_CreateWindow(title.as_ptr(), wx, wy, ww_req, wh_req, window_flags);
     if win.is_null() {
         log("CreateWindow failed");

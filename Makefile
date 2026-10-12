@@ -2164,6 +2164,34 @@ sim-linux: $(LIBASS_HOST_STAGED)
 	  cargo build --release --manifest-path rust-modules/Cargo.toml --target-dir "$$SIM_LINUX_TDIR_ENV" \
 	  --features hostsim --bin plxnative-sim
 
+# **`make linux` — the Linux media player**: the app built with `gst` (local library home,
+# GStreamer playback) and staged with everything it loads into ONE directory, `$(LINUX_DIST)`:
+# the binary, the bundled FFmpeg and libass it `dlopen`s by absolute path from its own directory,
+# the fonts and the launcher (`tools/linux/plxnative`). Copy that directory anywhere and run
+# `plxnative`. Needs SDL2, SDL2_ttf and GStreamer from the system (docs/linux.md).
+# A release-shaped build (no frame counter, no dev triggers); `LINUX_DEV=1` keeps both, for driving
+# it through the remote FIFO.
+comma := ,
+LINUX_DIST ?= dist/linux/plxnative
+LINUX_FEATURES = gst$(if $(LINUX_DEV),$(comma)devtools$(comma)devtriggers,)
+LINUX_FFMPEG = libavutil-plx.so.61 libavcodec-plx.so.63 libavformat-plx.so.63 libswscale-plx.so.10
+LINUX_ASSETS = pkg/appfont.ttf pkg/appfont-bold.ttf pkg/appfont-cjk.ttf pkg/OFL.txt pkg/le-roots.pem \
+               pkg/splash.png pkg/icon.png THIRD-PARTY-NOTICES.md LICENSING.md
+$(FFMPEG_HOST_PREFIX)/lib/libavformat-plx.so.63:
+	HOST=1 ./ci/build-ffmpeg.sh
+linux: $(FFMPEG_HOST_PREFIX)/lib/libavformat-plx.so.63 $(LIBASS_HOST_STAGED)
+	$(TELEMETRY_ENV) \
+	  cargo build --release --manifest-path rust-modules/Cargo.toml --target-dir rust-modules/target \
+	  --no-default-features --features $(LINUX_FEATURES) --bin plxnative-sim
+	rm -rf $(LINUX_DIST)
+	mkdir -p $(LINUX_DIST)
+	install -m 0755 rust-modules/target/release/plxnative-sim $(LINUX_DIST)/plxnative-bin
+	install -m 0755 tools/linux/plxnative $(LINUX_DIST)/plxnative
+	for f in $(LINUX_FFMPEG); do install -m 0644 $(FFMPEG_HOST_PREFIX)/lib/$$f $(LINUX_DIST)/$$f; done
+	install -m 0644 $(LIBASS_HOST_STAGED) $(LINUX_DIST)/
+	install -m 0644 $(LINUX_ASSETS) $(LINUX_DIST)/
+	@echo "linux: $(LINUX_DIST)/plxnative"
+
 # The demo video's frame-dump simulator (`rust-modules/src/dev/framedump.rs`; `tools/site_video.py render`
 # drives it). Release, because a dump is a render of thousands of 1080p frames; its own target dir,
 # because the feature set differs from every other simulator build; `--no-default-features` because
@@ -2319,5 +2347,5 @@ fetch-profile:
 	-$(SCP) tv:$(RUNDIR)/plxnative-hwcnt.jsonl pkg/plxnative-hwcnt.jsonl
 	@ls -l pkg/plxnative-*.jsonl 2>/dev/null || echo "no profiler output in $(RUNDIR) on the TV ($(APPID))"
 
-.PHONY: libass libass-host screenshots screenshots-sim demo-library disk symbols symbols-libs sentry-symbols sentry-native all setup-env telemetry-local deploy verify-deploy run run-stream kill check check-unlocked check-ffmpeg lint test ipk clean tv-lock-require threadprobe sockprobe logmprobe mali-hwcnt-probe tv-capture-bench mali-irq-sample plxnative-stackwalk sim sim-macos sim-linux site-video-sim sim-wsl sim-run sim-macos-run sim-shot sim-macos-shot sim-token sim-macos-token sim-play sim-macos-play sim-clean sim-macos-clean macapp macapp-zip fixtures fixtures-quick fixtures-pipeline fetch-profile \
+.PHONY: linux libass libass-host screenshots screenshots-sim demo-library disk symbols symbols-libs sentry-symbols sentry-native all setup-env telemetry-local deploy verify-deploy run run-stream kill check check-unlocked check-ffmpeg lint test ipk clean tv-lock-require threadprobe sockprobe logmprobe mali-hwcnt-probe tv-capture-bench mali-irq-sample plxnative-stackwalk sim sim-macos sim-linux site-video-sim sim-wsl sim-run sim-macos-run sim-shot sim-macos-shot sim-token sim-macos-token sim-play sim-macos-play sim-clean sim-macos-clean macapp macapp-zip fixtures fixtures-quick fixtures-pipeline fetch-profile \
         release-guard lab-guard install uninstall $(QUERY_GOALS)

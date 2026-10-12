@@ -196,3 +196,6 @@ tests/fixtures/softfloat/arm.tbl
 
 # Independent native DB8 storage helper (built by Makefile).
 /pkg/plxnative-storage
+
+# `make linux` output: the staged Linux app directory.
+/dist/

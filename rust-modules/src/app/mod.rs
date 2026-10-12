@@ -99,6 +99,12 @@ extern "C" {
     /// a window may actually occupy. The out parameter is an `SDL_Rect`: exactly four `c_int`.
     fn SDL_GetDisplayUsableBounds(display: c_int, rect: *mut c_int) -> c_int;
 }
+#[cfg(feature = "gst")]
+extern "C" {
+    /// `SDL_GetDisplayBounds` — the whole display, which the Linux build's full-screen window is
+    /// created at (`boot`).
+    fn SDL_GetDisplayBounds(display: c_int, rect: *mut c_int) -> c_int;
+}
 
 // Phase 1a of the UI restructure split this file: everything above `run_application` moved into
 // the submodules below as a PURE move (`pub(crate)` widening only), glob-imported here so the
