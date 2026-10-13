@@ -560,20 +560,8 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
             }
             #[cfg(feature = "gst")]
             ContentReq::LocalPlay(path) => {
-                let mounted = bridge::player(&app.pages).is_some();
-                if !clear_engine_for_play(&mut app.player.session, &mut app.adapters.player, mounted) {
-                    continue;
-                }
-                plx_media::route::clear_url(&mut app.player.session);
-                // Probing reads the file's headers: a local disk answers in milliseconds, and the
-                // press that asked for it is this frame's only work.
-                if let Err(e) = plx_media::localplay::prepare(&mut app.player.session, std::path::Path::new(&path)) {
-                    plx_base::eventlog::log(&format!("local play: refused: {e}"));
-                    super::toast::raise(e.message());
-                    continue;
-                }
-                start_playback(&mut app.player.session, &mut app.adapters.player, 0,
-                    super::playback::Origin::Here, HUD_LINGER_MS, Some(ret), &mut app.pages, &mut app.bridge);
+                super::local_watch::play(&mut app.player.session, &mut app.adapters.player, std::path::Path::new(&path),
+                    false, Some(ret), &mut app.pages, &mut app.bridge);
             }
             ContentReq::PreviewStart { sid, rk, part, vcodec, acodec, title } => {
                 if part.is_empty() {

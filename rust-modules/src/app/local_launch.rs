@@ -4,7 +4,7 @@
 //! before the app starts ([`set`]); once the app has drawn its first frames, [`tick`] probes the
 //! file and starts it through the ordinary playback entry (`playback::start_playback`), so the
 //! player, its HUD and its exit behave exactly as for a library item. A file that cannot play is
-//! reported on screen (the app's toast), on stderr and in the event log, and the app carries on.
+//! reported on screen (the app's toast) and in the event log, and the app carries on.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -26,21 +26,6 @@ pub(crate) fn tick(app: &mut super::App, now: u32) {
     let Some(path) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take() else {
         return;
     };
-    plx_media::route::clear_url(&mut app.player.session);
-    if let Err(e) = plx_media::localplay::prepare(&mut app.player.session, &path) {
-        plx_base::eventlog::log(&format!("local launch: refused: {e}"));
-        eprintln!("plxnative: {}: {e}", path.display());
-        super::toast::raise(e.message());
-        return;
-    }
-    super::playback::start_playback(
-        &mut app.player.session,
-        &mut app.adapters.player,
-        0,
-        super::playback::Origin::Here,
-        plx_appkit::player_hud::LINGER_MS,
-        None,
-        &mut app.pages,
-        &mut app.bridge,
-    );
+    super::local_watch::play(&mut app.player.session, &mut app.adapters.player, &path, false, None,
+        &mut app.pages, &mut app.bridge);
 }

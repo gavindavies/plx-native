@@ -349,6 +349,11 @@ pub enum ItemMenuKind {
     Episode { mark: plx_ui::widgets::PosterMark },
     /// The detail page's season tabs.
     Season { mark: plx_ui::widgets::PosterMark },
+    /// A video in the local library (`screens::local`). The menu's `rk` is the file's path and its
+    /// `sid` `plx_data::local::ART_SRV`: the rows are an episode's (the watched pair and Play from
+    /// Start), and the application keeps the record itself (`plx_data::local_progress`).
+    #[cfg(feature = "local")]
+    Local { mark: plx_ui::widgets::PosterMark },
 }
 
 /// **Identity, not contents.** `PmsMovie` is a wire DTO with no `PartialEq` of its own, and one
@@ -363,6 +368,8 @@ impl PartialEq for ItemMenuKind {
                 da == db && a.sid == b.sid && a.rk == b.rk && a.kind == b.kind,
             (Self::Episode { mark: a }, Self::Episode { mark: b }) => a == b,
             (Self::Season { mark: a }, Self::Season { mark: b }) => a == b,
+            #[cfg(feature = "local")]
+            (Self::Local { mark: a }, Self::Local { mark: b }) => a == b,
             _ => false,
         }
     }
@@ -386,6 +393,8 @@ impl plx_machine::machine::LogicalState for ItemMenuArg {
             ItemMenuKind::Card { row, from_deck } => { c.u32(0).bool(*from_deck).u32(row.kind as u32); }
             ItemMenuKind::Episode { mark } => { c.u32(1).u32(*mark as u32); }
             ItemMenuKind::Season { mark } => { c.u32(2).u32(*mark as u32); }
+            #[cfg(feature = "local")]
+            ItemMenuKind::Local { mark } => { c.u32(3).u32(*mark as u32); }
         }
         c.u32(self.host.0);
         c.option(self.focus, |c, key| { c.u32(key.entry.0).u32(key.elem); });

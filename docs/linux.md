@@ -52,7 +52,8 @@ dist/linux/plxnative/plxnative /path/to/film.mkv  # play one file
 | `PLXNATIVE_GST_AUDIOSINK` | A GStreamer sink description for audio (default `autoaudiosink`), e.g. `alsasink device=hdmi:0`. |
 | `PLXNATIVE_RUNTIME_DIR` | Where logs and state go. Default `$XDG_STATE_HOME/plxnative`, else `~/.local/state/plxnative`. |
 
-Keys: arrows move, Enter/OK opens a folder or plays a video, Esc/Backspace goes back.
+Keys: arrows move, Enter/OK opens a folder or plays a video (hold it for the video's menu),
+Esc/Backspace goes back.
 
 ## The library
 
@@ -61,6 +62,15 @@ order (`Episode 2` before `Episode 10`); hidden entries are skipped. Artwork fol
 media-folder conventions: `poster`, `folder` or `cover` (`.jpg`/`.jpeg`/`.png`) inside a folder is
 that folder's picture; `<name>-poster.jpg` or `<name>.jpg` beside a video is the video's; a video
 alone in its folder wears the folder's.
+
+## Where you left off
+
+Each video remembers where it was stopped and plays on from there; the card wears the amber
+resume bar. Reaching 90% of a file, or its end, marks it watched (✓) and forgets the place.
+Hold OK on a video for its menu: **Play from Start**, **Mark as Watched**, **Mark as
+Unwatched**. The records are this machine's own — `$PLXNATIVE_RUNTIME_DIR/state/local-progress.json`
+(by default `~/.local/state/plxnative/state/`), keyed by the file's path and size, so a file
+replaced by another of the same name starts fresh.
 
 ## What plays
 
@@ -72,6 +82,6 @@ build draws the toasts a television would show) and written to the event log.
 
 ## What does not work yet
 
-- No resume position or watched state, no external subtitles, no HDMI-CEC remote.
+- No external subtitles, no HDMI-CEC remote.
 - Video is copied to the GPU as RGBA each frame, scaled to fit 1920×1080 first: fine for 1080p on a
   PC, not yet measured on a small ARM board.

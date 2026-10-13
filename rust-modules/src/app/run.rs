@@ -188,6 +188,8 @@ pub(crate) unsafe fn run(app: &mut App) {
         }
         #[cfg(feature = "gst")]
         crate::app::local_launch::tick(app, fr.now);
+        #[cfg(feature = "gst")]
+        crate::app::local_watch::tick(app, fr.now);
         plx_base::diag::spans::span("pump", || unsafe { playback_tick(app, fr) });
         clock_and_press(app, fr);
         plx_base::diag::spans::span("land", || unsafe { land_results(app, fr) });
@@ -1603,6 +1605,9 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
         // the player (back to the detail page or home, whichever is behind), instead of freezing
         // on the last frame.
         if playback_may_run(app) && super::bridge::player(&app.pages).is_some() && plx_media::player::ended() {
+            // A local file's record is settled as finished (`finish_playback` clears the flag).
+            #[cfg(feature = "gst")]
+            super::local_watch::note_ended();
             let handed_off_to_up_next = finish_playback(&mut app.player.session,
                 &mut app.adapters.player,
                 &mut app.refresh_hubs_at,

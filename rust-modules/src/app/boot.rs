@@ -1173,6 +1173,8 @@ pub(crate) unsafe fn construct(
     let boot_to = {
         let _ = &activate_session;
         log("boot: local library (no Plex session)");
+        // Before the frame loop: the one blocking read of where each file was left.
+        plx_data::local_progress::load();
         BootTo::Local
     };
     #[cfg(not(feature = "gst"))]

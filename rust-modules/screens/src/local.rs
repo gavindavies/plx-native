@@ -22,16 +22,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use plx_data::local::{Entry, EntryKind, Listing};
+use plx_data::local_progress::{self, Progress};
 use plx_machine::machine::{Canon, Cx, Delivery, Edge, Effects, Enter, EntryId, FocusKey, FocusTarget, Fx,
     GroupId, Handled, Host, InputEvent, InputKind, InstanceId, Key, LogicalState, Machine, MachineId, Measure};
 use plx_machine::present::Provenance;
 use plx_ui::cards::{CardEvent, CardSource, GridSpec, Kind, SectionSpec, Stack, StackEvent, StackPage, Tile, TileLabel};
 use plx_ui::consts::*;
 use plx_ui::label::{Label, VAlign};
-use plx_ui::screen::{AxisMask, DrawFrame, EdgeRule, ElemKind, FocusSource, Focusable, GroupKind, GroupSpec,
+use plx_ui::screen::{At, AxisMask, DrawFrame, EdgeRule, ElemKind, FocusSource, Focusable, GroupKind, GroupSpec,
     HitSource, RenderStrategy, Screen, ScreenEvent, Seat};
 use plx_ui::theme;
-use plx_ui::widgets::{self, Art, PageGround, StatusKind, StatusOverlay};
+use plx_ui::widgets::{self, Art, PageGround, PosterMark, StatusKind, StatusOverlay};
 use plx_ui::{Env, Painter, Rect};
 
 use super::registry::{AppFx, ContentLike, ContentReq, LocalArg};
@@ -123,6 +124,8 @@ struct Items<'a> {
     entries: &'a [Entry],
     elems: &'a [u32],
     index: &'a HashMap<u32, usize>,
+    /// Card `i`'s watch record (`local_progress`), read when the page last synced.
+    marks: &'a [Option<Progress>],
 }
 
 impl<H: Host<Elem = u32>> CardSource<H> for Items<'_> {
@@ -138,8 +141,14 @@ impl<H: Host<Elem = u32>> CardSource<H> for Items<'_> {
     fn label(&self, i: usize) -> TileLabel {
         self.entries.get(i).map_or_else(TileLabel::default, |e| TileLabel::titled(&e.title, &caption(e)))
     }
+    fn progress(&self, i: usize) -> Option<f32> {
+        self.marks.get(i).copied().flatten().as_ref().and_then(local_progress::fraction)
+    }
     fn overlay(&self, p: Painter, i: usize, tile: &Tile, measure: &dyn Measure) {
         let Some(entry) = self.entries.get(i) else { return };
+        if self.marks.get(i).copied().flatten().is_some_and(|m| m.watched) {
+            widgets::watched_mark(p, tile.rect, tile.radius);
+        }
         if entry.art.is_none() {
             let side = tile.rect.w * GLYPH_SHARE;
             let glyph = Rect::new(tile.rect.x + (tile.rect.w - side) / 2.0, tile.rect.y + (tile.rect.h - side) / 2.0 - side * 0.25, side, side);
@@ -154,6 +163,16 @@ impl<H: Host<Elem = u32>> CardSource<H> for Items<'_> {
     }
 }
 
+/// The card's watch state, as the item menu reads it: finished wins over a kept place (a finished
+/// film being watched again is still finished until the viewer says otherwise).
+fn mark_of(record: Option<Progress>) -> PosterMark {
+    match record {
+        Some(m) if m.watched => PosterMark::Watched,
+        Some(m) if m.offset_ms > 0 => PosterMark::InProgress,
+        _ => PosterMark::None,
+    }
+}
+
 struct Page {
     entry: EntryId,
     /// The folder shown; empty for the library's top level.
@@ -161,7 +180,12 @@ struct Page {
     /// The listing as last read, and the catalog revision it was read at.
     entries: Arc<Vec<Entry>>,
     listing: Listing,
+    /// The catalog revision the listing was read at, and the progress revision the marks were.
     synced: Option<u64>,
+    marks_synced: Option<u64>,
+    marks: Vec<Option<Progress>>,
+    /// Moves whenever anything a section draws moved: the page's own revision.
+    changes: u64,
     /// One element per path, minted once and never reused for another path on this page.
     keys: HashMap<PathBuf, u32>,
     next: u32,
@@ -176,6 +200,22 @@ impl Page {
     /// Re-read the listing if the catalog moved. `true` when it did: the page has new ground to
     /// present, and nothing else will ask for a frame on its behalf.
     fn sync(&mut self) -> bool {
+        let moved = self.sync_listing();
+        let marks = local_progress::revision();
+        if !moved && self.marks_synced == Some(marks) {
+            return false;
+        }
+        self.marks_synced = Some(marks);
+        self.marks = self
+            .entries
+            .iter()
+            .map(|e| if e.kind == EntryKind::Video { local_progress::get(&e.path, e.size) } else { None })
+            .collect();
+        self.changes += 1;
+        true
+    }
+
+    fn sync_listing(&mut self) -> bool {
         let revision = plx_data::local::revision();
         if self.synced == Some(revision) {
             return false;
@@ -200,7 +240,7 @@ impl Page {
     }
 
     fn items(&self) -> Items<'_> {
-        Items { entries: &self.entries, elems: &self.elems, index: &self.index }
+        Items { entries: &self.entries, elems: &self.elems, index: &self.index, marks: &self.marks }
     }
 
     fn ready(&self) -> bool {
@@ -236,13 +276,18 @@ impl<H: ContentLike> StackPage<H> for Page {
     type Key = Sec;
     type Cards<'a> = Items<'a>;
 
+    /// A video's hold opens the item menu (Play from Start, the watched rows); a folder has none.
+    fn card_has_menu(&self, _cx: &Cx<'_, H>, _k: Sec, elem: &u32) -> bool {
+        self.index.get(elem).and_then(|&i| self.entries.get(i)).is_some_and(|e| e.kind == EntryKind::Video)
+    }
+
     fn revision(&self, _cx: &Cx<'_, H>) -> u64 {
         let status = match self.listing {
             Listing::Loading => 1,
             Listing::Ready(_) => 2,
             Listing::Failed(_) => 3,
         };
-        self.synced.unwrap_or(0) << 2 | status
+        self.changes << 2 | status
     }
 
     fn sections(&self, cx: &Cx<'_, H>, out: &mut Vec<SectionSpec<Sec>>) {
@@ -332,6 +377,9 @@ impl LocalScreen {
             entries: Arc::new(Vec::new()),
             listing: Listing::Loading,
             synced: None,
+            marks_synced: None,
+            marks: Vec::new(),
+            changes: 0,
             keys: HashMap::new(),
             next: FIRST_CARD_ELEM,
             elems: Vec::new(),
@@ -349,6 +397,15 @@ impl LocalScreen {
 
     fn entry_at(&self, elem: u32) -> Option<&Entry> {
         self.page.index.get(&elem).and_then(|&i| self.page.entries.get(i))
+    }
+
+    /// The video the engine's `focus` is on, for the item menu a hold opens: its path, its size
+    /// (the identity its watch record is kept under) and its mark, as the card shows it.
+    pub fn focused_video(&self, focus: Option<FocusKey<u32>>) -> Option<(PathBuf, u64, PosterMark)> {
+        let key = focus.filter(|k| k.entry == self.page.entry)?;
+        let i = *self.page.index.get(&key.elem)?;
+        let entry = self.page.entries.get(i).filter(|e| e.kind == EntryKind::Video)?;
+        Some((entry.path.clone(), entry.size, mark_of(self.page.marks.get(i).copied().flatten())))
     }
 
     fn activate<H: ContentLike>(&mut self, elem: u32, fx: &mut Effects<'_, H>) {
@@ -373,7 +430,7 @@ impl<H: ContentLike> Machine<H> for LocalScreen {
                 request_scan(&self.page.path);
             }
             let _ = self.page.sync();
-            if self.drawn != self.page.synced {
+            if self.drawn != Some(self.page.changes) {
                 fx.invalidate(Provenance::Landing(fx.from()));
             }
             if !self.seated && self.page.ready() {
@@ -405,6 +462,14 @@ impl<H: ContentLike> Machine<H> for LocalScreen {
                 }
                 Handled::Yes
             }
+            ScreenEvent::PressHold(_) => {
+                if matches!(card, Some(CardEvent::Hold(_))) {
+                    fx.push(plx_machine::machine::Fx::App(AppFx::Content(ContentReq::ItemMenu)));
+                    Handled::Yes
+                } else {
+                    Handled::No
+                }
+            }
             // The library's top level is the app's root: BACK there is the container's to answer.
             ScreenEvent::Input(InputEvent { kind: InputKind::Key { key: Key::Back, edge: Edge::Down, .. }, .. })
                 if !self.page.path.is_empty() => {
@@ -430,7 +495,7 @@ impl<H: ContentLike> Screen<H> for LocalScreen {
     fn crumb(&self, _cx: &Cx<'_, H>) -> Option<std::borrow::Cow<'_, str>> { None }
     fn prepare(&mut self, _budget: &mut plx_ui::frame::Budget, _cx: &Cx<'_, H>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>) {
-        self.drawn = self.page.synced;
+        self.drawn = Some(self.page.changes);
         let p = f.painter.alpha(f.page_alpha);
         self.ground.draw(p, Rect::FULL);
         self.stack.view(&self.page).paint(f);
@@ -438,6 +503,10 @@ impl<H: ContentLike> Screen<H> for LocalScreen {
     fn render(&self) -> RenderStrategy { RenderStrategy::Page }
     fn focus_source(&self) -> FocusSource { FocusSource::Engine }
     fn hit_source(&self) -> HitSource { HitSource::Engine }
+    fn focused_card_rect(&self, cx: &Cx<'_, H>, focus: Option<FocusKey<u32>>, at: At) -> Option<Rect> {
+        let key = focus.filter(|k| k.entry == self.page.entry)?;
+        Focusable::<H>::place(self, &key.elem, cx, at).map(|p| p.rect)
+    }
     fn as_any(&self) -> Option<&dyn std::any::Any> { Some(self) }
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> { Some(self) }
 }
@@ -448,6 +517,15 @@ mod tests {
 
     fn entry(title: &str, kind: EntryKind, size: u64) -> Entry {
         Entry { title: title.into(), path: PathBuf::from(format!("/m/{title}.mkv")), kind, art: None, size }
+    }
+
+    #[test]
+    fn a_record_reads_as_the_mark_its_menu_offers() {
+        let p = |offset_ms, watched| Some(Progress { offset_ms, duration_ms: 100_000, watched, size: 1 });
+        assert_eq!(mark_of(None), PosterMark::None);
+        assert_eq!(mark_of(p(0, false)), PosterMark::None);
+        assert_eq!(mark_of(p(40_000, false)), PosterMark::InProgress);
+        assert_eq!(mark_of(p(40_000, true)), PosterMark::Watched, "finished wins over a kept place");
     }
 
     #[test]
