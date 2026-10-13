@@ -172,9 +172,7 @@ pub(crate) fn play(
     pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
     bridge: &mut super::bridge::Bridge,
 ) {
-    if !super::content::clear_engine_for_play(ps, pa, super::bridge::player(pages).is_some()) {
-        return;
-    }
+    retire_orphan(ps, pa, super::bridge::player(pages).is_some());
     plx_media::route::clear_url(ps);
     let probe = match plx_media::localplay::prepare(ps, path) {
         Ok(probe) => probe,
@@ -202,7 +200,21 @@ pub(crate) fn play(
     bridge.metadata_mut().run(plx_data::stores::metadata::MetadataCmd::InstallPlaying(Some(item)));
 }
 
-/// The item menu's rows for a local video (`ItemMenuKind::Local`): its `rk` is the file's path.
+/// A live engine that is not the player page's: every transport key and the EOS teardown are gated
+/// on the player page, so nothing would ever stop it, and the next Load would meet it as "a live
+/// engine that belongs to another Load attempt" and fail. Stop it before the new Load.
+fn retire_orphan(
+    ps: &mut plx_media::route::PlaybackSession,
+    pa: &mut plx_media::player::adapter::PlayerAdapter,
+    player_mounted: bool,
+) {
+    if pa.is_live() && !player_mounted {
+        plx_base::eventlog::log("play: stopping an off-route engine nothing owns before the new Load");
+        plx_media::player::stop_bufferfeed(ps, pa);
+    }
+}
+
+/// The item menu's rows: play the file from its start, or write its watch record.
 pub(crate) fn apply_menu_action(
     ps: &mut plx_media::route::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
@@ -211,14 +223,12 @@ pub(crate) fn apply_menu_action(
     bridge: &mut super::bridge::Bridge,
 ) {
     use plx_screens::item_menu::Action;
-    let path = PathBuf::from(act.rk());
+    let path = PathBuf::from(act.path());
     let size = || std::fs::metadata(&path).map_or(0, |m| m.len());
     match act {
         Action::PlayFromStart(_) => play(ps, pa, &path, true, None, pages, bridge),
         Action::MarkWatched(_) => local_progress::set_watched(&path, size(), true),
         Action::MarkUnwatched(_) => local_progress::set_watched(&path, size(), false),
-        // No other row is built for a local video (`item_menu::build_episode`).
-        _ => {}
     }
 }
 

@@ -4,17 +4,6 @@
 
 use super::*;
 
-/// Preserve one IME commit and its place among key events. Desktop text does not imply an
-/// on-screen panel; the owning field decides whether it is editing when delivery reaches it.
-pub(crate) fn text_inputs(text: &str, panel: bool, at: plx_machine::machine::Tick,
-    source: plx_machine::machine::Source) -> Vec<plx_machine::machine::InputEvent<u32>> {
-    use plx_machine::machine::{InputEvent, InputKind, TextEdit};
-    if text.is_empty() { return Vec::new(); }
-    let mut events = Vec::with_capacity(if panel { 2 } else { 1 });
-    if panel { events.push(InputEvent { at, source, kind: InputKind::SystemKeyboard(true) }); }
-    events.push(InputEvent { at, source, kind: InputKind::Text(TextEdit::Commit(text.into())) });
-    events
-}
 
 #[inline]
 pub(crate) fn rd_u32(ev: &[u8], off: usize) -> u32 {
@@ -317,29 +306,7 @@ pub(crate) fn remote_synth_pointer(et: u32, x: i32, y: i32) {
     unsafe { SDL_PushEvent(ev.as_ptr() as *const c_void) };
 }
 
-/// One app lifecycle event (`0x103`–`0x106`), as the compositor would send it — the replay
-/// driver's re-injection of a recorded background/foreground edge.
-pub(crate) fn remote_synth_lifecycle(code: u32) {
-    let mut ev = [0u8; 128];
-    ev[0..4].copy_from_slice(&code.to_ne_bytes());
-    unsafe { SDL_PushEvent(ev.as_ptr() as *const c_void) };
-}
 
-/// A remote token that acts DIRECTLY rather than by pushing SDL events — the recorder writes
-/// these as `token` records (the SDL kinds are recorded where they are polled), and the replay
-/// driver re-dispatches them. `txt:` is here because its payload never becomes an SDL event on
-/// this host (`dispatch_remote_token`'s arm says why).
-pub(crate) fn token_is_direct(tok: &str) -> bool {
-    #[cfg(feature = "devtriggers")]
-    if crate::remote::HangProbe::parse(tok).is_some() {
-        return true;
-    }
-    tok == "shot"
-        || tok == "diag"
-        || tok == "diagnostics"
-        || tok.starts_with("pat:")
-        || tok.starts_with("txt:")
-}
 
 /// Synthesize a full remote-key press (key-down then key-up) and push both onto SDL's
 /// own event queue, so the existing poll loop consumes them as if they came off the
@@ -435,16 +402,6 @@ mod input_event_tests {
         }
     }
 
-    #[cfg(feature = "devtriggers")]
-    #[test]
-    fn hang_probes_are_direct_recorder_tokens() {
-        for token in ["hang:1", "hang-raw:1", "hang:5001"] {
-            assert!(token_is_direct(token));
-        }
-        for token in ["down", "hang:", "hang:-1", "hang-raw:bad"] {
-            assert!(!token_is_direct(token));
-        }
-    }
 
     /// The boundary `popover::host::input_scope` rests on: every input kind is in, and the
     /// lifecycle events (background/foreground, `0x103`–`0x106`), window events and quit are out.
@@ -474,7 +431,7 @@ mod input_event_tests {
 ///
 /// `true` means the token was accepted and injected/requested, not that the screen necessarily
 /// changed — pressing DOWN at the bottom of a list is still a successfully delivered command.
-pub(crate) fn dispatch_remote_token(tok: &str, ps: &plx_media::route::PlaybackSession) -> bool {
+pub(crate) fn dispatch_remote_token(tok: &str) -> bool {
     // As the SDL loop: a modal's input is its own. NOT for `pat:`, which is not input at all — it
     // changes the PAGE's ground directly, and a frozen host must be retaken to show it.
     let _own_input = if tok.starts_with("pat:") {
@@ -548,13 +505,6 @@ pub(crate) fn dispatch_remote_token(tok: &str, ps: &plx_media::route::PlaybackSe
             }
             None => false,
         }
-    } else if tok == "diag" || tok == "diagnostics" {
-        if plx_platform::labcfg::menu_row_enabled() {
-            crate::lab::request_upload("command", ps);
-            true
-        } else {
-            false
-        }
     } else if let Some(spec) = tok.strip_prefix("pat:") {
         // `pat:flat:40` — swap the synthetic ground live for a one-session graded sweep.
         let ok = plx_ui::testpat::set(spec);
@@ -562,20 +512,6 @@ pub(crate) fn dispatch_remote_token(tok: &str, ps: &plx_media::route::PlaybackSe
             plx_base::eventlog::log(&format!("remote: unrecognised pattern {spec:?}"));
         }
         ok
-    } else if let Some(text) = tok.strip_prefix("txt:") {
-        // `txt:star+wars` — commit text as the system keyboard's IME would. `+` stands for a
-        // space because the FIFO protocol is whitespace-delimited. Handed directly to textinput:
-        // pushing a synthetic SDL_TEXTINPUT crashes sdl2-compat because SDL2 and SDL3 disagree
-        // about whether that payload is inline bytes or a pointer (the full measurement is in the
-        // original FIFO call-site history and `textinput.rs`).
-        let ev = crate::textinput::encode_event(&text.replace('+', " "));
-        crate::textinput::on_event(&ev);
-        log(&format!(
-            "txt: decoded {:?} pending={}",
-            crate::textinput::decode(&ev),
-            crate::textinput::pending()
-        ));
-        true
     } else if let Some((sym, wcode)) = remote_token_key(tok) {
         remote_synth_key(sym, wcode);
         true

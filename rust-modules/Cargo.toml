@@ -94,7 +94,6 @@ devtriggers = [
     "plx_plex/devtriggers",
     "plx_telemetry/devtriggers",
     "plx_data/devtriggers",
-    "plx_session/devtriggers",
     "plx_media/devtriggers",
     "plx_appkit/devtriggers",
     "plx_screens/devtriggers",
@@ -236,10 +235,6 @@ plx_telemetry = { path = "telemetry" }
 # The data layer (ci/module-layers.ini `[data]`): the content stores and the catalog, browse, detail,
 # person, collection, search and view-state modules they own. No screen, widget or application type.
 plx_data = { path = "data" }
-# The session layer (ci/module-layers.ini `[session]`): plex.tv sign-in, server discovery, the
-# who's-watching picker and the install of the chosen profile's credentials, and the owner machine
-# that holds them. It reads no build variable: the version it reports is `plx_plex`'s.
-plx_session = { path = "session" }
 # The media layer (ci/module-layers.ini `[media]`): the bundled-FFmpeg demuxer, the HTTPS media plane,
 # HLS, adaptive bitrate, the buffer-feed player engine and route selection. It declares the Starfish/ACB
 # externs and the two C callbacks `src/starfish.c` calls, and links nothing on the television.
@@ -257,10 +252,6 @@ plx_screens = { path = "screens" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 # raw socket/libc FFI for the stream module (correct constants + struct layouts)
 libc = "0.2"
-# XXH3-64 of every written frame of the demo-video dump (`src/dev/framedump.rs`, the `frames.tsv`
-# column `tools/site_video.py` reads). Optional, and pulled by `hostsim` alone: no television or
-# shipping build compiles it.
-xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
 # JSON parsing for the pms module (replaces the C's hand-rolled string scrape)
 # std exposes the writer API used to bound manifest encoding before any filesystem write.
 serde_json = { version = "1", default-features = false, features = ["alloc", "std"] }
@@ -321,8 +312,6 @@ plx_plex = { path = "plex", features = ["test-support"] }
 plx_telemetry = { path = "telemetry", features = ["test-support"] }
 # Likewise the data layer's seeding and fixture seams (`pms::seed_for_test`, `metadata::set_current_for_test`, ...).
 plx_data = { path = "data", features = ["test-support"] }
-# Likewise the session layer's test fixtures (`auth::test_support`, `auth::owner::scenarios`, ...).
-plx_session = { path = "session", features = ["test-support"] }
 # Likewise the media layer's seams (`player::preview`, `player::restore_state_for_test`, ...).
 plx_media = { path = "media", features = ["test-support"] }
 # Likewise the appkit layer's seams (`player_hud::SkipIntervalGuard`, the `overscan_rects` audits, ...).

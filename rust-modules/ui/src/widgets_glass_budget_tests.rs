@@ -412,12 +412,6 @@ fn no_popover_panel_uses_the_blur_path_and_every_one_stands_on_the_field() {
     // …and every panel that used to frost one now stands on the field.
     for rel in [
         "screens/src/item_menu.rs",
-        "screens/src/account_menu.rs",
-        "screens/src/alt_sources.rs",
-        "screens/src/about_panel.rs",
-        "screens/src/tracks_panel.rs",
-        "screens/src/library/menu.rs",
-        "screens/src/person_bio.rs",
         "ui/src/decision_alert.rs",
     ] {
         let src = std::fs::read_to_string(root.join(rel)).expect("read panel source");

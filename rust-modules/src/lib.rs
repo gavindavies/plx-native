@@ -10,24 +10,17 @@
 //! `acb_on_event`, `plx_media`'s player/mod.rs). Everything else is Rust-internal (the per-module `repr(C)`
 //! shapes are migration legacy, not ABI).
 mod app; // run_application — the Rust app core / event loop (the entry inverted from main.c; port.rs's `plex_run` hands over to it)
-mod capture; // dev live UI capture stream: own-GLES-frame grab → MPEG1/TS or JPEG → TCP (UI plane only)
-mod coldstart; // retires old last-page bookmarks; authenticated cold boots now stay on Home
 mod dev; // the /tmp/plxnative-* trigger surface, behind one `devtriggers` feature — read it before adding a trigger
-mod focusprobe; // dev: one diffable line naming everything app.rs's key ladder can move, logged when it changes
-mod lab; // Cloud Lab bridge: pinned diagnostic uploads + optional outbound command long-poll
 // Pure RELEASE_LINE-parsing helpers, `include!`d verbatim by build.rs so `cargo test --lib`
 // actually runs their unit tests (see the module for why). Nothing in the app itself calls
 // them at runtime — the version rule they implement is applied once, at compile time, by
 // build.rs — so they exist in THIS crate only for the test build; `#[cfg(test)]` here, not on
 // the functions themselves, because build.rs's own separate compilation is never built with
 // `--test` and needs them unconditionally.
-#[cfg(test)]
-mod release_line;
 mod remote; // dev/testing remote-control channel: a FIFO the loop drains into synthetic SDL keys
 mod shot; // simulator screenshots: read the frame back and write a PNG (see the module doc)
 mod system;
 
-mod textinput; // the TV's own on-screen keyboard, via plain SDL_StartTextInput (see the module doc)
 
 /// The instance root, for the simulator binary.
 ///
@@ -62,5 +55,4 @@ pub fn sim_events_log() -> std::path::PathBuf {
 /// compile error. There is deliberately no `pub use` here: a re-export would be a reference from
 /// the crate root into the port.
 pub mod port;
-pub use app::synthetic_home_initial;
 

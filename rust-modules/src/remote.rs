@@ -67,10 +67,6 @@ impl HangProbe {
 }
 
 impl Remote {
-    #[cfg(all(test, feature = "devtriggers"))]
-    pub(crate) fn buffered_for_test(tokens: &str) -> Self {
-        Self { fd: -1, buf: tokens.to_owned() }
-    }
 
     /// Create + open the control FIFO non-blocking. `O_RDWR` keeps a writer end open
     /// on our side so reads never hit EOF between host writes (the standard self-pipe

@@ -1025,7 +1025,6 @@ dependencies = [
  "plx_platform",
  "plx_plex",
  "plx_screens",
- "plx_session",
  "plx_telemetry",
  "plx_ui",
  "serde_json",
@@ -1069,7 +1068,6 @@ dependencies = [
  "plx_gfx",
  "plx_machine",
  "plx_platform",
- "qrcodegen",
  "serde",
  "serde_json",
 ]
@@ -1090,12 +1088,10 @@ dependencies = [
  "plx_platform",
  "plx_plex",
  "plx_screens",
- "plx_session",
  "plx_telemetry",
  "plx_ui",
  "serde",
  "serde_json",
- "xxhash-rust",
 ]
 
 [[package]]
@@ -1151,12 +1147,6 @@ name = "pxfm"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0c5ccf5294c6ccd63a74f1565028353830a9c2f5eb0c682c355c471726a6e3f"
-
-[[package]]
-name = "qrcodegen"
-version = "1.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4339fc7a1021c9c1621d87f5e3505f2805c8c105420ba2f2a4df86814590c142"
 
 [[package]]
 name = "quote"
@@ -1624,12 +1614,6 @@ dependencies = [
  "thiserror",
  "time",
 ]
-
-[[package]]
-name = "xxhash-rust"
-version = "0.8.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "550a2b930b62486a393c52d5c3b84bff264b28aa437ed64694d31e93b1757af7"
 
 [[package]]
 name = "yasna"

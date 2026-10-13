@@ -486,11 +486,6 @@ fn note_dump_failure(key: &[u8], transient: bool) {
     }
 }
 
-/// The first art-request failure since the dump was armed, if any. See [`DUMP_FAILURE`].
-#[cfg(feature = "devtriggers")]
-pub(crate) fn dump_failure() -> Option<String> {
-    DUMP_FAILURE.lock().unwrap_or_else(|e| e.into_inner()).clone()
-}
 static CV: Condvar = Condvar::new();
 
 fn store() -> MutexGuard<'static, Store> {
@@ -1748,17 +1743,6 @@ fn disk_namespace(client: &plx_plex::plex::Client) -> String {
     }
 }
 
-/// Diagnostic snapshot only: reading counters must never initialize or scan the disk cache
-/// on the frame thread. The two demand workers are the only callers that open it.
-pub(crate) fn log_cache_stats() {
-    let s = plx_platform::imgcache::stats();
-    let queued = note_backlog(&store().slots);
-    plx_base::eventlog::log(&format!(
-        "imgcache: hits={} misses={} writes={} evictions={} entries={} bytes={} fetches={} queued_bytes={} peak_queued_bytes={} gpu_bytes={}",
-        s.hit, s.miss, s.write, s.eviction, s.entries, s.bytes,
-        FETCHES.load(Ordering::Relaxed), queued, BACKLOG_PEAK.load(Ordering::Relaxed), tex::resident_bytes(),
-    ));
-}
 
 /// What [`load_art`] produced: the decoded art (if any), the disk key to refresh when the hit
 /// was stale, and whether a failure is one that can change.
@@ -1781,7 +1765,7 @@ fn load_art<T>(
     mut decode: impl FnMut(&[u8]) -> Option<T>,
 ) -> Loaded<T> {
     let mut out = Loaded { art: None, from_disk: false, stale: None, transient: false };
-    let disk = if crate::dev::scenarios::imagecache_bypass_armed() {
+    let disk = if crate::dev::imagecache_bypass_armed() {
         None
     } else {
         plx_platform::imgcache::classify(&disk_namespace(client), key_s)
@@ -1913,7 +1897,7 @@ fn bake_fan(
     token_gen: u32,
 ) -> fan::Got<fan::Rgba> {
     let profile = plx_plex::plex::session::current_profile_key();
-    let disk = if crate::dev::scenarios::imagecache_bypass_armed() {
+    let disk = if crate::dev::imagecache_bypass_armed() {
         None
     } else {
         let namespace = format!("{}|profile:{profile}", disk_namespace(client));
@@ -2897,57 +2881,8 @@ mod tests {
         store().slots = [Pslot::ZERO; PT_CAP];
     }
 
-    /// Exercise the source-facing half of the product card primitive, not a
-    /// hand-entered admission scope. GPU composition is the real-TV obligation.
-    /// A future position term in any screen reaches this same transformed centre.
-    #[test]
-    fn the_card_renderer_scopes_every_art_variant_and_unknown_misses_converge() {
-        card_renderer_frames(false);
-    }
 
-    /// The same three frames under `plxnative-cardspeed`: the card that jumped 80 px between two
-    /// frames is `Moving` and still claims nothing until it settles.
-    #[test]
-    fn under_cardspeed_a_moving_card_claims_no_slot_until_it_settles() {
-        card_renderer_frames(true);
-    }
 
-    fn card_renderer_frames(enforced: bool) {
-        let (_fresh, sid, _) = one_server();
-        let _enforce = if enforced { plx_ui::card_motion::enforce_for_test() } else { plx_ui::card_motion::default_for_test() };
-        tex::install(&SOURCE);
-        tex::reset_for_test(16 * 1024 * 1024);
-        store().slots = [Pslot::ZERO; PT_CAP];
-        let rect = plx_ui::Rect::new(0.0, 0.0, 250.0, 375.0);
-        let mut item = plx_data::pms::PmsMovie::default();
-        item.sid = sid;
-        item.thumb = "/library/metadata/42/thumb".into();
-        item.still = "/library/metadata/42/still".into();
-        plx_ui::widgets::resolve_card_art(plx_ui::Painter::recording(), rect,
-            &plx_ui::widgets::Art::Poster(Some(plx_screens::registry::tile_facts::of(&item))));
-        assert!(store().slots.iter().all(|s| s.state == P_EMPTY), "text prewarming must not start poster work");
-        for frame in 0..3 {
-            plx_ui::card_motion::begin_frame(frame * 16);
-            plx_machine::idle::frame_begin(0.016);
-            plx_machine::idle::take_local_damage();
-            let painter = plx_ui::Painter::root().translate(if frame == 0 { 0.0 } else { 80.0 }, 0.0);
-            let facts = plx_screens::registry::tile_facts::of(&item);
-            for art in [plx_ui::widgets::Art::Poster(Some(facts)), plx_ui::widgets::Art::Still(Some(facts)),
-                plx_ui::widgets::Art::Thumb { sid: sid.raw(), key: "/test-thumb", res: (250, 375) },
-                plx_ui::widgets::Art::Person { sid: sid.raw(), key: "/test-person", res: (250, 250) }] {
-                plx_ui::widgets::resolve_card_art(painter, rect, &art);
-            }
-            // Frame 0 is `Unknown`; frame 1 jumped 80 px in 16 ms (`Moving`, 5000 px/s); frame 2 held.
-            if frame == 0 || enforced && frame == 1 {
-                assert!(store().slots.iter().all(|s| s.state == P_EMPTY), "unknown/moving cards must claim no slots");
-                assert!(plx_machine::idle::take_local_damage() > 0, "a refused unknown needs a follow-up present");
-            } else {
-                assert_eq!(store().slots.iter().filter(|s| s.state == P_WANT).count(), 4, "all four admitted variants must queue art");
-            }
-        }
-        assert!(!plx_ui::card_motion::declines_request(), "hero work after a card is outside its scope");
-        store().slots = [Pslot::ZERO; PT_CAP];
-    }
 
     #[test]
     fn a_motion_declined_retry_wakes_only_when_due() {
@@ -3293,220 +3228,9 @@ mod tests {
         store().slots = [Pslot::ZERO; PT_CAP];
     }
 
-    /// **Deterministic deadline progression (adjudication on PR #182, item 2).** The tight-loop
-    /// test above ([`a_key_evicted_and_reevicted_in_rapid_succession_does_not_rearm_without_bound`])
-    /// never lets real time move — the host clock stub is frozen — so it proves the FIRST cooldown
-    /// blocks a rearm but nothing about what happens once that cooldown's own deadline arrives,
-    /// which is the schedule's whole point. This drives the app clock explicitly instead
-    /// (`crate::app::clock::set_replay`, the same seam the recorded-replay driver uses), so a
-    /// `Touch::Warm` probe can be checked on both sides of the deadline: still dormant a tick
-    /// before it, and — because Warm is refused unconditionally, before the cooldown gate is even
-    /// reached — still dormant a tick after it too.
-    #[test]
-    fn a_touch_warm_probe_of_a_cooling_slot_stays_dormant_before_and_after_expiry() {
-        let (_fresh, sid, _) = one_server();
-        let path = key_for(sid, "/library/metadata/42/thumb", 2, 2, 0);
-        {
-            let mut g = store();
-            g.slots = [Pslot::ZERO; PT_CAP];
-            let slot = &mut g.slots[0];
-            slot.srv = sid;
-            slot.cache_gen = plx_platform::imgcache::generation();
-            slot.token_gen = plx_plex::plex::client_for(sid).unwrap().token_gen();
-            slot.grant_epoch = plx_plex::plex::client_for(sid).unwrap().grant_epoch();
-            set_key(slot, &path);
-            slot.state = P_EVICTED;
-            slot.evict_attempts = 1;
-            slot.evicted_at = Some(0);
-            slot.evict_cooldown_until = Some(250); // evict_backoff(1)
-        }
 
-        crate::app::clock::set_replay(100); // before the deadline
-        let (hit, warm) = lookup(sid, &path, Touch::Warm);
-        assert_eq!(hit, None);
-        assert_eq!(warm, Warm::Known);
-        assert_eq!(store().slots[0].state, P_EVICTED, "a warm probe stays dormant before expiry");
 
-        crate::app::clock::set_replay(250); // exactly at the deadline
-        let (hit, warm) = lookup(sid, &path, Touch::Warm);
-        assert_eq!(hit, None);
-        assert_eq!(warm, Warm::Known);
-        assert_eq!(
-            store().slots[0].state,
-            P_EVICTED,
-            "a warm probe stays dormant even once the cooldown has cleared - only a Draw probe \
-             may recover an EVICTED slot"
-        );
 
-        store().slots = [Pslot::ZERO; PT_CAP];
-    }
-
-    /// The Draw-probe half of the same deadline: refused one tick short, honored at the deadline
-    /// itself - mirrors [`evict_cooldown_due_only_after_its_own_deadline`]'s edges, but through
-    /// `lookup` end to end (the re-arm counter, the state transition) rather than the pure
-    /// predicate alone.
-    #[test]
-    fn a_touch_draw_probe_only_rearms_once_the_cooldown_deadline_arrives() {
-        let (_fresh, sid, _) = one_server();
-        let path = key_for(sid, "/library/metadata/42/thumb", 2, 2, 0);
-        {
-            let mut g = store();
-            g.slots = [Pslot::ZERO; PT_CAP];
-            let slot = &mut g.slots[0];
-            slot.srv = sid;
-            slot.cache_gen = plx_platform::imgcache::generation();
-            slot.token_gen = plx_plex::plex::client_for(sid).unwrap().token_gen();
-            slot.grant_epoch = plx_plex::plex::client_for(sid).unwrap().grant_epoch();
-            set_key(slot, &path);
-            slot.state = P_EVICTED;
-            slot.evict_attempts = 1;
-            slot.evicted_at = Some(0);
-            slot.evict_cooldown_until = Some(250);
-        }
-        let (_, rearmed0) = residency_counts_for_test();
-
-        crate::app::clock::set_replay(249);
-        let (hit, _) = lookup(sid, &path, Touch::Draw);
-        assert_eq!(hit, None);
-        assert_eq!(
-            store().slots[0].state,
-            P_EVICTED,
-            "one millisecond short of the deadline must still refuse to rearm"
-        );
-        let (_, rearmed1) = residency_counts_for_test();
-        assert_eq!(rearmed1, rearmed0, "a refused rearm must not count");
-
-        crate::app::clock::set_replay(250);
-        let (hit, _) = lookup(sid, &path, Touch::Draw);
-        assert_eq!(hit, None, "a freshly rearmed slot has no pixels yet");
-        assert_eq!(store().slots[0].state, P_WANT, "the deadline itself rearms it");
-        let (_, rearmed2) = residency_counts_for_test();
-        assert_eq!(rearmed2, rearmed0 + 1, "the rearm must count exactly once");
-
-        store().slots = [Pslot::ZERO; PT_CAP];
-    }
-
-    /// The escalation the tight-loop test cannot see: driving the app clock forward by exactly
-    /// each deadline (never one tick less, per [`a_touch_draw_probe_only_rearms_once_the_cooldown_deadline_arrives`])
-    /// and completing the recovery immediately each time - the fast round trip a thrash needs -
-    /// must walk [`evict_backoff`]'s own schedule (250ms, 500ms, 1s, 2s, 4s, 8s) and then hold at
-    /// its 8s cap, exactly like [`the_retry_backoff_doubles_from_one_second_and_caps`] proves for
-    /// the unrelated transient-fetch schedule.
-    #[test]
-    fn repeated_completed_recoveries_escalate_the_cooldown_to_its_cap() {
-        use plx_ui::tex::Source as _;
-
-        let (_fresh, sid, _) = one_server();
-        let path = key_for(sid, "/library/metadata/42/thumb", 2, 2, 0);
-        let mut now: u32 = 0;
-        crate::app::clock::set_replay(now);
-        {
-            let mut g = store();
-            g.slots = [Pslot::ZERO; PT_CAP];
-            let slot = &mut g.slots[0];
-            slot.srv = sid;
-            slot.cache_gen = plx_platform::imgcache::generation();
-            slot.token_gen = plx_plex::plex::client_for(sid).unwrap().token_gen();
-            slot.grant_epoch = plx_plex::plex::client_for(sid).unwrap().grant_epoch();
-            set_key(slot, &path);
-            slot.state = P_READY;
-        }
-
-        // A fresh key's FIRST eviction never cools (`evicted_at` was `None`) - it rearms on the
-        // very next Draw probe, the ordinary one-eviction-then-recovery case. This primes
-        // `evicted_at` so the NEXT eviction (immediately after, same tick) is the first the
-        // thrash guard can see as a continuation.
-        SOURCE.unresident(PosterKey(0), false);
-        assert_eq!(
-            store().slots[0].evict_cooldown_until,
-            None,
-            "a key's first-ever eviction never cools"
-        );
-        let (hit, _) = lookup(sid, &path, Touch::Draw);
-        assert_eq!(hit, None);
-        assert_eq!(store().slots[0].state, P_WANT);
-        store().slots[0].state = P_READY;
-
-        let schedule_ms: [u32; 8] = [250, 500, 1_000, 2_000, 4_000, 8_000, 8_000, 8_000];
-        for &wait in schedule_ms.iter() {
-            SOURCE.unresident(PosterKey(0), false); // rapid: inside the thrash window every time
-            let cooldown = store().slots[0]
-                .evict_cooldown_until
-                .expect("a rapid re-eviction always sets a cooldown");
-            assert_eq!(
-                cooldown,
-                now.wrapping_add(wait),
-                "the escalation schedule must reach {wait}ms and cap there"
-            );
-
-            crate::app::clock::set_replay(now.wrapping_add(wait) - 1);
-            let (hit, _) = lookup(sid, &path, Touch::Draw);
-            assert_eq!(hit, None);
-            assert_eq!(
-                store().slots[0].state,
-                P_EVICTED,
-                "one tick short of {wait}ms must still refuse to rearm"
-            );
-
-            now = now.wrapping_add(wait);
-            crate::app::clock::set_replay(now);
-            let (hit, _) = lookup(sid, &path, Touch::Draw);
-            assert_eq!(hit, None);
-            assert_eq!(store().slots[0].state, P_WANT, "the deadline itself rearms it");
-            store().slots[0].state = P_READY; // the fast recovery a thrash needs
-        }
-
-        store().slots = [Pslot::ZERO; PT_CAP];
-    }
-
-    /// The other side of [`evict_was_rapid_only_flags_a_reeviction_inside_the_thrash_window`]:
-    /// mid-escalation, a gap past [`EVICT_THRASH_WINDOW_MS`] before the NEXT eviction must reset
-    /// `evict_attempts` to 0 and set no cooldown at all - the key is treated exactly like one
-    /// evicted for the first time, because as far as the guard can tell, it was: nothing has
-    /// churned it in ten whole seconds.
-    #[test]
-    fn an_eviction_gap_past_the_thrash_window_resets_the_escalation() {
-        use plx_ui::tex::Source as _;
-
-        let (_fresh, sid, _) = one_server();
-        let path = key_for(sid, "/library/metadata/42/thumb", 2, 2, 0);
-        crate::app::clock::set_replay(0);
-        {
-            let mut g = store();
-            g.slots = [Pslot::ZERO; PT_CAP];
-            let slot = &mut g.slots[0];
-            slot.srv = sid;
-            slot.cache_gen = plx_platform::imgcache::generation();
-            slot.token_gen = plx_plex::plex::client_for(sid).unwrap().token_gen();
-            slot.grant_epoch = plx_plex::plex::client_for(sid).unwrap().grant_epoch();
-            set_key(slot, &path);
-            slot.state = P_READY;
-            slot.evicted_at = Some(0);
-            slot.evict_attempts = 5; // mid-escalation from an earlier thrash episode
-        }
-
-        // The window's own edge - not one millisecond less - counts as settled.
-        crate::app::clock::set_replay(EVICT_THRASH_WINDOW_MS);
-        SOURCE.unresident(PosterKey(0), false);
-        {
-            let g = store();
-            assert_eq!(g.slots[0].evict_attempts, 0, "a settled gap must clear the escalation");
-            assert_eq!(
-                g.slots[0].evict_cooldown_until, None,
-                "a reset episode's first eviction never cools"
-            );
-        }
-
-        let (hit, _) = lookup(sid, &path, Touch::Draw);
-        assert_eq!(hit, None);
-        assert_eq!(
-            store().slots[0].state,
-            P_WANT,
-            "the reset key rearms on its very next Draw probe, exactly like a fresh key"
-        );
-
-        store().slots = [Pslot::ZERO; PT_CAP];
-    }
 
     /// The pure decision behind [`invalidate_due_evictions`]: only a slot an active cooldown
     /// deadline is ticking against is ever due for a wake - a slot with no cooldown (`None`) has

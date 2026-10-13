@@ -1,157 +1,55 @@
-//! **The application bundle's SCREEN-SIDE half** (restructure spec §3.1, phase 5b): the effects a
-//! screen may ask for (`AppFx`), the messages a machine receives (`AppMsg`), and the requests an
-//! owned screen makes of the legacy LOOP (`LoopReq`) while the two coexist (§14).
+//! **The application bundle's screen-side half**: the effects a screen may ask for (`AppFx`), the
+//! messages a machine receives (`AppMsg`), the requests an owned screen makes of the loop, the
+//! screen argument ([`AppArg`]) and the one `mount` match ([`AppMounter`]).
 //!
-//! **…and, since restructure phase 10, the concrete `ScreenArg` ([`AppArg`]) and the one `mount`
-//! match ([`AppMounter`])** — which §2.1 always put here and which lived in `app/bridge.rs` until
-//! then. The blocker was stated in this doc and is gone: the argument carried the legacy `Route`,
-//! `Route` was `app`-private, and a screen may not name `app::`. `Route` moved here in phase 10
-//! and was FOLDED INTO [`AppArg`] in phase 12 — its seven mountable values are flat variants and
-//! the enum is gone (§15.2), so a page argument is one value rather than a value inside a value. What §0's criterion 5 buys
-//! for that is the thing this module is for: **a new screen touches its own `screens/<name>.rs`,
-//! this file, `dev/scenarios.rs` and `tests/manifest.json` and nothing else** — the variant, the id,
-//! the `mount` arm and the recorded shape ([`SCREEN_SHAPES`]) are all here.
-//!
-//! What stays in `app/bridge.rs` is the concrete `Host` and the rig it lends the dispatcher
-//! (`AppHost`, `AppViews`, `Bridge`), plus the two conversions that are about the LEGACY trail
-//! rather than about the alphabet (`AppArg::from_node`/`node`). The mounter is generic over the
-//! host for the same reason the screens are: the views it needs arrive through the `*Like`
-//! accessors below, so it names no application type. The Settings family instantiates the same
-//! screens a second time for the surface's own inner stack (`screens::settings::InnerHost`), which
-//! is how one `OnboardScreen` mounts twice (§6.2).
-//!
-//! `LoopReq` is a DEBT with a phase number on each variant: a request the loop performs because
-//! the machine that should own it (Session, Player, Navigation over the app's real stack) is not
-//! on the dispatcher yet. The bridge drains them after every dispatcher frame.
+//! A new screen touches its own `screens/<name>.rs` and this file: the variant, the id, the
+//! `mount` arm and the recorded shape ([`SCREEN_SHAPES`]) are all here.
 
-use crate::family::SettingsPage;
-use std::sync::Arc;
-use crate::settings::{Family, RouteSurface};
-use plx_data::stores::{StoreCmd, StoreId, StoreWork};
 use plx_machine::machine::{
     Canon, Chrome, Cx, Effects, EntryId, Host, InstanceId, LogicalState, ScreenId,
 };
 use plx_ui::screen::{Mounter, ReturnState, Screen};
 
-/// The one conversion from a catalog row to the plain facts `ui` draws a tile from. It lives here
-/// because a screen may name `registry` but never a sibling screen, and `ui` cannot name the row.
-pub mod tile_facts;
-
-/// The application's effects (spec §3.1). `Store` since phase 4; `Consent` and `Loop` since 5b.
+/// The application's effects.
 pub enum AppFx {
-    Session(plx_session::auth::SessionCmd),
-    SessionEffect(plx_session::auth::owner::SessionFx),
-    /// Account and install preference IO, admitted by the application before work starts.
-    Preferences(PreferenceCmd),
-    /// A store command, executed as a `Deliver` to the store machine in the same drain.
-    Store(StoreId, StoreCmd),
-    /// Poll only the store work this visible route owns, after its read-only step returns.
-    StoreWork(StoreWork),
-    /// The consent MACHINE's command (§2.2): it owns the two decisions and publishes them.
-    Consent(ConsentCmd),
-    /// A request of the legacy loop (§14) — see [`LoopReq`].
-    Loop(LoopReq),
-    /// Content-page requests, executed by the navigation bridge during coexistence (phase 7).
-    Content(ContentReq),
-    /// Home-page semantic requests. The bridge owns navigation/player/menu execution.
-    Home(HomeReq),
-    /// Library-page semantic requests. The bridge owns navigation/player/item-menu execution.
-    Library(LibraryReq),
-    Search(SearchReq),
-    /// Player-route requests — what an overlay panel on the player's own `ModalStack` asks of the
-    /// loop, because the thing being asked for needs the `MainThread` token, the route or the
-    /// trail (§14). Executed by `app/playback.rs`'s drain.
-    Player(PlayerReq),
-    /// The item context menu's committed row (phase 10) — see [`ItemMenuReq`].
-    ItemMenu(ItemMenuReq),
-}
-
-/// A private live receipt. Requests contain account credentials and are intentionally unsupported
-/// by the controlled recorder/replay codec; the bridge must reject them before execution.
-pub struct AccountPreferenceReply {
-    pub request: Option<plx_plex::plex::account::PreferenceRequest>,
-    pub outcome: Result<plx_plex::plex::account::PreferenceSnapshot, plx_plex::plex::account::PreferenceError>,
-}
-
-pub enum PreferenceCmd {
-    /// Capture the live profile only after admission: even session::peek can schedule storage IO.
-    Load { reply: std::sync::mpsc::Sender<AccountPreferenceReply> },
-    Save {
-        request: plx_plex::plex::account::PreferenceRequest,
-        base: plx_plex::plex::account::PreferenceSnapshot,
-        update: plx_plex::plex::account::PreferenceUpdate,
-        reply: std::sync::mpsc::Sender<AccountPreferenceReply>,
-    },
     /// One live player setting's pick (`plx_media::route::Choice`): the app writes it through the
-    /// media door, and `reply` learns whether the write was durable.
-    Choose(plx_media::route::Choice, std::sync::mpsc::Sender<bool>),
-    Language { language: plx_platform::i18n::Preference, reply: std::sync::mpsc::Sender<bool> },
+    /// media door, and the sender learns whether the write was durable.
+    Preferences(plx_media::route::Choice, std::sync::mpsc::Sender<bool>),
+    /// Library-page requests, executed by the navigation bridge.
+    Content(ContentReq),
+    /// Player-route requests — what an overlay panel on the player's own `ModalStack` asks of the
+    /// loop. Executed by `app/playback.rs`'s drain.
+    Player(PlayerReq),
+    /// The item context menu's committed row — see [`ItemMenuReq`].
+    ItemMenu(ItemMenuReq),
+    /// A store command, executed as a `Deliver` to the store machine in the same drain.
+    Store(plx_data::stores::StoreId, plx_data::stores::StoreCmd),
+    /// Poll only the store work this visible route owns, after its read-only step returns.
+    StoreWork(plx_data::stores::StoreWork),
 }
-
-/// Whether an item has a context menu to open (`item_menu::has_actions`): the one predicate the
-/// app declines a menu with and the card screens' hold hint is gated by. The screens reach it
-/// here, never by naming the sibling `item_menu`.
-pub use crate::item_menu::has_actions as item_has_menu;
-/// The panels a sibling screen's host test reads through the shared vocabulary (the `sibling` gate
-/// admits only `crate::registry`): the Detail page's tests drive the real About panel and compare
-/// the audio summary against the tracks panel's full list.
-#[cfg(test)]
-pub(crate) use crate::{about_panel::AboutPanelScreen, tracks_panel::audio_rows as tracks_panel_audio_rows};
 
 /// **What the item context menu asks of the loop**, once its own `step` has resolved the pressed
-/// row to an [`crate::item_menu::Action`].
-///
-/// The panel owns its rows, its cursor, its anchor and its dismissal; it owns none of what an
-/// action DOES. Every arm of `app::input::apply_item_action` either navigates (a `Route` flip plus
-/// a blocking metadata fetch), starts playback (the playback session's `&mut`) or reaches the
-/// view-state store, and a screen may name none of the three (§2.1). So the panel decides and the
-/// loop performs, exactly as `LibraryReq` and `PlayerReq` do for their screens.
-///
-/// The four payload fields beside the action are the whole of what `MenuHost` and two `static mut`s
-/// were still deciding by the time the route that carried them was deleted:
-///
-/// * `sid` — WHICH SERVER the action's ratingKey is about, captured when the menu was presented.
-///   Resolving it against `plex::current_server()` at the press is the reported bug itself: on a
-///   Continue Watching shelf merged across servers, Play from Start on a friend's episode found
-///   OUR row with the same key and played a different film under the friend's title.
-/// * `item` — the catalog ROW the menu was opened on, for the one action a key cannot perform.
-///   `route::request_play_movie` needs the part id, duration, resume offset and media flags, and
-///   the only way back from a bare key used to be `pms::index_of_rk`, which walks the HOME hub
-///   catalog alone — so on a Library, Search or person tile the press silently did nothing.
-///   `None` for the detail page's filmstrip and season menus, which play through the loaded season.
-/// * `loaded_episode` — `MenuHost::is_loaded_episode`, the one bit that changed what an action
-///   means: only the filmstrip's rk is a leaf of the season the mounted page has loaded, so its
-///   Play from Start goes through that page's own episode path and its scrobble makes the page
-///   re-read itself. Every other entry point — including the detail page's own RELATED shelf,
-///   which stands on that page while its tiles are OTHER items — is a card row.
-/// * `from_home` — `menu_leave`'s only question (`matches!(host, MenuHost::Home)`): a navigation
-///   out of a menu opened on a HOME shelf resets the trail, because Home is the trail's root and
-///   the page being left is not one BACK can return to.
+/// row to an [`crate::item_menu::Action`]. The panel owns its rows, cursor, anchor and dismissal;
+/// the loop performs what an action does (play, mark watched), which a screen may not.
 pub struct ItemMenuReq {
     pub act: crate::item_menu::Action,
-    pub sid: plx_plex::plex::ServerId,
-    pub item: Option<plx_data::pms::PmsMovie>,
-    pub loaded_episode: bool,
-    pub from_home: bool,
 }
 
 /// **What a player overlay asks for**, once its own `step` has decided.
 ///
-/// A panel on the player's page-owned `ModalStack` owns its own state and its own input, but not
-/// the playback: seeking, pausing, applying a quality rung and leaving for a detail page all need
-/// the `MainThread` token and the container ops `app::bridge` owns, neither of which a screen may
-/// name (§2.1).
-/// So the panel decides and the loop performs, exactly as `LibraryReq` does for the Library.
+/// Seeking, pausing and leaving the player need the `MainThread` token and the container ops
+/// `app::bridge` owns, neither of which a screen may name. So the panel decides and the loop
+/// performs.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PlayerReq {
     /// Accepted only after the owned player confirmation. Never emitted by boot or Play.
     RepairSandbox,
+    /// The failure read-out's fix for Force Direct Play: set the Direct Play preference to Auto
+    /// and resolve the failed item again under it.
+    PlayAutomatically,
     /// The failure read-out's *Try again*: resolve the failed item again, unchanged, at the
     /// position the viewer was at (`app::playback::retry_failed_playback`).
     RetryPlayback,
-    /// The failure read-out's fix for Force Direct Play: set the Direct Play preference to Auto —
-    /// the same persisted value Settings writes — and resolve the failed item again under it.
-    PlayAutomatically,
     /// A transport key FELL THROUGH the panel (§ `overlay_transport_key_tests`): a viewer holding
     /// the track menu, the Info card or the Chapters strip open still expects PAUSE/PLAY to work,
     /// and the panel stays up. `true` = the key was PLAY, `false` = PAUSE; a PLAYPAUSE toggle is
@@ -206,1087 +104,102 @@ pub enum PlayerReq {
     Exit,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SearchReq {
-    Back,
-    Detail { sid: plx_plex::plex::ServerId, rk: String },
-    Person { sid: plx_plex::plex::ServerId, key: String, guid: String, name: String, thumb: String },
-    ItemMenu { sid: plx_plex::plex::ServerId, rk: String },
-    /// OK on a Collections-shelf hit. `rk` is the collection's ratingKey (empty for a tag-shaped
-    /// hit from a server that ignored `includeCollections`), `tag` its tag id; both are checked
-    /// against the retained selection before the route is built from it.
-    Collection { sid: plx_plex::plex::ServerId, rk: String, tag: i64 },
-    Tab(HomeTab),
-    Account,
-}
-
-/// Bounded actions emitted by the owned Home page. Item identity is always server-scoped.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum HomeReq {
-    Play { sid: plx_plex::plex::ServerId, rk: String, resume_ns: i64 },
-    Detail { sid: plx_plex::plex::ServerId, rk: String },
-    ItemMenu { sid: plx_plex::plex::ServerId, rk: String },
-    /// BACK from the shelves: fold to the hero and seat the engine in its remembered hero group.
-    FoldToHero,
-    Account,
-    Tab(HomeTab),
-}
-
-/// Stable top-strip destinations; availability changes presentation, never identity.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum HomeTab {
-    Home,
-    Movies,
-    Shows,
-    Search,
-}
-
-/// Addressed bootstrap/diagnostic intentions. They use the same owned step and focus engine as
-/// remote input; application scripts never write a Home cursor or carousel global.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HomeCmd {
-    FocusGrid { row: usize, col: usize },
-    Hero,
-    FocusStrip(HomeTab),
-    Flip(i32),
-    SelectHero(i32),
-    /// [`SelectHero`](Self::SelectHero), then HOLD that slot: the auto-advance stops for the
-    /// life of the page. The screenshot pipeline's pin (`/tmp/plxnative-heropin=<n>`), so a
-    /// capture taken whenever the page settles shows the billboard the scene manifest named.
-    PinHero(i32),
-    ItemMenu,
-}
-
-/// Bounded actions emitted by an owned Library instance. Every media action carries its server.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum LibraryReq {
-    /// Evaluated after dispatch by the application, where the input owner can report a live arm.
-    PublishShelves { target: plx_data::stores::browse::SectionAddress, hidden_page: bool, at_head: bool },
-    Menu { kind: LibraryMenuKind, anchor: [u32; 4], target: plx_data::stores::browse::SectionAddress },
-    Play { sid: plx_plex::plex::ServerId, rk: String, resume_ns: i64 },
-    Detail { sid: plx_plex::plex::ServerId, rk: String },
-    ItemMenu { sid: plx_plex::plex::ServerId, rk: String, from_deck: bool },
-    Account,
-    Tab(HomeTab),
-    BackToHome { kind: plx_data::stores::browse::SecKind },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LibraryMenuKind { Sort, Filter, Genre, Sources, Type }
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LibraryMenuArg {
-    pub host: plx_machine::machine::InstanceId,
-    pub target: plx_data::stores::browse::SectionAddress,
-    pub kind: LibraryMenuKind,
-    /// Bit-preserving rest rectangle; valid in canonical arguments without float equality.
-    pub anchor: [u32; 4],
-}
-
-impl plx_machine::machine::LogicalState for LibraryMenuArg {
-    fn write(&self, c: &mut plx_machine::machine::Canon) {
-        c.u32(self.host.0).u32(self.target.epoch).u32(u32::from(self.target.sid.raw()))
-            .u64(self.target.section as u64).u32(match self.kind {
-                LibraryMenuKind::Sort => 0, LibraryMenuKind::Filter => 1,
-                LibraryMenuKind::Genre => 2, LibraryMenuKind::Sources => 3, LibraryMenuKind::Type => 4,
-            });
-        for value in self.anchor { c.u32(value); }
-    }
-    fn probe(&self, out: &mut String) { out.push_str("library_menu_arg"); }
-}
-
 /// **What the item context menu is about**, captured at the moment it is presented and never
-/// re-resolved (`screens::item_menu`). [`LibraryMenuArg`] is the precedent: an anchored `Compact`
-/// surface whose whole subject is decided by the press that opened it.
-///
-/// Six `static mut`s collapsed into this one value in restructure phase 10 — `ITEM` and `SID`
-/// (what the menu is about), `OPENER` (where it hangs and what it lifts), and the `MenuHost` the
-/// route carried, down to the two bits an action actually reads. Being an ARGUMENT rather than a
-/// global is a stronger claim than it looks: a hub refetch cannot re-point the row under an open
-/// panel, and two menus could not exist at once to fight over it.
-#[derive(Clone)]
+/// re-resolved (`screens::item_menu`).
+#[derive(Clone, PartialEq, Eq)]
 pub struct ItemMenuArg {
-    /// The server every action's ratingKey names — see [`ItemMenuReq`].
-    pub sid: plx_plex::plex::ServerId,
-    /// The item the menu is about. For a card it is the row's own key, repeated here so the
-    /// identity questions (`same_instance`, the canonical hash) need not look inside the row.
-    pub rk: String,
-    pub kind: ItemMenuKind,
+    /// The file the menu is about.
+    pub path: String,
+    /// Its watch state, as the library page drew it.
+    pub mark: plx_ui::widgets::PosterMark,
     /// The PAGE entry the menu hangs off: its focused element is the anchor the panel sits beside
     /// and the tile lifted back out of the modal dim (`app::bridge::redraw_opener`).
     pub host: plx_machine::machine::EntryId,
-    /// …and which element that is, as the host page's own focus at the press frame. The surface
-    /// takes input the moment it is presented, so the host's live cursor is not the answer.
+    /// …and which element that is, as the host page's own focus at the press frame.
     pub focus: Option<plx_machine::machine::FocusKey<u32>>,
     /// The focused tile's drawn rect, bit-preserving so a canonical argument needs no float
-    /// equality — [`LibraryMenuArg::anchor`]'s rule. The presenter resolves the centred fallback
-    /// (`item_menu::fallback_anchor`) before storing it, so this is always a real rect.
+    /// equality. The presenter resolves the centred fallback (`item_menu::fallback_anchor`) before
+    /// storing it, so this is always a real rect.
     pub anchor: [u32; 4],
-    pub loaded_episode: bool,
-    pub from_home: bool,
 }
-
-/// Which of the three menus this is, and the data its row set is built from.
-///
-/// No `Debug`, deliberately: `PmsMovie` is a wire DTO with none, and deriving one for it would put
-/// a household's viewing on the far end of any `{:?}` — which `eventlog::scrub` cannot make safe,
-/// because nothing distinguishes a title from an ordinary log word (`eventlog/scrub.rs`'s own rule, and
-/// the tree-wide grep that enforces it).
-#[derive(Clone)]
-pub enum ItemMenuKind {
-    /// A card row — a home shelf, the Library grid, a Search result shelf, a person's filmography,
-    /// the detail page's Related shelf. `from_deck` is the SHELF's answer, not the item's: the
-    /// deck-removal row exists only on Continue Watching.
-    Card {
-        /// Boxed because it is by far the largest thing an `AppArg` can carry, and every other
-        /// variant of that enum would pay for it inline.
-        row: Box<plx_data::pms::PmsMovie>,
-        from_deck: bool,
-    },
-    /// The detail page's episode filmstrip. `mark` is resolved by the page through the same
-    /// `ep_state` that draws the still's own state line, so the tile and the menu opened on it
-    /// cannot describe one episode two ways.
-    Episode { mark: plx_ui::widgets::PosterMark },
-    /// The detail page's season tabs.
-    Season { mark: plx_ui::widgets::PosterMark },
-    /// A video in the local library (`screens::local`). The menu's `rk` is the file's path and its
-    /// `sid` `plx_data::local::ART_SRV`: the rows are an episode's (the watched pair and Play from
-    /// Start), and the application keeps the record itself (`plx_data::local_progress`).
-    Local { mark: plx_ui::widgets::PosterMark },
-}
-
-/// **Identity, not contents.** `PmsMovie` is a wire DTO with no `PartialEq` of its own, and one
-/// derived over its forty-odd fields would be the wrong question anyway: two menus are the same
-/// menu when they are about the same item on the same server in the same role, and a refreshed
-/// copy of that row with a new `viewOffset` is still that menu. The container asks this through
-/// `ScreenArg::same_instance`, which must never be able to think it is holding two of them.
-impl PartialEq for ItemMenuKind {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Card { row: a, from_deck: da }, Self::Card { row: b, from_deck: db }) =>
-                da == db && a.sid == b.sid && a.rk == b.rk && a.kind == b.kind,
-            (Self::Episode { mark: a }, Self::Episode { mark: b }) => a == b,
-            (Self::Season { mark: a }, Self::Season { mark: b }) => a == b,
-            (Self::Local { mark: a }, Self::Local { mark: b }) => a == b,
-            _ => false,
-        }
-    }
-}
-impl Eq for ItemMenuKind {}
-
-impl PartialEq for ItemMenuArg {
-    fn eq(&self, other: &Self) -> bool {
-        self.sid == other.sid && self.rk == other.rk && self.kind == other.kind
-            && self.host == other.host && self.focus == other.focus
-            && self.anchor == other.anchor && self.loaded_episode == other.loaded_episode
-            && self.from_home == other.from_home
-    }
-}
-impl Eq for ItemMenuArg {}
 
 impl plx_machine::machine::LogicalState for ItemMenuArg {
     fn write(&self, c: &mut plx_machine::machine::Canon) {
-        c.u32(u32::from(self.sid.raw())).str(&self.rk);
-        match &self.kind {
-            ItemMenuKind::Card { row, from_deck } => { c.u32(0).bool(*from_deck).u32(row.kind as u32); }
-            ItemMenuKind::Episode { mark } => { c.u32(1).u32(*mark as u32); }
-            ItemMenuKind::Season { mark } => { c.u32(2).u32(*mark as u32); }
-            ItemMenuKind::Local { mark } => { c.u32(3).u32(*mark as u32); }
-        }
-        c.u32(self.host.0);
+        c.str(&self.path).u32(self.mark as u32).u32(self.host.0);
         c.option(self.focus, |c, key| { c.u32(key.entry.0).u32(key.elem); });
         for value in self.anchor { c.u32(value); }
-        c.bool(self.loaded_episode).bool(self.from_home);
     }
     fn probe(&self, out: &mut String) { out.push_str("item_menu_arg"); }
 }
 
-/// Addressed simulator/harness intentions. They are resolved by the mounted instance.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LibraryCmd {
-    Enter(plx_data::stores::browse::SecKind),
-    /// Seat focus on one grid card (tests, and the screenshot pipeline's `plxnative-libgrid`).
-    FocusGrid { row: usize, col: usize },
-    /// Seat focus on one card of a hub shelf above the grid, `shelf` counted from the top (the
-    /// screenshot pipeline's `plxnative-libshelf`).
-    FocusShelf { shelf: usize, col: usize },
-    /// Open the Sort or Filter menu exactly as OK on its toolbar chip does (the screenshot
-    /// pipeline's `plxnative-libmenu`).
-    OpenMenu(LibraryMenuKind),
-    /// Choose a TYPE menu value exactly as its row does (the screenshot pipeline's and the fps
-    /// suite's `plxnative-libtype`).
-    SetType(plx_data::browse::LibraryType),
-    Page(i32),
-    Sweep,
-    SwitchStep(u32),
-    ItemMenu,
-}
-
-/// Stable section identity. PMS section keys are server-local, never globally unique.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct LibrarySectionIdentity {
-    pub sid: plx_plex::plex::ServerId,
-    pub key: i64,
-}
-
-/// Stable identities for Library controls and repeated media. Removed identities remain in the
-/// instance registry as tombstones so `KeyRegion` never guesses ownership from live membership.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum LibraryIdentity {
-    Library(LibrarySectionIdentity),
-    Shelf {
-        section: LibrarySectionIdentity,
-        hub: String,
-        sid: plx_plex::plex::ServerId,
-        rk: String,
-    },
-    ShelfSlot {
-        section: LibrarySectionIdentity,
-        hub: String,
-        publication: u32,
-        slot: u32,
-    },
-    Grid {
-        section: LibrarySectionIdentity,
-        sid: plx_plex::plex::ServerId,
-        rk: String,
-    },
-    GridSlot {
-        section: LibrarySectionIdentity,
-        query: u32,
-        slot: u32,
-    },
-    Rail { section: LibrarySectionIdentity, label: String },
-    Control { section: LibrarySectionIdentity, kind: String, key: String },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LibraryKey {
-    pub identity: LibraryIdentity,
-    pub elem: u32,
-    /// Last published slot is recovery metadata, never an active cursor.
-    pub last_group: u32,
-    pub last_index: u32,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct LibraryMemory {
-    pub epoch: Option<u32>,
-    pub query: Option<u32>,
-    pub grid_reset_pending: bool,
-    pub viewports: Vec<LibraryViewport>,
-    /// Return snapshots share unchanged catalog keys. The live registry detaches on mutation;
-    /// the canonical state remains the ordered key values, never this allocation's identity.
-    pub keys: Arc<Vec<LibraryKey>>,
-    pub next_elem: u32,
-    pub section: Option<LibrarySectionIdentity>,
-    pub scroll: f32,
-    pub shelf_scroll: Vec<(String, f32)>,
-}
-
-/// Section-owned document geometry, deliberately without any current or remembered item.
-#[derive(Clone, Debug)]
-pub struct LibraryViewport {
-    pub epoch: u32,
-    pub section: LibrarySectionIdentity,
-    pub scroll: f32,
-    pub shelves: Vec<(String, f32)>,
-}
-
-impl plx_machine::machine::LogicalState for LibraryViewport {
-    fn write(&self, c: &mut plx_machine::machine::Canon) {
-        let Self { epoch, section, scroll, shelves } = self;
-        c.u32(*epoch).u32(u32::from(section.sid.raw())).u64(section.key as u64).f32(*scroll);
-        c.seq(shelves.len());
-        for (id, x) in shelves { c.str(id).f32(*x); }
-    }
-    fn probe(&self, _: &mut String) {}
-}
-
-// `ContentArg`: an item's or person's identity travels with the navigation entry, never in a
-// screen global. The type lives in `plx_data::stores` (the data layer's `search` hit names it as its
-// route); this is the screens' spelling of it.
-pub use plx_data::stores::ContentArg;
-
-/// Application payload on the container's return state. Focus itself remains engine-owned.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum DetailIdentity {
-    /// A published placeholder with no server-side identity yet; never equal to a landed item.
-    Slot(u32),
-    Season { sid: plx_plex::plex::ServerId, show: String, rk: String },
-    Episode { sid: plx_plex::plex::ServerId, rk: String, text: bool },
-    Related { sid: plx_plex::plex::ServerId, rk: String },
-    Cast { sid: plx_plex::plex::ServerId, key: String, guid: String, name: String, role: String },
-    Extra { sid: plx_plex::plex::ServerId, rk: String },
-    /// A card of the collection shelf. Its own variant rather than `Related`: the two shelves are
-    /// different rows, and a movie that moves between them across a refetch is a different card.
-    CollectionMember { sid: plx_plex::plex::ServerId, rk: String },
-}
-
-#[derive(Clone, Debug)]
-pub struct DetailKey {
-    pub identity: DetailIdentity,
-    pub elem: u32,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct DetailMemory {
-    pub spot: plx_data::metadata::Spot,
-    pub keys: Vec<DetailKey>,
-    pub next_elem: u32,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CardIdentity {
-    pub sid: plx_plex::plex::ServerId,
-    pub rk: String,
-    pub elem: u32,
-}
-
-/// The slot ranges to project, sorted and merged, clamped to `total`. Shared by the sliding-window
-/// key projections of the Library grid and the Collection page.
-pub(crate) fn merged_ranges(mut ranges: Vec<std::ops::Range<usize>>, total: usize) -> Vec<std::ops::Range<usize>> {
-    ranges.retain_mut(|r| { r.end = r.end.min(total); r.start < r.end });
-    ranges.sort_by_key(|r| r.start);
-    let mut out: Vec<std::ops::Range<usize>> = Vec::new();
-    for r in ranges {
-        match out.last_mut() {
-            Some(last) if r.start <= last.end => last.end = last.end.max(r.end),
-            _ => out.push(r),
-        }
-    }
-    out
-}
-
-/// The slots of the grid row holding `index` and the row either side, for a grid `cols` wide: the
-/// neighbourhood a focus or a restore keeps keys for.
-pub(crate) fn row_neighbourhood(index: usize, cols: usize) -> std::ops::Range<usize> {
-    let row = index / cols.max(1);
-    row.saturating_sub(1) * cols..(row + 2) * cols
-}
-
-/// A card page's stable item-key interning: which engine element each `(sid, rk)` card owns, and
-/// the next element to hand out. It maps identities to elements and never stores which one is
-/// focused. The Person and Collection pages share it; each page picks its own first element.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct CardKeys {
-    pub keys: Vec<CardIdentity>,
-    pub next: u32,
-}
-
-impl CardKeys {
-    pub fn new(first: u32) -> Self {
-        Self { keys: Vec::new(), next: first }
-    }
-
-    /// The element `(sid, rk)` owns, interning a fresh one on first sight. `page` names the page
-    /// in the exhaustion panic.
-    pub fn intern(&mut self, sid: plx_plex::plex::ServerId, rk: &str, page: &str) -> u32 {
-        if let Some(elem) = self.elem_for(sid, rk) { return elem; }
-        let elem = self.next;
-        self.next = elem.checked_add(1).unwrap_or_else(|| panic!("{page} element-key space exhausted"));
-        self.keys.push(CardIdentity { sid, rk: rk.to_string(), elem });
-        elem
-    }
-
-    /// Intern every card in order and answer their elements, index for index. Known cards are
-    /// found through one index built for the pass, so a page landing costs O(cards + keys)
-    /// rather than a scan of every key per card.
-    pub fn intern_all<'a>(&mut self,
-        cards: impl Iterator<Item = (plx_plex::plex::ServerId, &'a str)>, page: &str) -> Vec<u32> {
-        let mut known: std::collections::HashMap<(plx_plex::plex::ServerId, String), u32> =
-            self.keys.iter().map(|k| ((k.sid, k.rk.clone()), k.elem)).collect();
-        cards.map(|(sid, rk)| {
-            if let Some(&elem) = known.get(&(sid, rk.to_string())) { return elem; }
-            let elem = self.intern(sid, rk, page);
-            known.insert((sid, rk.to_string()), elem);
-            elem
-        }).collect()
-    }
-
-    /// Merge a frozen registry back in. A live covered body can intern a landing after the
-    /// request-time snapshot, so this MERGES — replacing would rewind those identities and could
-    /// reuse an element. `next` never moves backwards and never below `first`.
-    pub fn merge(&mut self, saved: &CardKeys, first: u32, page: &str) {
-        for key in &saved.keys {
-            if self.elem_for(key.sid, &key.rk).is_some() { continue; }
-            assert!(self.get(key.elem).is_none(), "restored {page} key collision");
-            self.keys.push(key.clone());
-        }
-        let after = self.keys.iter().map(|key| key.elem).max()
-            .and_then(|elem| elem.checked_add(1)).unwrap_or(first);
-        self.next = self.next.max(saved.next).max(after).max(first);
-    }
-
-    pub fn elem_for(&self, sid: plx_plex::plex::ServerId, rk: &str) -> Option<u32> {
-        self.keys.iter().find(|k| plx_plex::plex::same_item((k.sid, k.rk.as_str()), (sid, rk))).map(|k| k.elem)
-    }
-
-    /// The identity that owns `elem`.
-    pub fn get(&self, elem: u32) -> Option<&CardIdentity> {
-        self.keys.iter().find(|k| k.elem == elem)
-    }
-
-    /// Where `elem` was interned — the card's order of first sight.
-    pub fn position(&self, elem: u32) -> Option<usize> {
-        self.keys.iter().position(|k| k.elem == elem)
-    }
-
-    pub fn len(&self) -> usize { self.keys.len() }
-
-    /// Bounds the table: above twice `window` (the cells the page keeps keys for) plus 256, the
-    /// oldest-interned keys go. A key `keep` names (a card projected now or a sync ago, the
-    /// focused member, the member a Back restores to, the group's remembered key) is never
-    /// dropped, so the table may stand over the bound only by those. `next` never moves back, so a
-    /// dropped element is not handed out again.
-    pub fn prune(&mut self, window: usize, keep: impl Fn(u32) -> bool) {
-        let excess = self.keys.len().saturating_sub(key_cap(window));
-        if excess == 0 { return; }
-        let drop = unlive_excess(self.keys.iter().map(|key| key.elem), keep, excess, EvictOrder::Table);
-        self.keys.retain(|key| !drop.contains(&key.elem));
-    }
-
-    /// This registry's canonical bytes after the page's `next` — `len` then `(sid, rk, elem)` per
-    /// key, the order every card page and both [`PageMemory`] arms have always written.
-    fn write_keys(&self, c: &mut plx_machine::machine::Canon) {
-        for key in &self.keys { c.u32(u32::from(key.sid.raw())).str(&key.rk).u32(key.elem); }
-    }
-}
-
-/// The slack every key table keeps above twice its live cells before it evicts.
-const KEY_SLACK: usize = 256;
-
-/// The size a key table may reach before the oldest unlive keys go: twice `live` plus [`KEY_SLACK`].
-pub(crate) fn key_cap(live: usize) -> usize { 2 * live + KEY_SLACK }
-
-/// Which keys of a table go first when it stands over its bound.
-#[derive(Clone, Copy)]
-pub(crate) enum EvictOrder {
-    /// Lowest element number first (elements are minted in order, so the oldest-interned).
-    Elem,
-    /// Table order, as the keys were stored.
-    Table,
-}
-
-/// The `excess` keys to drop from a table that stands over its bound: those of `elems` that `live`
-/// does not hold, in `order`. Fewer come back when too few are unlive.
-pub(crate) fn unlive_excess(
-    elems: impl Iterator<Item = u32>,
-    live: impl Fn(u32) -> bool,
-    excess: usize,
-    order: EvictOrder,
-) -> std::collections::HashSet<u32> {
-    let mut unlive: Vec<u32> = elems.filter(|&elem| !live(elem)).collect();
-    if matches!(order, EvictOrder::Elem) { unlive.sort_unstable(); }
-    unlive.truncate(excess);
-    unlive.into_iter().collect()
-}
-
-/// What a card page (Person, Collection) leaves behind on a push: its [`CardKeys`] and whether an
-/// explicit press had marked the header.
-#[derive(Clone, Debug, Default)]
-pub struct CardPageMemory {
-    pub cards: CardKeys,
-    pub header_marked: bool,
-    /// A listing page's directory (Collection): its total, one kept-row count per page read, the
-    /// focused member's index and element. Empty for a page that has none.
-    pub total: usize,
-    pub counts: Vec<u8>,
-    pub focus_index: Option<usize>,
-    pub focus_elem: Option<u32>,
-}
-
-impl CardPageMemory {
-    /// `tag` is the [`PageMemory`] arm's canonical tag: 2 for Person, 7 for Collection.
-    fn write(&self, tag: u32, c: &mut plx_machine::machine::Canon) {
-        c.u32(tag).u32(self.cards.next).bool(self.header_marked).seq(self.cards.len());
-        self.cards.write_keys(c);
-        if tag == 7 {
-            c.u64(self.total as u64).seq(self.counts.len());
-            for &kept in &self.counts { c.u32(u32::from(kept)); }
-            c.bool(self.focus_index.is_some()).u64(self.focus_index.unwrap_or(0) as u64)
-                .bool(self.focus_elem.is_some()).u32(self.focus_elem.unwrap_or(0));
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FilmographyKey {
-    pub department: String,
-    /// None identifies the department tab; Some identifies a provider credit within it.
-    pub catalog_id: Option<String>,
-    pub elem: u32,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct FilmographyMemory {
-    pub keys: Vec<FilmographyKey>,
-    pub next_elem: u32,
-    pub department: String,
-    pub preview: Option<(String, String)>,
-}
-
-/// Owned provider identity used by Home's stable group and element registries. Provider
-/// identifiers include their listing key because one server can reuse an identifier for distinct
-/// rows while a mixed-library row must not derive identity from whichever item happens to lead it.
-///
-/// A provider which publishes no identity receives an explicitly ephemeral identity scoped to
-/// that publication generation. Neither its title nor its position is claimed as stable.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum HomeHubIdentity {
-    ContinueWatching,
-    Identifier { sid: plx_plex::plex::ServerId, id: String, key: String },
-    Key { sid: plx_plex::plex::ServerId, key: String },
-    Ephemeral { generation: u32, ordinal: u32 },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HomeGroupKey {
-    pub identity: HomeHubIdentity,
-    pub group: u32,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum HomeItemIdentity {
-    Item { hub: HomeHubIdentity, sid: plx_plex::plex::ServerId, rk: String },
-    Slot { hub: HomeHubIdentity, generation: u32, ordinal: u32 },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HomeItemKey {
-    pub identity: HomeItemIdentity,
-    pub elem: u32,
-    /// Last published slot for this item, used only if its identity disappears. This is
-    /// per-item recovery metadata, not the engine's active or remembered focus.
-    pub last_row: u32,
-    pub last_col: u32,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct HomeMemory {
-    pub groups: Vec<HomeGroupKey>,
-    /// Shared with the screen that took it; see `HomeScreen::items`.
-    pub items: Arc<Vec<HomeItemKey>>,
-    pub next_group: u32,
-    pub next_elem: u32,
-    pub carousel: Option<(plx_plex::plex::ServerId, String)>,
-    pub strip_chosen: bool,
-    pub scroll_y: f32,
-    /// Stable group keys, not row ordinals: provider reorder must not transfer a viewport.
-    pub row_scroll: Vec<(u32, f32)>,
-}
-
+/// What a page leaves behind on its return state. The library page keeps nothing beyond the
+/// engine's own focus memory.
 #[derive(Clone, Debug, Default)]
 pub enum PageMemory {
     #[default]
     None,
-    Detail(DetailMemory),
-    Person(CardPageMemory),
-    Collection(CardPageMemory),
-    Filmography(FilmographyMemory),
-    Home(HomeMemory),
-    Library(LibraryMemory),
-    Search(crate::search::Memory),
 }
 
 impl PageMemory {
-    /// What an entry far below the top keeps (`plx_ui::containers::stack::DEEP`): Detail's key
-    /// table shrinks to the focused card's identity, so the page that reloads on return seats the
-    /// same card by it; `next_elem` stays, so no key minted later reuses a released number. The
-    /// other pages bound their own memory (Home and Library prune theirs, the card pages keep one
-    /// key per card the store holds) and are left as they are.
-    pub fn shed_to_identity(&mut self, focus: Option<u32>) {
-        if let Self::Detail(memory) = self {
-            memory.keys.retain(|key| Some(key.elem) == focus);
-            memory.keys.shrink_to_fit();
-        }
-    }
-}
-
-impl plx_machine::machine::LogicalState for DetailIdentity {
-    fn write(&self, c: &mut plx_machine::machine::Canon) {
-        match self {
-            Self::Slot(local) => { c.u32(4).u32(*local); }
-            Self::Season { sid, show, rk } => { c.u32(0).u32(u32::from(sid.raw())).str(show).str(rk); }
-            Self::Episode { sid, rk, text } => { c.u32(1).u32(u32::from(sid.raw())).str(rk).bool(*text); }
-            Self::Related { sid, rk } => { c.u32(2).u32(u32::from(sid.raw())).str(rk); }
-            Self::Cast { sid, key, guid, name, role } => { c.u32(3).u32(u32::from(sid.raw())).str(key).str(guid).str(name).str(role); }
-            Self::Extra { sid, rk } => { c.u32(5).u32(u32::from(sid.raw())).str(rk); }
-            Self::CollectionMember { sid, rk } => { c.u32(6).u32(u32::from(sid.raw())).str(rk); }
-        }
-    }
-    fn probe(&self, out: &mut String) { out.push_str("detail_identity"); }
+    pub fn shed_to_identity(&mut self, _focus: Option<u32>) {}
 }
 
 impl plx_machine::machine::LogicalState for PageMemory {
     fn write(&self, c: &mut plx_machine::machine::Canon) {
         match self {
             Self::None => { c.u32(0); }
-            Self::Detail(memory) => {
-                c.u32(1).u32(memory.spot.section as u32).u32(memory.spot.col as u32).bool(memory.spot.ep_text);
-                for col in memory.spot.saved_col { c.u32(col as u32); }
-                c.option(memory.spot.season, |c, season| { c.u64(season as u64); });
-                c.u32(memory.next_elem).seq(memory.keys.len());
-                for key in &memory.keys { key.identity.write(c); c.u32(key.elem); }
-            }
-            Self::Person(memory) => memory.write(2, c),
-            Self::Collection(memory) => memory.write(7, c),
-            Self::Filmography(memory) => {
-                c.u32(3).u32(memory.next_elem).str(&memory.department).seq(memory.keys.len());
-                for key in &memory.keys {
-                    c.str(&key.department).option(key.catalog_id.as_ref(), |c, id| { c.str(id); }).u32(key.elem);
-                }
-                c.option(memory.preview.as_ref(), |c, (department, id)| { c.str(department).str(id); });
-            }
-            Self::Home(memory) => {
-                c.u32(4).u32(memory.next_group).u32(memory.next_elem).seq(memory.groups.len());
-                for key in &memory.groups {
-                    write_home_hub(&key.identity, c);
-                    c.u32(key.group);
-                }
-                c.seq(memory.items.len());
-                for key in memory.items.iter() {
-                    match &key.identity {
-                        HomeItemIdentity::Item { hub, sid, rk } => {
-                            c.u32(0);
-                            write_home_hub(hub, c);
-                            c.u32(u32::from(sid.raw())).str(rk);
-                        }
-                        HomeItemIdentity::Slot { hub, generation, ordinal } => {
-                            c.u32(1);
-                            write_home_hub(hub, c);
-                            c.u32(*generation).u32(*ordinal);
-                        }
-                    }
-                    c.u32(key.elem).u32(key.last_row).u32(key.last_col);
-                }
-                c.option(memory.carousel.as_ref(), |c, (sid, rk)| {
-                    c.u32(u32::from(sid.raw())).str(rk);
-                });
-                c.bool(memory.strip_chosen).f32(memory.scroll_y).seq(memory.row_scroll.len());
-                for &(group, scroll) in &memory.row_scroll { c.u32(group).f32(scroll); }
-            }
-            Self::Library(memory) => {
-                c.u32(5).u32(memory.next_elem).f32(memory.scroll);
-                c.option(memory.section.as_ref(), |c, section| {
-                    c.u32(u32::from(section.sid.raw())).u64(section.key as u64);
-                });
-                c.seq(memory.keys.len());
-                for key in memory.keys.iter() {
-                    write_library_identity(&key.identity, c);
-                    c.u32(key.elem).u32(key.last_group).u32(key.last_index);
-                }
-                c.seq(memory.shelf_scroll.len());
-                for (hub, scroll) in &memory.shelf_scroll { c.str(hub).f32(*scroll); }
-                c.option(memory.epoch, |c, epoch| { c.u32(epoch); });
-                c.option(memory.query, |c, query| { c.u32(query); });
-                c.bool(memory.grid_reset_pending);
-                c.seq(memory.viewports.len());
-                for viewport in &memory.viewports { viewport.write(c); }
-            }
-            Self::Search(memory) => { c.u32(6); memory.write(c); }
         }
     }
     fn probe(&self, out: &mut String) { out.push_str("page_memory"); }
 }
 
-fn write_library_section(section: &LibrarySectionIdentity, c: &mut plx_machine::machine::Canon) {
-    c.u32(u32::from(section.sid.raw())).u64(section.key as u64);
-}
-
-fn write_library_identity(identity: &LibraryIdentity, c: &mut plx_machine::machine::Canon) {
-    match identity {
-        LibraryIdentity::Library(section) => { c.u32(0); write_library_section(section, c); }
-        LibraryIdentity::Shelf { section, hub, sid, rk } => {
-            c.u32(1); write_library_section(section, c); c.str(hub).u32(u32::from(sid.raw())).str(rk);
-        }
-        LibraryIdentity::ShelfSlot { section, hub, publication, slot } => {
-            c.u32(2); write_library_section(section, c); c.str(hub).u32(*publication).u32(*slot);
-        }
-        LibraryIdentity::Grid { section, sid, rk } => {
-            c.u32(3); write_library_section(section, c); c.u32(u32::from(sid.raw())).str(rk);
-        }
-        LibraryIdentity::GridSlot { section, query, slot } => {
-            c.u32(4); write_library_section(section, c); c.u32(*query).u32(*slot);
-        }
-        LibraryIdentity::Rail { section, label } => {
-            c.u32(5); write_library_section(section, c); c.str(label);
-        }
-        LibraryIdentity::Control { section, kind, key } => {
-            c.u32(6); write_library_section(section, c); c.str(kind).str(key);
-        }
-    }
-}
-
-fn write_home_hub(hub: &HomeHubIdentity, c: &mut plx_machine::machine::Canon) {
-    match hub {
-        HomeHubIdentity::ContinueWatching => { c.u32(0); }
-        HomeHubIdentity::Identifier { sid, id, key } => {
-            c.u32(1).u32(u32::from(sid.raw())).str(id).str(key);
-        }
-        HomeHubIdentity::Key { sid, key } => { c.u32(2).u32(u32::from(sid.raw())).str(key); }
-        HomeHubIdentity::Ephemeral { generation, ordinal } => { c.u32(3).u32(*generation).u32(*ordinal); }
-    }
-}
-
-pub const PAGE_MEMORY_SHAPE: &str = "PageMemory{None,Detail:{spot:Spot{section:i32,col:i32,ep_text:bool,saved_col:[i32;8],season:Option<i64>},next_elem:u32,keys:[{identity:DetailIdentity{Season(sid:u32,show:str,rk:str),Episode(sid:u32,rk:str,text:bool),Related(sid:u32,rk:str),Cast(sid:u32,key:str,guid:str,name:str,role:str),Extra(sid:u32,rk:str),CollectionMember(sid:u32,rk:str),Slot(u32)},elem:u32}]},Person:{next_card_elem:u32,header_marked:bool,card_keys:[{sid:ServerId,rk:String,elem:u32}]},Collection:{next_elem:u32,header_marked:bool,card_keys:[{sid:ServerId,rk:String,elem:u32}]},Filmography:{next_elem:u32,department:String,keys:[{department:String,catalog_id:Option<String>,elem:u32}],preview:Option<(String,String)>},Home:{next_group:u32,next_elem:u32,groups:[{identity:HomeHubIdentity{ContinueWatching,Identifier{sid:ServerId,id:String,key:String},Key{sid:ServerId,key:String},Ephemeral{generation:u32,ordinal:u32}},group:u32}],items:[{identity:HomeItemIdentity{Item{hub:HomeHubIdentity,sid:ServerId,rk:String},Slot{hub:HomeHubIdentity,generation:u32,ordinal:u32}},elem:u32,last_row:u32,last_col:u32}],carousel:Option<(ServerId,String)>,strip_chosen:bool,scroll_y:f32,row_scroll:[(group:u32,scroll:f32)]},Library:{next_elem:u32,section:Option<{sid:ServerId,key:i64}>,scroll:f32,keys:[{identity:LibraryIdentity,elem:u32,last_group:u32,last_index:u32}],shelf_scroll:[(hub:String,scroll:f32)],epoch:Option<u32>,query:Option<u32>,grid_reset_pending:bool,viewports:[LibraryViewport{epoch:u32,section:{sid:u32,key:u64},scroll:f32,shelves:[(id:str,x:f32)]}]}}";
+pub const PAGE_MEMORY_SHAPE: &str = "PageMemory{None}";
 
 /// Effects cross the screen/loop boundary; screens do not poll one another's pending latches.
 pub enum ContentReq {
-    Push(ContentArg),
-    Present(ContentArg),
-    /// The local library (`local`): open a folder as a page of its own, so BACK returns here.
+    /// Open a folder as a page of its own, so BACK returns here.
     LocalOpen(LocalArg),
-    /// The local library: play a file on this machine's disk. The loop probes it and starts the
-    /// engine, which needs the playback session a screen may not name.
+    /// Play a file on this machine's disk. The loop probes it and starts the engine, which needs
+    /// the playback session a screen may not name.
     LocalPlay(String),
     Back,
-    Play { play: PlayIntent, resume_ns: i64 },
-    /// Start a hero preview. Does not push the player route.
-    PreviewStart {
-        sid: plx_plex::plex::ServerId,
-        rk: String,
-        part: String,
-        vcodec: String,
-        acodec: String,
-        title: String,
-    },
-    /// Stop a hero preview and stay on the page.
-    PreviewStop,
-    /// **Pause or resume the live hero preview** — full-trailer mode's OK/PLAY/PAUSE. `Some(true)`
-    /// is the remote's PLAY key, `Some(false)` its PAUSE, `None` the PLAYPAUSE toggle, exactly as
-    /// [`PlayerReq::Transport`] carries them.
-    ///
-    /// A request rather than something the page performs, for [`PlayerReq::Transport`]'s reason:
-    /// pausing needs the `MainThread` token and the playback session's `&mut`, neither of which a
-    /// screen may name (§2.1). It carries no position: this is the toggle only, and its `SeekTo`
-    /// twin is [`ContentReq::PreviewSeek`], below.
-    PreviewTransport(Option<bool>),
-    /// **A user-driven LEFT/RIGHT seek inside a playing trailer** — the target position, in ns.
-    ///
-    /// Deliberately NOT `PlayerReq::SeekTo`/`CommitSeek`: those reach `player::request_seek`,
-    /// which writes `route::note_user_seek_intent` and
-    /// `report::note_seek_for(playback_trace_generation())` — a preview has no trace generation,
-    /// and `player::preview`'s watch-state promise (no PlayQueue, no timeline, no scrobble) covers
-    /// a seek exactly like every other write. This reaches `player::preview::seek` instead, which
-    /// carries its own budget/breaker accounting (`player::preview`'s module doc) — the same
-    /// `MainThread`/`&mut PlaybackSession` reason [`ContentReq::PreviewTransport`] is a request at
-    /// all.
-    PreviewSeek(i64),
     ItemMenu,
-    /// **Present one of the Detail page's own panels** on the container tree (spec §6.2's
-    /// "page-owned panels"). The page names WHICH and supplies whatever the panel needs to place
-    /// itself; the loop knows the style and the page's identity, so neither is on this request.
-    Panel(ContentPanel),
-}
-
-/// **Which page-owned panel [`ContentReq::Panel`] asks for** — any content page's, not one
-/// screen's: the Detail page's three, the Person page's biography sheet and the Collection page's
-/// summary sheet.
-///
-/// One variant per panel rather than one screen with an inner kind — unlike the player's four
-/// overlays, which share a key ladder and a transport rule. These share nothing: two are read-only
-/// `Style::Alert` sheets (one with a page cursor, one with none), one is a `Style::Compact` menu
-/// anchored to a button whose OK navigates.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ContentPanel {
-    /// *Also available* (`screens::alt_sources`), anchored to the drawn rect of the pill that
-    /// opened it — bit-preserving, so a canonical argument holds it without float equality.
-    AltSources { anchor: [u32; 4] },
-    /// *Track information* (`screens::tracks_panel`), opened at 1-based `page`. Every interactive
-    /// opening passes 1; `/tmp/plxnative-tracks=<n>` is the only caller that does not, and it is
-    /// what makes a headless capture of page 2 possible at all.
-    Tracks { page: i32 },
-    /// *About* (`screens::about_panel`), the footer card's synopsis read in full. It carries
-    /// nothing: the sheet has no cursor to open at and describes the item that landed.
-    About,
-    /// The **Person** page's biography, in full (`screens::person_bio`) — the alert behind that
-    /// page's `MORE` mark. It carries nothing and takes no subject: the sheet is about the person
-    /// the person store holds, and this page has no `(sid, rk)` to give.
-    Bio,
-    /// The **Collection** page's summary, in full — the alert behind that page's `MORE` mark. The
-    /// About sheet (`screens::about_panel`) reading the collection store's current collection; it
-    /// carries nothing, for `Bio`'s reason.
-    CollectionAbout,
-}
-
-impl ContentPanel {
-    /// **The surface a panel IS**: its container style and its argument, which is the whole of what
-    /// presenting one needs beyond the host the loop already holds.
-    ///
-    /// Here rather than in `app/bridge::open_content_panel`, which is where the same `match` stood
-    /// until the About panel joined it. The reason is §0's criterion 5 and nothing subtler: with the
-    /// map in the bridge, adding a page-owned panel edited `app/bridge.rs` — so the "and nothing
-    /// else" the criterion claims would have been false on its first proof, for a reason that has
-    /// nothing to do with the loop. The bridge still owns the PRESENTING (the duplicate check, the
-    /// `next_style` handshake, the `NavOp`); this owns which surface the page asked for.
-    ///
-    /// `subject` is the ITEM the host page is standing on, and it is an `Option` because a content
-    /// page need not have one: the Person page is about a person, so it has no `(sid, rk)` to give
-    /// and every panel that needs one is refused rather than presented against a neighbour's item.
-    /// `None` back means "this page cannot offer that panel", which the caller drops.
-    pub fn surface(
-        self,
-        host: plx_machine::machine::InstanceId,
-        subject: Option<(plx_plex::plex::ServerId, &str)>,
-    ) -> Option<(plx_ui::containers::modal::Style, AppArg)> {
-        use plx_ui::containers::modal::Style;
-        Some(match self {
-            Self::AltSources { anchor } => {
-                let (sid, rk) = subject?;
-                (
-                    Style::Compact,
-                    AppArg::AltSources(crate::alt_sources::AltSourcesArg {
-                        host,
-                        sid,
-                        rk: rk.to_string(),
-                        anchor,
-                    }),
-                )
-            }
-            Self::Tracks { page } => (
-                Style::Alert,
-                AppArg::TracksPanel(crate::tracks_panel::TracksPanelArg { page }),
-            ),
-            Self::About => (Style::Alert, AppArg::AboutPanel),
-            Self::Bio => (Style::Alert, AppArg::PersonBio),
-            Self::CollectionAbout => (Style::Alert, AppArg::CollectionAbout),
-        })
-    }
-}
-
-/// **The play a content page decided on, for the loop to start** (spec §2.2, phase 9).
-///
-/// `route::request_play` takes the playback session's `&mut`, and an owned screen is only ever
-/// shown the frame's publication (`AppViews::session`) — so Detail names the item and the loop
-/// performs the request, exactly as Home's [`HomeReq::Play`] already did. The loop also owns what
-/// happens when the request is REFUSED (a PMS/native route transition still owns the reducer):
-/// the page's navigation is skipped, which is what the page's own discarded `started` bool used
-/// to decide.
-pub enum PlayIntent {
-    /// An item off this page's own metadata.
-    Item {
-        sid: plx_plex::plex::ServerId,
-        rk: String,
-        part: String,
-        vcodec: String,
-        acodec: String,
-        title: String,
-        context: String,
-    },
-    /// The alternative source the page had selected (`route::request_play_movie`). Owned rather
-    /// than a `&'static` catalog borrow: it is held inside `PageAction`/`AppFx` across a frame
-    /// boundary, and once Detail's `selected` becomes an owned per-page snapshot (rather than a
-    /// process-wide catalog read) there is no `'static` row left to borrow.
-    Movie(plx_data::pms::PmsMovie),
 }
 
 pub trait ContentLike: AppLike<Memory = PageMemory> {}
 impl<H: AppLike<Memory = PageMemory>> ContentLike for H {}
 
-/// A host publishing the Person model borrowed from its concrete store owner for this frame.
-pub trait PersonLike: AppLike + Sized {
-    fn person<'a>(cx: &Cx<'a, Self>) -> plx_data::person::PersonView<'a>;
-}
-
-pub trait CollectionLike: AppLike + Sized {
-    fn collection<'a>(cx: &Cx<'a, Self>) -> plx_data::collection::CollectionView<'a>;
-}
-
-/// A host publishing the Metadata layer's read surface borrowed from its concrete store owner
-/// for this frame — the same shape [`PersonLike`] gives Person, for a screen generic over `H`
-/// that needs `plx_data::metadata::MetadataView` rather than the app-concrete `Bridge`.
+/// A host publishing the metadata read surface for this frame (the playing item's title, chapters
+/// and streams).
 pub trait MetadataLike: AppLike + Sized {
     fn metadata<'a>(cx: &Cx<'a, Self>) -> plx_data::metadata::MetadataView<'a>;
     /// The subtitle search the player's Search page reads. PROVIDED, defaulting to `None` — a host
-    /// that offers no search shows no Search row — so the many test hosts that only need metadata
-    /// owe nothing; the production host overrides it with the store's view.
+    /// that offers no search shows no Search row.
     fn subtitle_search<'a>(_cx: &Cx<'a, Self>) -> Option<plx_data::subsearch::SubSearchView<'a>> {
         None
     }
 }
 
-/// A host that publishes Home's retained catalog view. The view is borrowed from the rig-owned
-/// snapshot and is therefore valid for the complete step/draw query without per-frame cloning.
-pub trait HomeLike: AppLike<Memory = PageMemory> + Sized {
-    fn hubs<'a>(cx: &Cx<'a, Self>) -> plx_data::pms::HubsView<'a>;
-}
-
-/// A host that publishes this frame's playback session (spec §2.3). The player's owned screens
-/// read the Player machine's decisions through it; a change is asked for as an effect
-/// (`AppFx::Player`, `ContentReq::Play`), because the publication is a copy and there is no `&mut`
-/// on this path by construction.
+/// A host that publishes this frame's playback session. The player's owned screens read the
+/// Player machine's decisions through it; a change is asked for as an effect (`AppFx::Player`),
+/// because the publication is a copy and there is no `&mut` on this path by construction.
 pub trait PlayerLike: AppLike<Memory = PageMemory> + Sized {
     fn session<'a>(cx: &Cx<'a, Self>) -> &'a plx_media::route::PlaybackSession;
 }
 
-pub trait SearchLike: AppLike<Memory = PageMemory> + Sized {
-    fn search<'a>(cx: &Cx<'a, Self>) -> plx_data::search::view::SearchView<'a>;
-}
+/// The application's messages.
+pub enum AppMsg {}
 
-/// A host that publishes all three retained Library views captured at the frame split.
-pub trait LibraryLike: AppLike<Memory = PageMemory> + Sized {
-    fn listing<'a>(cx: &Cx<'a, Self>) -> plx_data::stores::browse::ListingView<'a>;
-    fn directory<'a>(cx: &Cx<'a, Self>) -> plx_data::stores::browse::DirectoryView<'a>;
-    fn section_hubs<'a>(cx: &Cx<'a, Self>) -> plx_data::stores::browse::HubsView<'a>;
-}
-
-/// A host carrying the retained Browse directory needed by Chrome and the Settings family.
-/// Full Library hosts implement this automatically; the nested Settings host carries only this
-/// one publication so its Onboard child never falls back to the compatibility selector.
-pub trait DirectoryLike: AppLike + Sized {
-    fn directory<'a>(cx: &Cx<'a, Self>) -> plx_data::stores::browse::DirectoryView<'a>;
-}
-
-impl<H: LibraryLike> DirectoryLike for H {
-    fn directory<'a>(cx: &Cx<'a, Self>) -> plx_data::stores::browse::DirectoryView<'a> {
-        LibraryLike::directory(cx)
-    }
-}
-
-/// Session's immutable frame publication; playback retains its separate `session` view.
-pub trait AuthLike: AppLike + Sized {
-    fn auth<'a>(cx: &Cx<'a, Self>) -> plx_session::auth::SessionRead<'a>;
-}
-
-/// An item's server reconciliation obligation. Detail owns this independently of its cancellable
-/// focus/episode restore intent; visibility retries a superseded Requested obligation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DetailRefreshPhase {
-    None,
-    Deferred,
-    Requested,
-}
-
-/// The application's messages (spec §3.1).
-pub enum AppMsg {
-    Session(plx_session::auth::owner::SessionEvent),
-    Consent(ConsentCmd),
-    RestartReply { correlation: u32, accepted: bool },
-    SelectionReply { correlation: u32, accepted: bool, flow_epoch: u64 },
-    BackReply { correlation: u32, resumed: bool },
-    Store(StoreCmd),
-    StoreWork(StoreWork),
-    HubsResult(plx_data::stores::hubs::HubsResult),
-    Home(HomeCmd),
-    Library(LibraryCmd),
-    LibraryEdit { target: plx_data::stores::browse::SectionAddress, edit: plx_data::stores::browse::QueryEdit },
-    LibrarySelect(plx_data::stores::browse::SectionAddress),
-    DetailRestore {
-        spot: plx_data::metadata::Spot,
-        episode: Option<String>,
-        /// Deferred retains the obligation while covered; Requested tells the visible Detail to
-        /// synchronously start the request before publishing that phase as logical state.
-        refresh: DetailRefreshPhase,
-    },
-    /// The *Also available* surface committed a row: open that copy's own page. The SURFACE names
-    /// the destination and the PAGE navigates, which is `LibraryMenu`'s shape (`LibrarySelect`) and
-    /// what keeps "what a press means on the Detail page" in one place instead of two.
-    AltSourceOpen(ContentArg),
-}
-
-/// What the consent machine is told (§2.3): a person's answer to both questions at once.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ConsentCmd {
-    Record { errors: bool, usage: bool },
-}
-
-/// What an owned screen asks the LEGACY LOOP to do, because the owner of that decision is not on
-/// the dispatcher yet. Each names the phase that retires it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum LoopReq {
-    /// BACK at a root the platform owns (Home, the FIRST consent question): hand the screen to
-    /// the television. Retires with the Navigation root rule (phase 12).
-    BackAtRoot,
-    /// Privacy & data → Delete all local data, confirmed: erase, sign out, land on sign-in.
-    /// Retires when Session owns the sign-in (phase 6).
-    DeleteAllLocalData,
-    /// The ordered Session erase and local-file sweep completed; leave the old account's UI.
-    LocalDataErased,
-    /// The first-run Favourites screen (`Route::Onboard`) finished: enter Home. Retires with the
-    /// route enum (phase 12, after 6 puts Login/Profiles/Onboard on one stack).
-    OnboardDone,
-    /// The first-run Favourites screen's BACK: the profile picker. Same retirement.
-    OnboardBack,
-    /// **Phase 10, the profile menu's five rows.** `screens::account_menu` is a surface on the
-    /// shared `ModalStack` and owns its own rows, cursor and dismissal — but not one of the five
-    /// things a row DOES. Three call `plx_session::auth` and then flip `app.route` (a screen may not
-    /// name `Route` at all, §2.1); one presents another surface, whose `Style` is the
-    /// application's to choose and not a screen's (`Navigation::next_style`); and one reaches
-    /// `crate::lab`. Each is therefore a request the loop performs, exactly as `LibraryReq` and
-    /// `PlayerReq` are for their screens. They retire when Session owns the sign-in and the
-    /// registry owns the style (phases 6/12's remainder).
-    ///
-    /// Every one of them ALSO gets a `Fx::Nav(NavOp::Dismiss)` from the screen in the same drain,
-    /// which is the legacy `on_ok`'s own "close, then return the action" in the order a container
-    /// can express it.
-    AccountChangeProfile,
-    AccountSignIn,
-    AccountSignOut,
-    /// PRESENTS the Settings surface over the same page, so the host route does not move.
-    /// Reachable signed OUT as well: a person who cannot sign in has still received a copy of this
-    /// software, and LG requires the privacy notice to be readable in the app rather than only on
-    /// the store listing.
-    AccountSettings,
-    /// Lab builds only, and it changes no route: the tester stays where they were and the toast
-    /// says what happened.
-    AccountSendDiagnostics,
-}
-
-/// Any host that carries this bundle. The screens under `screens/` are written against it, so the
-/// bridge's `AppHost` and the Settings surface's inner host both mount them unchanged.
+/// Any host that carries this bundle.
 pub trait AppLike: Host<Elem = u32, Fx = AppFx, Msg = AppMsg> {}
 impl<H: Host<Elem = u32, Fx = AppFx, Msg = AppMsg>> AppLike for H {}
 
-/// The heartbeat words an owned screen can name (§15.3's word table) — the same alphabet
-/// `app::route_word`/`overlay_word` print, so the fps tier's `overlay=` selection cannot drift
-/// from the screen that owns the frame.
-///
-/// **`LOGIN`/`PROFILES` are phase 6's addition, and they are `route=` words, not `overlay=` ones**
-/// — the QR sign-in and the who's-watching picker are app-stack PAGES (`AppArg::Login` /
-/// `AppArg::Profiles`, flat variants since phase 12 folded the page alphabet in here), never a
-/// surface on the `ModalStack`, exactly as first-run Favourites was in 5b. They MUST stay the
-/// literal strings `"login"`/`"profiles"`, and the reason changed shape in D1 rather than going
-/// away: `app::words::route_word` prints the same two words for the same two arguments, and the
-/// `debug_assert_eq!(word, route_word(route), …)` in `bridge::frame` that used to catch the two
-/// drifting is GONE — with one route authority there is nothing to compare a mirror against, so
-/// the heartbeat word simply IS the top screen's own `Screen::name`. The equality is now the
-/// tables' to keep, and `app::words::heartbeat_word_tests` derives both rather than transcribing
-/// either. `tests/run.py` selects fps samples by these words (`tests/manifest.json`'s `route`
-/// field), so a changed spelling silently disarms a scene rather than failing anything visible.
+/// The heartbeat words an owned screen can name: the top screen's own `Screen::name`.
 pub mod word {
-    pub const HOME: &str = "home";
-    /// The profile menu (`screens::account_menu`). An `overlay=` word since phase 10 — it was a
-    /// `route=` word (`Route::Account`) while the menu was a legacy popover with a route of its
-    /// own, and `tests/manifest.json`'s `home-acct-glass` scene was re-keyed with it.
-    pub const ACCOUNT: &str = "account";
-    /// The item context menu (`screens::item_menu`). An `overlay=` word since phase 10 — it was a
-    /// `route=` word (`Route::ItemMenu { over }`) while the menu was a legacy popover with a route
-    /// of its own, and `tests/manifest.json`'s `item-menu` scene was re-keyed with it. The
-    /// SPELLING is unchanged (`itemmenu`, one word, no separator), so a reader's grammar and every
-    /// tool that greps for it are unchanged too.
+    /// The item context menu (`screens::item_menu`).
     pub const ITEM_MENU: &str = "itemmenu";
-    pub const PERSON: &str = "person";
-    pub const COLLECTION: &str = "collection";
     /// The local library's folder page (`screens::local`).
     pub const LOCAL: &str = "local";
-    pub const SETTINGS: &str = "settings";
-    pub const PRIVACY: &str = "privacy";
-    pub const LEGAL: &str = "legal";
-    /// The Playback page, the Audio & Subtitles page and a preference's choice list
-    /// (`screens::preferences`): pages of the Settings family's inner stack, each its own
-    /// `overlay=` word so a scene can tell them from the root.
-    pub const PLAYBACK: &str = "playback";
-    pub const AUDIO: &str = "audio";
-    pub const PICKER: &str = "picker";
-    pub const CONSENT: &str = "consent";
-    pub const ONBOARD: &str = "onboard";
-    /// The QR sign-in (`screens::login::LoginScreen`). Same spelling as `app::words::route_word`'s
-    /// `AppArg::Login` arm — see this module's doc for why that equality is load-bearing.
-    pub const LOGIN: &str = "login";
-    /// The who's-watching picker (`screens::profiles::ProfilesScreen`). Same spelling as
-    /// `app::words::route_word`'s `AppArg::Profiles` arm — see this module's doc.
-    pub const PROFILES: &str = "profiles";
 }
 
 /// An element key for a route-family screen: table rows are their index; the action band's
@@ -1468,36 +381,6 @@ mod repeat_gate_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The card key table is bounded by twice the window plus 256: the oldest-interned keys go,
-    /// and a key the page names (focus, restore target, remembered key, a card in view) never does.
-    #[test]
-    fn card_keys_prune_to_twice_the_window_plus_256_and_never_drop_a_named_key() {
-        let mut keys = CardKeys::new(0x1000);
-        let sid = plx_plex::plex::ServerId::UNSET;
-        let elems: Vec<u32> = (0..2000).map(|i| keys.intern(sid, &format!("m{i}"), "test")).collect();
-        let (oldest, middle, newest) = (elems[0], elems[900], elems[1999]);
-        keys.prune(50, |elem| elem == oldest || elem == middle);
-        assert_eq!(keys.len(), 2 * 50 + 256, "pruned to the bound");
-        assert!(keys.get(oldest).is_some() && keys.get(middle).is_some(), "a named key stays even when it is the oldest");
-        assert!(keys.get(newest).is_some(), "the newest stay");
-        assert!(keys.get(elems[1]).is_none(), "the oldest unnamed go first");
-        let next = keys.next;
-        keys.prune(50, |_| false);
-        assert_eq!(keys.len(), 2 * 50 + 256, "already at the bound: nothing more goes");
-        assert_eq!(keys.next, next, "an element is not handed out again");
-        // under the bound nothing is dropped, named or not
-        let mut small = CardKeys::new(0x1000);
-        for i in 0..300 { small.intern(sid, &format!("s{i}"), "test"); }
-        small.prune(100, |_| false);
-        assert_eq!(small.len(), 300);
-        // named keys beyond the bound all stay (the bound is on the unnamed)
-        let mut named = CardKeys::new(0x1000);
-        let all: Vec<u32> = (0..400).map(|i| named.intern(sid, &format!("n{i}"), "test")).collect();
-        named.prune(0, |elem| all.contains(&elem));
-        assert_eq!(named.len(), 400);
-    }
-
     /// A row index stays itself under `band_elem`/`band_index` for the whole practical range of
     /// an action row (never more than two controls in this family today, but the round trip is
     /// asserted well past that so a widened band does not silently wrap into the alert's space).
@@ -1536,112 +419,19 @@ mod tests {
 // the page alphabet, the screen argument and the one mount match
 // ---------------------------------------------------------------------------------------------
 
-// (The nine-value page alphabet `Route`, plus `route_wears_tab_bar` and `page_word`, stood here — the PAGE alphabet, a second
-// enum whose nine values `AppArg::Legacy` wrapped. **Phase 12 folded it in rather than renaming
-// it** (spec §14: "`Route` survives only as its argument"; §15.2: the enum is gone): the seven
-// values that could actually mount are flat `AppArg` variants below, and the two that could not
-// (`Detail`, `Person`) are gone entirely, because a page with an ITEM IDENTITY has always mounted
-// from `AppArg::Content` and the `Legacy(Detail | Person)` arm of the mounter was a
-// `debug_assert!(false)` nothing constructed.
-//
-// What the fold removed, beyond one enum: the two-level `match` every chrome, identity and mount
-// question was written over; `route_wears_tab_bar`, whose only in-registry caller was
-// [`AppArg::chrome`] and which is that function's body now; `page_word`, a second nine-word table
-// beside `Screen::name`; and `AppArg::route()`, the "which of the two spellings is this page"
-// resolution that every reader in `app/` had to perform first.)
-
 /// **A screen argument: everything the container needs to mount one screen, and nothing else.**
-///
-/// Three families in one enum, distinguished by nothing but which variant it is: the seven flat
-/// PAGES the application stack can hold, the CONTENT pages that carry an item identity, and the
-/// surfaces a `ModalStack` presents. `AppArg::Legacy(Route)` and the nine-value page alphabet it
-/// wrapped were folded in here in phase 12 (§15.2: the enum is gone) — see the note above.
-///
-/// **Both owned variants carry the page their inner stack is ROOTED at**, which is there for the
-/// dev boot targets and for nothing else. `/tmp/plxnative-settings=privacy` has to put a headless
-/// run on a page that is normally two presses inside the surface, and the loop cannot press them:
-/// the Settings root's row indices are `RootPage`'s private business (the Favourites row is absent
-/// signed out), so a loop that reached the child by delivering `Activate(<row>)` would be encoding
-/// a table it does not own and would rot the first time a row is added. Rooting the stack at the
-/// target instead needs nothing from the page. The one thing it costs is that BACK at a
-/// dev-booted child DISMISSES the surface rather than revealing the root — a difference that
-/// exists only under a trigger, and that the fps scenes it serves (`legal-document`,
-/// `decision-alert`, `settings-*`) never press.
 #[derive(Clone, PartialEq, Eq)]
 pub enum AppArg {
-    LibraryMenu(LibraryMenuArg),
-    /// The profile menu (`screens::account_menu`), presented on the shared `ModalStack` over
-    /// whichever bar-wearing page the chip was pressed on. **It carries nothing**, and that is the
-    /// whole of what `Route::Account { over: BarHost }` was for: the host is the page the surface
-    /// was presented over, which the container already knows and does not replace, so there is
-    /// neither a host to name nor a destination to "close back to".
-    AccountMenu,
-    /// The item context menu (`screens::item_menu`), presented on the shared `ModalStack` over
-    /// whichever card surface the hold happened on. **Everything the popover is about travels on
-    /// the argument** — the row, its server, the anchor it hangs beside, and the two bits an
-    /// action reads — which is what six `static mut`s and `Route::ItemMenu { over: MenuHost }`
-    /// were between them doing. There is no host to NAME because the host is the top page, which
-    /// the container already knows and does not replace.
+    /// The item context menu (`screens::item_menu`), presented on the shared `ModalStack` over the
+    /// library page whose card was held.
     ItemMenu(ItemMenuArg),
-    /// One of the player's panels, presented on the PLAYER PAGE's own `ModalStack` (§6.2).
-    /// It carries only which panel: the host is the page it is presented over, which the container
-    /// already knows, and the panel's own state is the instance's.
+    /// One of the player's panels, on the player page's own `ModalStack`.
     PlayerOverlay(crate::player::overlay::PlayerOverlayArg),
-    /// The Detail page's *Also available* picker (§6.2's page-owned panels). Its ANCHOR — the drawn
-    /// rect of the pill it hangs off — is on the argument, `LibraryMenuArg`'s shape and for the
-    /// same reason: the entry outlives any one frame's idea of where that pill was.
-    AltSources(crate::alt_sources::AltSourcesArg),
-    /// The Detail page's *Track information* sheet (§6.2's page-owned panels). It carries only the
-    /// 1-based PAGE the sheet opens at — a boot address like `Settings`'s root, not an identity —
-    /// because the sheet describes `metadata::current()` and the host it is presented over is the
-    /// container's own knowledge.
-    TracksPanel(crate::tracks_panel::TracksPanelArg),
-    /// The Detail page's *About* sheet (§6.2's page-owned panels). **It carries nothing**, like
-    /// [`Self::AccountMenu`] and for the same reason twice over: the sheet describes
-    /// `metadata::current()`, it has no cursor to be opened at, and the host it is presented over
-    /// is the container's own knowledge.
-    AboutPanel,
-    /// The Person page's biography sheet (§6.2's page-owned panels). **It carries nothing**, for
-    /// `AboutPanel`'s reasons: the sheet describes `person::current()`, it opens at the top of the
-    /// prose every time, and the host it is presented over is the container's own knowledge.
-    PersonBio,
-    /// The Collection page's summary sheet — the About panel over `collection::current()`. **It
-    /// carries nothing**, for `PersonBio`'s reasons.
-    CollectionAbout,
-    /// plex.tv sign-in (QR) — shown when there is no usable session.
-    Login,
-    /// The "who's watching" Plex Home picker.
-    Profiles,
-    /// **"Which libraries do you want?"** — the *Favorite libraries* screen, the third and last
-    /// onboarding page and the only one that is not about credentials: which of the granted
-    /// libraries this profile wants, asked of EVERY profile (the account holder and a managed one, on
-    /// one server or several) exactly once. Favourites fill Home's shelves, decide which type pills the top strip draws at
-    /// all, and scope the Library's own Sources picker; the grant is untouched, and Search still
-    /// reaches every granted library.
-    Onboard,
-    /// The Home shelves — the app's ROOT page, and the one page that is always there.
-    Home,
-    /// The Library browse grid. Its sort/filter/source panels are [`Self::LibraryMenu`] entries;
-    /// WHICH library is the `browse` store's business, not this argument's, which is why it
-    /// carries nothing (the grid is re-ENTERED, never re-queried).
-    Library,
-    /// The Search screen. A PEER of Home and the Library, not a stacking page: it is reached from
-    /// the strip's last pill and BACK from it returns to Home. What it OPENS stacks; it does not.
-    Search,
-    /// Playback. Its panels are NOT here — they are entries on the player page's own
-    /// `ModalStack` ([`Self::PlayerOverlay`]), and the container owns which one is up.
+    /// Playback. Its panels are entries on the player page's own `ModalStack`
+    /// ([`Self::PlayerOverlay`]), and the container owns which one is up.
     Player,
-    /// A page with an ITEM IDENTITY — a detail page, a person page, a filmography. Two of these
-    /// are two entries (`person → detail → person` is three), which is the whole reason the
-    /// identity rides on the argument instead of being a variant of a page alphabet.
-    Content(ContentArg),
-    /// The Settings family, rooted at this page (`SettingsPage::Root` for every real opening).
-    Settings(SettingsPage),
-    /// The first-run consent question, rooted at this stage byte (0 for every real opening;
-    /// `screens::consent`'s `STAGE_PRODUCT` for `/tmp/plxnative-consent=product`).
-    FirstRunConsent(u8),
-    /// One folder of the local library (the Linux build's home and folder browser). The path is
-    /// the folder's, empty for the library's top level.
+    /// One folder of the local library. The path is the folder's, empty for the library's top
+    /// level.
     Local(LocalArg),
 }
 
@@ -1651,47 +441,15 @@ pub struct LocalArg {
     pub path: String,
 }
 
-pub const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,Search,Player,Content:{Detail{sid:u32,rk:str},Person{sid:u32,key:str,guid:str,name:str,thumb:str},Filmography{sid:u32,key:str},Collection{sid:u32,rk:str,sec:i64,tag:i64,name:str}},Settings:SettingsPage{Root,Playback,AudioSubtitles,Favourites,Privacy,Legal,About,Document(u8),Preview(u8),ConsentStage(u8),Language,Contribute},FirstRunConsent(u8),LibraryMenu{host:u32,target:{epoch:u32,sid:u32,section:u64},kind:u32,anchor:[u32;4]},\
-     PlayerOverlay{Tracks(tab:i32),Info,Chapters,More(quality:bool)},\
-     AltSources{host:u32,sid:u32,rk:str,anchor:[u32;4]},\
-     TracksPanel{page:i32},AboutPanel,PersonBio,CollectionAbout,AccountMenu,\
-     ItemMenu{sid:u32,rk:str,kind:{Card{from_deck:bool,type:u32},Episode{mark:u32},Season{mark:u32}},\
-     host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4],loaded_episode:bool,from_home:bool}}";
+pub const ARG_SHAPE: &str = "AppArg{ItemMenu{path:str,mark:u32,host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4]},\
+     PlayerOverlay{Tracks(tab:i32),Info,Chapters,More(quality:bool)},Player,Local{path:str}}";
 
 impl LogicalState for AppArg {
     fn write(&self, c: &mut Canon) {
         match self {
-            Self::LibraryMenu(arg) => { c.u32(4); arg.write(c); }
             Self::PlayerOverlay(arg) => { c.u32(5); arg.write(c); }
-            Self::AltSources(arg) => { c.u32(6); arg.write(c); }
-            Self::TracksPanel(arg) => { c.u32(7); arg.write(c); }
-            // 10, after the two menus' 8 and 9: a canon tag is a surface's identity in a recorded
-            // state, so a retired or reallocated one would make two surfaces indistinguishable in
-            // a replay. They are allocated forward, exactly as `ScreenId` is.
-            Self::AboutPanel => { c.u32(10); }
-            Self::PersonBio => { c.u32(11); }
-            Self::CollectionAbout => { c.u32(12); }
-            // 8 and 9 rather than the 6/7 the profile and card menus carried on their own
-            // branch: this canon tag is the surface's identity in a recorded state, so two
-            // surfaces merged from two lanes may not share one. 4/5 are the library and player
-            // menus; 6/7 are the two Detail panels above.
-            Self::AccountMenu => { c.u32(8); }
             Self::ItemMenu(arg) => { c.u32(9); arg.write(c); }
-            // The seven PAGE variants keep the canon bytes `Legacy(Route)` wrote — a `0` tag and
-            // then the route's own — so a recording taken before the fold and one taken after are
-            // byte-comparable at every page frame. Only the SHAPE STRING moved, which is what the
-            // fixtures are re-recorded for.
-            Self::Login => { c.u32(0).u32(0); }
-            Self::Profiles => { c.u32(0).u32(1); }
-            Self::Onboard => { c.u32(0).u32(2); }
-            Self::Home => { c.u32(0).u32(3); }
-            Self::Library => { c.u32(0).u32(6); }
-            Self::Search => { c.u32(0).u32(9); }
             Self::Player => { c.u32(0).u32(10); }
-            Self::Content(arg) => { c.u32(1); arg.write(c); }
-            Self::Settings(page) => { c.u32(2); page.write(c); }
-            Self::FirstRunConsent(stage) => { c.u32(3).u8(*stage); }
-            // 13: allocated forward, past the twelve tags above.
             Self::Local(arg) => { c.u32(13).str(&arg.path); }
         }
     }
@@ -1699,76 +457,17 @@ impl LogicalState for AppArg {
 }
 
 impl plx_ui::screen::ScreenArg for AppArg {
-    /// **Which pages draw the shared top tab bar** — `route_wears_tab_bar`'s body, in the one
-    /// place that ever asked it. Exhaustive on purpose: a new screen must not be able to answer
-    /// this by accident, because the page each surface stands on is what answers for the chrome
-    /// under it. Detail and Person have no bar, which is what makes every transition to or from
-    /// them fade the bar with the page.
     fn chrome(&self) -> Chrome {
-        match self {
-            AppArg::Home | AppArg::Library | AppArg::Search => Chrome::TabBar,
-            AppArg::Login
-            | AppArg::Profiles
-            | AppArg::Onboard
-            | AppArg::Player
-            | AppArg::Content(_)
-            | AppArg::Settings(_)
-            | AppArg::FirstRunConsent(_)
-            | AppArg::LibraryMenu(_)
-            | AppArg::AccountMenu
-            | AppArg::ItemMenu(_)
-            | AppArg::PlayerOverlay(_)
-            | AppArg::AltSources(_)
-            | AppArg::TracksPanel(_)
-            | AppArg::AboutPanel
-            | AppArg::PersonBio
-            | AppArg::CollectionAbout => Chrome::None,
-            AppArg::Local(_) => Chrome::None,
-        }
+        Chrome::None
     }
     fn id(&self) -> ScreenId {
         ScreenId(match self {
-            AppArg::LibraryMenu(_) => 15,
-            // One id for every player panel, exactly as `Settings(_)` collapses its root payload:
-            // they are kinds of ONE screen, and `same_instance` must never let the container
-            // think it is holding two of them.
+            // One id for every player panel: they are kinds of ONE screen, and `same_instance`
+            // must never let the container think it is holding two of them.
             AppArg::PlayerOverlay(_) => 16,
-            AppArg::AltSources(_) => 17,
-            AppArg::TracksPanel(_) => 18,
-            // 21, not a vacated id: allocated forward, so a retired identity is never handed to
-            // the screen that replaced it.
-            AppArg::AboutPanel => 21,
-            AppArg::PersonBio => 22,
-            AppArg::CollectionAbout => 24,
-            // 19 and 20, not the 5 and 6 `Route::Account`/`Route::ItemMenu` vacated when this
-            // phase deleted them, and not the 17/18 these two carried on their own branch: ids
-            // are allocated forward here so a retired identity is never handed to the screen
-            // that replaced it, and so two lanes' surfaces cannot collide on one.
-            AppArg::AccountMenu => 19,
-            // One id for all three entry points (a card, an episode still, a season tab): they are
-            // three row sets of ONE screen, and `same_instance` must never let the container think
-            // it is holding two of them.
             AppArg::ItemMenu(_) => 20,
-            // The seven page ids are the ones `Legacy(Route)` computed, unchanged: an id is a
-            // screen's identity in a recorded state and in `same_instance`, so they are allocated
-            // forward and a fold may not renumber them. 5 and 6 are vacant (the two popover routes
-            // phase 10 deleted); 8 and 9 belong to Detail and Person, which mount from `Content`.
-            AppArg::Login => 1,
-            AppArg::Profiles => 2,
-            AppArg::Onboard => 3,
-            AppArg::Home => 4,
-            AppArg::Library => 7,
-            AppArg::Search => 10,
             AppArg::Player => 11,
-            // The ROOT payload is a boot address, not an identity: one Settings surface and one
-            // consent question, whichever page each happens to have been rooted at.
-            AppArg::Settings(_) => 12,
-            AppArg::FirstRunConsent(_) => 13,
-            AppArg::Content(ContentArg::Detail { .. }) => 8,
-            AppArg::Content(ContentArg::Person { .. }) => 9,
-            AppArg::Content(ContentArg::Filmography { .. }) => 14,
-            AppArg::Content(ContentArg::Collection(_)) => 23,
-            // 25: allocated forward. Every folder page is one SCREEN; which folder is its argument.
+            // Every folder page is one SCREEN; which folder is its argument.
             AppArg::Local(_) => 25,
         })
     }
@@ -1776,98 +475,48 @@ impl plx_ui::screen::ScreenArg for AppArg {
         None
     }
     fn same_instance(&self, other: &Self) -> bool {
-        if let (Self::Content(a), Self::Content(b)) = (self, other) {
-            return a.same_item(b);
-        }
-        if matches!(self, Self::Content(_)) || matches!(other, Self::Content(_)) {
-            return false;
-        }
-        // **A player overlay's identity is its KIND, never the playback under it** (§16.9): the
-        // panel is a surface on the player's own stack, so the page beneath it is not part of what
-        // "the same instance" means here — and, the other way round, the PLAYER's own argument
-        // carries no overlay at all any more, which is what makes a BACK out of the track menu
-        // dismiss a surface instead of remounting the page (the reuse-vs-remount risk this rule
-        // exists for).
         if let (Self::Local(a), Self::Local(b)) = (self, other) {
             return a == b;
         }
+        // **A player overlay's identity is its KIND, never the playback under it**: the panel is
+        // a surface on the player's own stack, so a BACK out of the track menu dismisses a surface
+        // instead of remounting the page.
         if let (Self::PlayerOverlay(a), Self::PlayerOverlay(b)) = (self, other) {
             return a.kind.slot() == b.kind.slot();
         }
-        // …and the same reason `id` collapses the payload: `Settings(Root)` and
-        // `Settings(Legal)` are the same SCREEN, so a container must never be able to think it
-        // is holding two of them.
         <Self as plx_ui::screen::ScreenArg>::id(self) == <Self as plx_ui::screen::ScreenArg>::id(other)
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// the mounter: the one match
-// ---------------------------------------------------------------------------------------------
-
-/// **What a detail page that is about to mount should be RESTORED to** — the one payload the
-/// container's own `ReturnState` cannot supply, because the page has never been on this stack.
-///
-/// Its two users are the `/tmp/plxnative-detail` boot trigger (a hard cut onto a page nobody
-/// navigated from) and a show opened ON A PARTICULAR SEASON, which is the mount a page argument
-/// cannot express: an argument names a PAGE, and a season is a tab inside one. It was a
-/// `ui::trail::Node` until phase 12, i.e. a whole history entry used as a carrier for its `Spot`.
-#[derive(Clone)]
-pub struct DetailSeed {
-    pub sid: plx_plex::plex::ServerId,
-    pub rk: String,
-    pub spot: plx_data::metadata::Spot,
-}
-
 #[derive(Default)]
 pub struct AppMounter {
-    pub seed: Option<DetailSeed>,
     /// **Where the NEXT player instance returns to** — the entry that was on top when the push was
-    /// asked for, stamped at the press and consumed by the mount exactly as `player_hud_ms` is.
-    ///
-    /// A seed rather than something the mounter derives, for the reason the auto-advance rule
-    /// needs: `play_up_next` starts a new item while the player is ALREADY mounted, so nothing is
-    /// seeded and nothing is consumed — the origin the user actually came from survives however
-    /// many episodes the chain runs for. That was `Origin::Unchanged` and a `set_origin` call;
-    /// it is now the absence of a write.
+    /// asked for, stamped at the press and consumed by the mount.
     pub player_origin: Option<crate::player::Origin>,
-    pub library_kind: Option<plx_data::stores::browse::SecKind>,
-    /// How long the NEXT player instance pins its transport for, in ms — `HUD_LINGER_MS` for an
-    /// ordinary start and `HUD_HEADLESS_MS` for a capture run. It is a seed rather than a constant
-    /// because `start_playback` is what knows which, and because the deadline must be stamped from
-    /// the instant the page MOUNTS: callers used to pass `last_input + HUD_LINGER_MS`, a timestamp
-    /// taken before a blocking resolve, so a load longer than the 4.5 s linger expired the HUD
-    /// before it was ever drawn and the user got a blank screen instead of a transport.
+    /// How long the NEXT player instance pins its transport for, in ms. A seed because the
+    /// deadline must be stamped from the instant the page MOUNTS, not from the keypress that asked
+    /// for the playback: a slow open would otherwise expire the HUD before it was ever drawn.
     pub player_hud_ms: Option<u32>,
 }
 
-/// **The one `mount` match** (spec §2.1) — the whole of what "add a screen" costs, in the module
-/// that owns the alphabet it matches on.
-///
-/// **Generic over the host rather than written against `app::bridge::AppHost`**, for the layer
-/// rule's sake and for one practical consequence of it: the screens are generic already, the
-/// views they need arrive through the `*Like` accessors above, and nothing in this match wants a
-/// concrete application type. So the mounter names no `app::` module and the bridge instantiates
-/// it for its own host exactly as the dispatcher instantiates everything else.
+/// **The one `mount` match** — generic over the host, so the mounter names no application type.
 impl<H> Mounter<H> for AppMounter
 where
-    H: plx_machine::machine::Host<Arg = AppArg> + HomeLike + LibraryLike + SearchLike + PlayerLike + AuthLike + PersonLike + CollectionLike + MetadataLike,
+    H: plx_machine::machine::Host<Arg = AppArg> + PlayerLike + MetadataLike,
 {
     fn mount(
         &mut self,
         id: InstanceId,
         arg: &AppArg,
-        ret: &ReturnState<u32, PageMemory>,
+        _ret: &ReturnState<u32, PageMemory>,
         cx: &Cx<'_, H>,
-        fx: &mut Effects<'_, H>,
+        _fx: &mut Effects<'_, H>,
     ) -> Box<dyn Screen<H>> {
         let entry = match cx.owner {
             plx_machine::machine::InputOwner::Entry(e) => e,
             _ => EntryId(0),
         };
         match arg {
-            AppArg::LibraryMenu(arg) => Box::new(crate::library::menu::LibraryMenu::new(entry, arg.clone())),
-            AppArg::AccountMenu => Box::new(crate::account_menu::AccountMenuScreen::new(entry)),
             AppArg::ItemMenu(arg) => Box::new(crate::item_menu::ItemMenuScreen::new(entry, arg.clone())),
             AppArg::PlayerOverlay(arg) => Box::new(
                 crate::player::overlay::PlayerOverlayScreen::new_with(
@@ -1875,400 +524,65 @@ where
                     // The search asks the playing item's SERVER; a local file has none.
                     H::subtitle_search(cx).is_some() && !plx_media::localfile::is_file_url(&plx_media::route::url(H::session(cx)))),
             ),
-            AppArg::AltSources(arg) => Box::new(
-                crate::alt_sources::AltSourcesScreen::new(entry, arg.clone(), H::metadata(cx)),
-            ),
-            AppArg::TracksPanel(arg) => Box::new(
-                crate::tracks_panel::TracksPanelScreen::new(entry, *arg),
-            ),
-            AppArg::AboutPanel => Box::new(
-                crate::about_panel::AboutPanelScreen::new(entry),
-            ),
-            AppArg::PersonBio => Box::new(
-                crate::person_bio::PersonBioScreen::new(entry),
-            ),
-            AppArg::CollectionAbout => Box::new(
-                crate::about_panel::AboutPanelScreen::collection(entry),
-            ),
-            AppArg::Content(ContentArg::Detail { sid, rk }) => {
-                let mut page = crate::detail::DetailScreen::new(entry, *sid, rk.clone(), H::hubs(cx));
-                // No `RequestDetail` push here: `DetailScreen`'s own `Enter(Fresh)` handler (fired
-                // this same frame, right after mount) already decides whether the freshly mounted
-                // page needs a fetch (`refresh == None && request_status != Some(true)` — a fresh
-                // open always refetches unless one is already in flight) — a mount-time push here
-                // raced that decision every time, because the admission it queued had not yet been
-                // drained when Enter read `detail_request_status`, so Enter always saw no fetch in
-                // flight and queued a second one. Mount and Enter now have exactly one owner of the
-                // request decision.
-                if let PageMemory::Detail(spot) = &ret.memory {
-                    page.restore_memory(spot, H::metadata(cx));
-                } else if let Some(seed) = self.seed.take() {
-                    if seed.sid == *sid && seed.rk == *rk { page.restore(&seed.spot, H::metadata(cx)); }
-                }
-                Box::new(page)
-            }
-            AppArg::Content(ContentArg::Person { sid, key, guid, name, thumb }) => {
-                let mut page = crate::person::PersonScreen::new(entry, *sid, key.clone(), guid.clone(), name.clone(), thumb.clone());
-                if let PageMemory::Person(memory) = &ret.memory { page.restore(memory); }
-                Box::new(page)
-            }
-            AppArg::Content(ContentArg::Filmography { sid, key }) => {
-                let mut page = crate::filmography::FilmographyScreen::new(
-                    entry, *sid, key.clone(), H::person(cx));
-                if let PageMemory::Filmography(memory) = &ret.memory { page.restore(memory, cx); }
-                Box::new(page)
-            }
-            AppArg::Content(ContentArg::Collection(id)) => {
-                let mut page = crate::collection::CollectionScreen::new(entry, id.clone());
-                if let PageMemory::Collection(memory) = &ret.memory { page.restore(memory); }
-                Box::new(page)
-            }
-            // the first-run Favourites screen is OWNED (§14: "retirement 5b Onboard"); the route
-            // word stays the loop's while the loop still names the page
-            AppArg::Onboard => Box::new(crate::onboard::OnboardScreen::first_run(
-                entry, H::directory(cx), H::hubs(cx))),
-            // Phase 6: the QR sign-in and the who's-watching picker are OWNED screens too, mounted
-            // exactly the same way — the route word is still the loop's (`route_word`), and
-            // naming the route is the whole of (re)mounting either: a fresh instance is built
-            // every time `bridge::frame` follows a `Replace` onto one of them, which is what lets
-            // every remaining `app::input`/`app::run` call site drop its own `enter()`-equivalent
-            // reset (see `input::enter_profiles_from_onboard`'s doc for the same argument made
-            // about `screens::onboard` in 5b).
-            AppArg::Login => Box::new(crate::login::LoginScreen::new(entry, H::auth(cx))),
-            AppArg::Profiles => {
-                let screen = crate::profiles::ProfilesScreen::new(entry, H::auth(cx));
-                fx.push(plx_machine::machine::Fx::App(AppFx::Session(
-                    plx_session::auth::SessionCmd::DismissPinError,
-                )));
-                Box::new(screen)
-            }
-            AppArg::Home => {
-                let mut page = crate::home::HomeScreen::new(entry, id);
-                if let PageMemory::Home(memory) = &ret.memory { page.restore(memory); }
-                Box::new(page)
-            }
-            AppArg::Library => {
-                let kind = self.library_kind.or_else(|| H::directory(cx).current().map(|i| H::directory(cx).sections()[i].kind))
-                    .unwrap_or(plx_data::stores::browse::SecKind::Movie);
-                let mut page = crate::library::LibraryScreen::new(entry, id, kind);
-                if let PageMemory::Library(memory) = &ret.memory { page.restore(memory); }
-                Box::new(page)
-            }
-            AppArg::Search => {
-                let mut page = crate::search::SearchScreen::new(entry, id);
-                if let PageMemory::Search(memory) = &ret.memory { page.restore(memory); }
-                Box::new(page)
-            }
-            // Phase 9: the player is an OWNED screen — the instance that holds the HUD, the scrub
-            // gesture, the held-key timer, the control row's springs and the Up Next countdown,
-            // and that answers `RenderStrategy::VideoPlane`. Its transport is pinned from the
-            // instant it mounts (`AppMounter::player_hud_ms`), never from the keypress that asked
-            // for the playback.
             AppArg::Player => {
                 let mut page = crate::player::PlayerScreen::new(entry);
-                // **Where BACK, Stop and EOS land** (§5.1). Captured at the MOUNT, from the page
-                // that was on top when the push was asked for — never read live, because an
-                // overlay opening on this page's own stack changes the input owner and must not
-                // be mistaken for a new origin.
+                // **Where BACK, Stop and EOS land.** Captured at the MOUNT, from the page that was
+                // on top when the push was asked for — never read live, because an overlay
+                // opening on this page's own stack changes the input owner and must not be
+                // mistaken for a new origin.
                 page.origin = self.player_origin.take();
                 page.hud.extend(cx.tick.ms, self.player_hud_ms.take().unwrap_or(crate::player::input::HUD_LINGER_MS));
                 page.publish();
                 Box::new(page)
             }
-            // **The `Legacy(Detail | Person)` arm stood here** — a `debug_assert!(false)` and a
-            // fall back to Home for two `Route` values nothing could construct, because a page
-            // with an ITEM IDENTITY has no room for one in a bare page name and mounts from
-            // `AppArg::Content`. Phase 12's fold deleted the two values with the enum, so the
-            // match is exhaustive over pages that can really mount and there is no unreachable
-            // arm left to keep honest.
-            AppArg::Settings(root) => {
-                Box::new(RouteSurface::new(entry, id, Family::Settings, *root, H::hubs(cx)))
-            }
             AppArg::Local(arg) => Box::new(crate::local::LocalScreen::new(entry, id, arg)),
-            AppArg::FirstRunConsent(stage) => Box::new(RouteSurface::new(
-                entry,
-                id,
-                Family::FirstRunConsent,
-                SettingsPage::ConsentStage(*stage),
-                H::hubs(cx),
-            )),
         }
     }
 }
 
 /// **Every `AppArg` a SURFACE can be presented with, one per variant** — the domain the heartbeat's
-/// ` overlay=` alphabet is derived over (`app::overlay_words`, restructure phase 10 item 4).
-///
-/// Exhaustive by the COMPILER, which is the whole reason it is written this way: the `match` below
-/// names every variant of the enum, so adding one and forgetting it here does not compile. A word
-/// that silently never joins the table is the failure this guards — `tests/manifest.json` selects
-/// fps samples by these strings, and a scene keyed on a word the app cannot print fails on the
-/// television as "only 0 post-warmup samples", which is indistinguishable from a real regression.
-///
-/// The PAGE variants (the seven flat pages and `Content`) are excluded on purpose and by name
-/// rather than by a wildcard: a page's word is `route=`, and it is the top page's own
-/// `Screen::name`. `Settings` and `FirstRunConsent` appear once each because their payload is
-/// a boot ADDRESS rather than an identity (`ScreenArg::id` collapses it the same way), and the
-/// family's inner stack is what decides its word at any moment — `RouteSurface::top_word`.
+/// ` overlay=` alphabet is derived over. Exhaustive by the compiler: the `match` names every
+/// variant, so adding one and forgetting it here does not compile.
 #[cfg(any(test, feature = "test-support"))]
 pub fn every_surface_arg() -> Vec<AppArg> {
     use crate::player::overlay::{OverlayKind, PlayerOverlayArg};
-    let mut args = vec![
-        AppArg::LibraryMenu(LibraryMenuArg {
-            host: plx_machine::machine::InstanceId(1),
-            target: plx_data::stores::browse::SectionAddress {
-                epoch: 0, sid: plx_plex::plex::ServerId::UNSET, section: 0,
-            },
-            kind: LibraryMenuKind::Sort,
-            anchor: [0; 4],
-        }),
-        AppArg::AccountMenu,
-        AppArg::ItemMenu(ItemMenuArg {
-            sid: plx_plex::plex::ServerId::UNSET,
-            rk: "1".into(),
-            kind: ItemMenuKind::Card { row: Box::new(plx_data::pms::PmsMovie::default()), from_deck: false },
-            host: EntryId(0),
-            focus: None,
-            anchor: [0; 4],
-            loaded_episode: false,
-            from_home: false,
-        }),
-        // The Detail page's own two panels. Presented over Home here like every other
-        // non-player surface: `Screen::name` is a constant of the screen, so the word it
-        // answers does not depend on which page it was opened from — and the alternative,
-        // standing a real Detail page up first, would make this derivation depend on the
-        // metadata store landing.
-        AppArg::AltSources(crate::alt_sources::AltSourcesArg {
-            host: plx_machine::machine::InstanceId(1),
-            sid: plx_plex::plex::ServerId::UNSET,
-            rk: "1".into(),
-            anchor: [0; 4],
-        }),
-        AppArg::TracksPanel(crate::tracks_panel::TracksPanelArg { page: 1 }),
-        AppArg::AboutPanel,
-        AppArg::PersonBio,
-        AppArg::CollectionAbout,
-    ];
+    let mut args = vec![AppArg::ItemMenu(ItemMenuArg {
+        path: "/media/a.mkv".into(),
+        mark: plx_ui::widgets::PosterMark::None,
+        host: EntryId(0),
+        focus: None,
+        anchor: [0; 4],
+    })];
     // The player's panels are ONE screen with several kinds, and each answers a different
     // `Screen::name` — so every kind is listed, not one representative.
     args.extend(OverlayKind::ALL.map(|kind| AppArg::PlayerOverlay(PlayerOverlayArg { kind })));
-    args.extend([AppArg::Settings(SettingsPage::Root), AppArg::FirstRunConsent(0)]);
     for a in &args {
         match a {
-            AppArg::LibraryMenu(_)
-            | AppArg::AccountMenu
-            | AppArg::ItemMenu(_)
-            | AppArg::AltSources(_)
-            | AppArg::TracksPanel(_)
-            | AppArg::AboutPanel
-            | AppArg::PersonBio
-            | AppArg::CollectionAbout
-            | AppArg::PlayerOverlay(_)
-            | AppArg::Settings(_)
-            | AppArg::FirstRunConsent(_) => {}
-            // The eight PAGE variants. Named rather than swept into a `_`, so the exhaustiveness
-            // above is real and a new SURFACE variant cannot land in a catch-all.
-            AppArg::Login
-            | AppArg::Profiles
-            | AppArg::Onboard
-            | AppArg::Home
-            | AppArg::Library
-            | AppArg::Search
-            | AppArg::Player
-            | AppArg::Content(_) => {
-                panic!("a page argument is not a surface: its word is `route=`")
-            }
-            AppArg::Local(_) => panic!("a page argument is not a surface: its word is `route=`"),
+            AppArg::ItemMenu(_) | AppArg::PlayerOverlay(_) => {}
+            AppArg::Player | AppArg::Local(_) => panic!("a page argument is not a surface: its word is `route=`"),
         }
     }
     args
 }
-// ---------------------------------------------------------------------------------------------
-// the shape inventory
-// ---------------------------------------------------------------------------------------------
 
-/// **Every SCREEN-side shape the recorder's `state_fp` hashes** (spec §5.4), as one array in the
-/// module a new screen is added to.
-///
-/// It was a hand-written list inside `app/recorder.rs::state_fp` until restructure phase 10, which
-/// made `app/recorder.rs` a file every new screen had to touch — and §0's criterion 5 is that a
-/// conversion touches its own `screens/<name>.rs`, this module, `dev/scenarios.rs` and
-/// `tests/manifest.json` and nothing else. The recorder still owns the shapes that are the LOOP's
-/// (the press machine, the input state, the frame line, the container tree, the return state, the
-/// PMS fixtures, the app's own init) and folds them in FRONT of these; what belongs to a screen is
-/// declared here, beside the argument that mounts it.
-///
-/// **Order is part of the hash** (`ui::rec::state_fp` writes the sequence), so an entry is
-/// APPENDED, or [`SCREEN_SHAPES_PIN`] moves for that reason alone.
+/// **Every SCREEN-side shape the recorder's `state_fp` hashes**, as one array in the module a new
+/// screen is added to. Order is part of the hash, so an entry is APPENDED.
 pub const SCREEN_SHAPES: &[&str] = &[
     ARG_SHAPE,
     PAGE_MEMORY_SHAPE,
-    crate::search::Memory::SHAPE,
-    crate::search::SHAPE,
-    crate::home::SHAPE,
-    crate::library::SHAPE[0],
-    crate::library::SHAPE[1],
-    crate::library::SHAPE[2],
-    crate::library::SHAPE[3],
-    crate::library::SHAPE[4],
-    crate::library::SHAPE[5],
-    crate::library::SHAPE[6],
-    crate::library::SHAPE[7],
-    crate::library::menu::SHAPE[0],
-    crate::library::menu::SHAPE[1],
-    crate::account_menu::SHAPE,
     crate::item_menu::SHAPE,
-    crate::detail::SHAPE,
-    crate::person::PersonScreen::SHAPE,
-    crate::filmography::FilmographyScreen::SHAPE,
-    crate::collection::CollectionScreen::SHAPE,
     crate::player::SHAPE,
     crate::player::overlay::SHAPE,
-    crate::alt_sources::SHAPE[0],
-    crate::alt_sources::SHAPE[1],
-    crate::tracks_panel::SHAPE,
-    crate::about_panel::SHAPE,
-    crate::person_bio::SHAPE,
-    "LocalizationSettingsV4{Root:{language:system|en|es|be},Language:{selected:system|en|es|be,focus:u32,busy:bool,failed:bool},Contribute:QrLink,LoginReportAlert:{send:bool,scroll_target_bits:u32},ConsentDisclosure:{scroll_target_bits:u32,scroll_owner:answer_band},ConsentDeleteDisclosure:{scroll_target_bits:u32},BandPart:MeasuredRowOrColumn}",
-    crate::preferences::SHAPE,
-    crate::preferences::PICKER_SHAPE,
-    "AppArg+Local{path:str}",
     crate::local::LocalScreen::SHAPE,
 ];
-
-/// The pin over [`SCREEN_SHAPES`] — bump it in the same edit that adds an entry, and say why.
-///
-/// A committed replay fixture recorded against a different value cannot be LOADED at all, which is
-/// the cost this exists to make visible rather than silent; `tools/plxnative-rec rerecord` is the
-/// verb (`tests/fixtures/replay/README.md`). The APP-side half is pinned separately in
-/// `app/recorder.rs`, over the shapes that are the loop's, so neither pin moves for the other's
-/// reason.
-///
-/// **Phase 10, the Detail page's *About* sheet** (0x844a_099e_5f0e_46d6 → this): `ARG_SHAPE` gains
-/// `AboutPanel`, `screens::about_panel::SHAPE` joins the array, and `screens::detail::SHAPE` loses
-/// `about_panel_open:u8` in the same commit — which panel is up is the CONTAINER's record now
-/// (`Navigation::write` writes every surface's argument, phase and instance hash) and a second
-/// copy on the page would be two producers of one fact. A schema transition rather than a
-/// rebaseline: a recording taken before it hashed the sheet as ONE BYTE on the page, so a replay
-/// could not tell an About sheet from a Track sheet, nor either from the page's own byte going
-/// stale.
-///
-/// **Phase 10, the Person page's biography sheet** (0x4e7f_3aa3_b666_b4b0 → this): `ARG_SHAPE`
-/// gains `PersonBio` and `screens::person_bio::SHAPE` joins the array. Its PAGE is in that shape
-/// deliberately — UP/DOWN there moves nothing else in the app, so a recording taken before this
-/// graded the sheet opening and closing with a hole between, and its page cursor was a `static mut`
-/// no `LogicalState` could see.
-///
-/// **Phase 12, the player's pointer drag** (0x2ba1_a831_5580_d0b1 → this): `screens::player::SHAPE`
-/// gains `scrub.drag:bool`. It is not a new piece of state — it was `app::input::Pointer::drag`, a
-/// field of the LOOP's pointer machine, which is precisely why a recording taken before this
-/// could not see it: the recorder hashes screens and the loop's own shapes, and a scrub gesture
-/// half-owned by each hashed as neither. PX-PLAYER moves the whole gesture onto `PlayerScreen`, so
-/// "a pointer is dragging the bar" is now a field of the page whose preview it moves, and a replay
-/// that diverges on it says so instead of showing a preview nobody recorded.
-///
-/// **Phase 12, the fold of `Route` into `AppArg`** (0xd7b2_a9a4_39f9_706f → this): `ARG_SHAPE`
-/// loses its nested `Legacy:Route{…}` and gains the seven page names flat. **No recorded byte
-/// moved** — `LogicalState::write` still emits the `0` tag and the same per-page tag it wrote as
-/// `Legacy(Route)`, deliberately, so a page frame hashes identically before and after. What
-/// changed is the SHAPE STRING, which is what a shape pin is for: the fixtures are re-recorded
-/// because their header names the shape, not because their frames disagree.
-///
-/// **Detail's independent ViewState refresh** (`0x8249_16e7_058b_2ada` → this): the phase moved
-/// out of the optional restore intent into the screen's own logical state. Directional input can
-/// cancel focus restoration while server reconciliation remains owed; the hash must distinguish
-/// those pages even with no restore intent, because Back can owe a replacement Metadata request.
-///
-/// `#[cfg(test)]` because the pin is an ASSERTION about the array above and never a value the
-/// app reads — `state_fp()` hashes [`SCREEN_SHAPES`] itself.
-///
-/// **Trailer PlayQueue / item menu** (0x3c0b_74a7_7a48_169c → 0xeb69_f6bf_105f_697f): `screens::item_menu::SHAPE`
-/// grows `Action` with `part`/`vcodec`/`acodec`/`title` so Play Trailer can carry the extra's
-/// play fields without a second PMS GET.
-///
-/// **Extras shelf** (0xeb69_f6bf_105f_697f → 0xb462_145d_9477_05de): detail `Spot.saved_col` grows a seventh
-/// identity-keyed slot for the extras section, and `DetailIdentity` grows `Extra`. The shape
-/// string moved, so recorded fixtures need `tools/plxnative-rec rerecord` before a scenario
-/// replay is trusted. Host unit tests do not replay them.
-///
-/// **0.7 forward-port merge** (0xb462_145d_9477_05de → 0x0e66_311c_e4f1_0769): this bump is not one
-/// feature's doing — it is the union of independently-landed changes each side made to state this
-/// array reaches, recombined by `git merge origin/main` into the integration branch. Nothing here
-/// was rebaselined by hand; the value is whatever `state_fp(SCREEN_SHAPES)` actually produces over
-/// the merged tree, taken from a failing run of `the_screen_shape_inventory_is_pinned` and copied in
-/// verbatim. Re-record fixtures the same way any other bump requires.
-///
-/// **Home modal cover state** (0x0e66_311c_e4f1_0769 → this): `screens::home::SHAPE` gains
-/// `covered:bool`. Compact surfaces keep their host page ticking, so the recorder must distinguish
-/// a Home whose hero timer is paused beneath a surface from the same visible state while active.
-///
-/// **Home hub identity keyed by listing key** (0x285a_3a99_d1e2_f068 → this): `HomeHubIdentity::Identifier`
-/// gains the provider-published listing key, keeping mixed-section hubs stable when their leading
-/// item changes libraries while still distinguishing section-specific rows. Recorded fixtures need
-/// `tools/plxnative-rec rerecord` like any other shape-pin bump before replay is trusted.
-///
-/// **Collection page** (`0x54b1_7d5f_d41a_2606` → this): `ARG_SHAPE` gains the Collection
-/// identity and the `CollectionAbout` summary sheet (the About panel over the collection store),
-/// `PAGE_MEMORY_SHAPE` gains its stable member interner, and `CollectionScreen::SHAPE`
-/// joins the inventory. Existing replay fixtures cannot name or restore this page and must be
-/// re-recorded before a collection transcript is trusted.
-///
-/// **Linked collection shelves** (`0x9f04_34b2_c8db_d655` → this): the Library's owned
-/// `Shelf` gains `heading`, the linked heading's group and element for a promoted
-/// `custom.collection.*` shelf. Re-record replay fixtures before trusting a Library transcript.
-///
-/// **Detail collection shelf** (`0x38a9_2955_0af8_72f6` → this): detail `Spot.saved_col` grows an
-/// eighth identity-keyed slot for the collection shelf, and `DetailIdentity` grows
-/// `CollectionMember`. Re-record replay fixtures like any other shape-pin bump.
-#[cfg(test)]
-// Playback/account preference pages add their arguments and logical state to the inventory.
-// The Library's TYPE transaction now names a listing type by code (`LibraryType{code:u32}`) since
-// movie sections list their collections too, and its layout reserves an empty answer's read-out
-// band (`LibraryLayout{…empty:bool…}`); the previous pin was 0x44f2_b3ed_2851_659a. Linked
-// collection shelves then moved it from 0x9f04_34b2_c8db_d655, and the detail collection shelf
-// from 0x38a9_2955_0af8_72f6 (see the doc paragraphs above), to 0xbb81_9301_0d21_bc8a on main.
-// Localization's Settings pages then join it as LocalizationSettingsV4, with the language
-// picker's busy state and the login report alert (0x677d_0944_ef25_3900 before the collections).
-// Settings form PR 3: the picker is its own page (`PickerV1`) and the field list is a FormTable
-// page (`PreferencesV3`); the previous pin was 0x668c_44dc_797c_5b0f.
-// Player sub-menus PR 2b: the track menu owns a page stack (`TrackPage`) and the overlay shape
-// carries it; the previous pin was 0x1a5c_e155_557b_e949.
-// Player sub-menus PR 5: More owns a page stack (`MorePage`, the Quality page) and the overlay shape
-// carries it too; the previous pin was 0x97ff_59c7_9aab_e35e.
-// Library shelf run (#412): the layout carries the run's height (`shelf_run:f32`) where it carried
-// twelve pitches (`pitches:[f32;12]`); the previous pin was 0x7063_dff7_775b_9075.
-// Collection adopts `cards::Stack` (cards-stack PR 5): its logical state gains the stack's motion
-// canon (`stack:Stack{scroll,target,sections}`); the previous pin was 0xac96_3316_a3a3_7bd4.
-// Person adopts `cards::Stack` (cards-stack PR 5): its logical state gains the stack's motion canon
-// (`stack:Stack{scroll,target,sections}`), the same as Collection's; the previous pin was
-// 0xbc1d_d51d_5b11_1273.
-// The Library grid projects keys for its wanted windows only (`LibraryGrid{total,windows,..}`
-// replaces a key per slot); the previous pin was 0xdb39_f424_a0be_5fd2.
-// About panel scroll: `AboutPanelScreen{}` gains the synopsis viewport's cursor and spring
-// (`page:usize,scroll:Spring{pos:f32,vel:f32}`, person_bio's shape); the previous pin was
-// 0x7435_d234_b769_60c2.
-#[allow(dead_code)]
-const SCREEN_SHAPES_PIN: u64 = 0x6a55_c53a_d931_3acf;
 
 #[cfg(test)]
 mod arg_tests {
     use super::*;
-    use plx_ui::screen::ScreenArg as _;
 
-    /// **The screen half of the recorder's shape pin** (§5.4), asserted here rather than in
-    /// `app/recorder.rs` because this is the array a new screen joins — so the bump lands in the
-    /// same file, and the same commit, as the entry that caused it.
-    // The local library's build appends its own shapes and records no replay fixtures; the pin
-    // is the television's and the simulator's.
-
-    /// **One `ScreenId` per surface VARIANT.** Ids are allocated forward here precisely so a
-    /// retired identity is never handed to the screen that replaced it, and `same_instance` is
-    /// derived from `id` — so two different variants sharing one would let the container hold a
-    /// mounted instance of the wrong screen and believe it was reusing the right one.
-    ///
-    /// Two arguments of ONE variant sharing an id is the DELIBERATE case (the four player panels,
-    /// the three item-menu entry points, both Settings roots), which is why the assertion is over
-    /// `mem::discriminant` rather than over equality of the arguments themselves.
+    /// **One `ScreenId` per surface VARIANT.** `same_instance` is derived from `id`, so two
+    /// different variants sharing one would let the container hold a mounted instance of the
+    /// wrong screen and believe it was reusing the right one.
     #[test]
     fn two_different_surface_variants_never_share_a_screen_id() {
         use plx_ui::screen::ScreenArg;
@@ -2276,119 +590,10 @@ mod arg_tests {
         for (i, a) in args.iter().enumerate() {
             for b in args.iter().skip(i + 1) {
                 if a.id() == b.id() {
-                    assert_eq!(
-                        std::mem::discriminant(a),
-                        std::mem::discriminant(b),
-                        "two different surfaces share ScreenId({})",
-                        a.id().0
-                    );
+                    assert_eq!(std::mem::discriminant(a), std::mem::discriminant(b),
+                        "two different surfaces share ScreenId({})", a.id().0);
                 }
             }
         }
-    }
-
-    // ---- the bar-wearing alphabet -------------------------------------------------------------
-
-    /// **The profile chip is offered on exactly the pages that wear the shared top bar.**
-    ///
-    /// This test used to be `the_profile_popover_stands_on_the_page_it_was_opened_from`, and it
-    /// graded `Route::Account { over: BarHost }` through `page_of`: the chip is a stop on all
-    /// three bar screens, so the route had to CARRY the page underneath or a press on the
-    /// Library's chip would cut to Home under the panel and strand the user there on dismissal.
-    ///
-    /// The menu is a `ModalStack` surface since phase 10, so that whole class of bug is gone by
-    /// construction — a surface is presented OVER the top page and never replaces it, which is
-    /// why `Route::Account` and `BarHost` are both deleted. What survives of the old rule is the
-    /// half `BarHost::of` answered: WHICH pages have a chip to press at all. It is derived from
-    /// `ScreenArg::chrome` now (the chip is a control on that bar), so the two cannot drift —
-    /// which is exactly what `BarHost::of`'s own hand-written three-route list could do.
-    /// `app::bridge`'s `the_profile_menu_is_a_surface_over_the_page_whose_chip_was_pressed`
-    /// grades the other half, on a real tree.
-    ///
-    /// It is asked of `ScreenArg::chrome` DIRECTLY, here, rather than of its one-line consumer
-    /// (`app::input::wears_the_chip`, which is `chrome() == Chrome::TabBar` and nothing else):
-    /// this file is where a page argument joins the alphabet, so the bar-wearing set and the
-    /// screen that joins it land in the same commit. A `screens/` module may not name
-    /// `crate::app::` at all (`ci/check-deps.sh`'s `layer` gate), which is the same boundary
-    /// stated as a rule.
-    #[test]
-    fn the_profile_chip_is_offered_on_exactly_the_bar_wearing_pages() {
-        for r in [AppArg::Home, AppArg::Library, AppArg::Search] {
-            assert!((r.chrome() == Chrome::TabBar), "a bar-wearing page carries the chip");
-        }
-        for r in [
-            AppArg::Content(crate::registry::ContentArg::Detail {
-                sid: plx_plex::plex::ServerId::UNSET, rk: String::new(),
-            }),
-            AppArg::Content(crate::registry::ContentArg::Person {
-                sid: plx_plex::plex::ServerId::UNSET, key: String::new(), guid: String::new(),
-                name: String::new(), thumb: String::new(),
-            }),
-            AppArg::Content(crate::registry::ContentArg::Collection(
-                plx_plex::plex::collections::CollectionRef::by_tag(plx_plex::plex::ServerId::UNSET, 0, 1, ""),
-            )),
-            AppArg::Login,
-            AppArg::Profiles,
-            AppArg::Onboard,
-            AppArg::Player,
-        ] {
-            assert!(
-                !(r.chrome() == Chrome::TabBar),
-                "only the bar-wearing screens carry the profile chip"
-            );
-        }
-    }
-
-    #[test]
-    fn collection_content_arg_has_the_pinned_canonical_field_order() {
-        let sid = plx_plex::plex::ServerId::from_raw(7);
-        let arg = ContentArg::Collection(plx_plex::plex::collections::CollectionRef {
-            sid, rk: "50077".into(), sec: 8, tag: 77, name: "Fixture".into(),
-        });
-        let mut expected = Canon::new();
-        expected.u32(3).u32(7).str("50077").u64(8).u64(77).str("Fixture");
-        assert_eq!(arg.hash(), expected.finish());
-    }
-
-    #[test]
-    fn collection_identity_never_compares_a_tag_with_a_rating_key() {
-        let sid = plx_plex::plex::ServerId::from_raw(2);
-        let by_rk = |rk: &str, tag| ContentArg::Collection(plx_plex::plex::collections::CollectionRef {
-            sid, rk: rk.into(), sec: 4, tag, name: "A".into(),
-        });
-        // The rule itself is `CollectionRef::same_collection`'s (graded in `plex::collections`);
-        // this pins that a page argument asks it rather than a copy.
-        assert!(by_rk("50077", 77).same_item(&by_rk("50077", 99)),
-            "two resolved arguments compare their ratingKey");
-        assert!(!by_rk("", 0).same_item(&by_rk("", 0)), "zero is not a tag identity");
-        assert!(!by_rk("50077", 0).same_item(&by_rk("", 50077)),
-            "a ratingKey is never compared to a numeric tag id");
-    }
-
-    #[test]
-    fn the_collection_more_sheet_is_its_own_alert_surface() {
-        let (style, arg) = ContentPanel::CollectionAbout
-            .surface(plx_machine::machine::InstanceId(1), None)
-            .expect("a page with no item subject can still offer its summary");
-        assert!(matches!(style, plx_ui::containers::modal::Style::Alert));
-        assert!(matches!(arg, AppArg::CollectionAbout));
-        assert_ne!(arg.id(), AppArg::AboutPanel.id(),
-            "the Detail About sheet and the Collection summary are distinct surfaces");
-        assert_ne!(arg.hash(), AppArg::AboutPanel.hash());
-    }
-
-    #[test]
-    fn collection_is_its_own_page_identity() {
-        let a = AppArg::Content(ContentArg::Collection(plx_plex::plex::collections::CollectionRef {
-            sid: plx_plex::plex::ServerId::UNSET, rk: "50001".into(), sec: 1, tag: 1, name: "A".into(),
-        }));
-        let b = AppArg::Content(ContentArg::Collection(plx_plex::plex::collections::CollectionRef {
-            sid: plx_plex::plex::ServerId::UNSET, rk: "50001".into(), sec: 1, tag: 9, name: "Renamed".into(),
-        }));
-        assert_eq!(a.id(), ScreenId(23));
-        assert!(a.same_instance(&b));
-        assert!(!a.same_instance(&AppArg::Content(ContentArg::Detail {
-            sid: plx_plex::plex::ServerId::UNSET, rk: "50001".into(),
-        })));
     }
 }

@@ -1,5 +1,5 @@
 //! `imgtrace` — the per-image timeline of the poster pipeline, armed by `/tmp/plxnative-imgtrace`
-//! (`dev::scenarios::imgtrace_armed`). Inert unless armed: every entry point returns at its first
+//! (`dev::imgtrace_armed`). Inert unless armed: every entry point returns at its first
 //! line when the latch reads `false`, and without `devtriggers` the trigger reader behind it always
 //! answers `false`, so the latch never arms.
 //!
@@ -268,7 +268,7 @@ std::thread_local! {
 
 #[inline]
 pub(super) fn armed() -> bool {
-    crate::dev::scenarios::imgtrace_armed()
+    crate::dev::imgtrace_armed()
 }
 
 fn with<R>(f: impl FnOnce(&mut Tracker, u64, u64) -> R) -> R {

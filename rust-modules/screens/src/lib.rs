@@ -12,31 +12,7 @@
 //! mounter's one match are `registry`'s since that phase; what is left in `app/bridge.rs` is the
 //! concrete host and the rig it lends the dispatcher.
 
-pub mod about_panel;
-pub mod account_menu;
-pub mod alt_sources;
-pub mod tracks_panel;
-pub mod consent;
-pub mod collection;
 pub mod local; // the Linux build's folder browser: one folder of the local library per page
-#[cfg(test)]
-mod cards_conformance_tests; // shared-card-sections Tier 2: every card screen through one black-box suite
-pub mod detail;
-pub mod person;
-pub mod person_bio;
-pub mod filmography;
-pub mod home;
 pub mod item_menu;
-pub mod library;
-pub mod search;
-pub mod family;
-pub mod legal;
-pub mod login;
-pub mod onboard;
-pub mod clock_readout;
-pub mod plaintext_question;
 pub mod player;
-pub mod profiles;
 pub mod registry;
-pub mod settings;
-pub mod preferences;
