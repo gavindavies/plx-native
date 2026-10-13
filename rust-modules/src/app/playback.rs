@@ -516,6 +516,15 @@ pub(crate) fn commit_track(
 ) {
     use plx_appkit::track_menu::TrackCommit;
     match commit {
+        // A local file's track the sink cannot decode has no server to convert it: say so.
+        #[cfg(feature = "gst")]
+        TrackCommit::Audio(audio)
+            if plx_media::localfile::is_file_url(&plx_media::route::url(ps))
+                && plx_media::player::engine::audio_payload_codec(&audio.codec).is_none() =>
+        {
+            plx_base::eventlog::log(&format!("local audio: {} is not decodable here; pick refused", audio.codec));
+            super::toast::raise(plx_media::localplay::LocalPlayError::AudioCodecs(vec![audio.codec]).message());
+        }
         TrackCommit::Audio(audio) => plx_media::route::commit_audio_selection(ps, audio),
         TrackCommit::AudioEnhancement(a) => plx_media::player::request_audio_enhancement(ps, a),
         TrackCommit::Subtitle { render_ordinal, stream_id, sidecar_key, sidecar_codec } => {

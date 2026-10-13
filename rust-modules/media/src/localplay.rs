@@ -132,14 +132,29 @@ pub fn install(ps: &mut crate::route::PlaybackSession, path: &Path, probe: &crat
 /// subtitle files beside it ([`plx_data::local::sidecars`]). The item's server is
 /// `local::ART_SRV` and its key the file's path.
 ///
-/// No audio list: switching tracks on a direct play goes through the server's route
-/// (`route::commit_audio_selection`), which a local file has none of, so the menu offers none
-/// rather than a pick that cannot land.
+/// Its audio tracks carry FFmpeg's codec names, which is what the Load payload and the route's
+/// direct-play test read on this build (`route::plan::audio_direct_plays`).
 pub fn playing_item(path: &Path, probe: &crate::ff::LocalProbe, sidecars: &[plx_data::local::SidecarFile]) -> plx_data::metadata::PlayingItem {
     use plx_data::metadata::Stream;
     let named = |tag: &str| {
         plx_data::metadata::two_letter_code(tag).map_or_else(String::new, |c| plx_plex::plex::languages::label(&c).to_owned())
     };
+    let audio = probe
+        .audio
+        .iter()
+        .enumerate()
+        .map(|(i, t)| Stream {
+            id: AUDIO_ID + i as i64,
+            index: i as i64,
+            lang: named(&t.lang),
+            lang_code: t.lang.clone(),
+            codec: t.codec.clone(),
+            channels: i64::from(t.channels),
+            title: t.title.clone(),
+            default: t.default,
+            ..Stream::default()
+        })
+        .collect();
     let mut subs: Vec<Stream> = probe
         .subs
         .iter()
@@ -175,7 +190,7 @@ pub fn playing_item(path: &Path, probe: &crate::ff::LocalProbe, sidecars: &[plx_
         rk: path.to_string_lossy().into_owned(),
         show_rk: String::new(),
         kind: "movie".into(),
-        audio: Vec::new(),
+        audio,
         subs,
         video_fps: probe.fps,
         width: i64::from(probe.width),
@@ -187,6 +202,16 @@ pub fn playing_item(path: &Path, probe: &crate::ff::LocalProbe, sidecars: &[plx_
         blur: None,
     }
 }
+
+/// The track a local file starts on: the first in file order the sink decodes (the probe's
+/// `acodec`, which the demuxer feeds by default), as the route records a pick.
+pub fn starting_audio(item: &plx_data::metadata::PlayingItem, probe: &crate::ff::LocalProbe) -> Option<crate::route::CarriedAudio> {
+    let i = item.audio.iter().position(|s| s.codec == probe.acodec)?;
+    Some(crate::route::CarriedAudio::from_stream(&item.audio[i], plx_data::metadata::audio_ordinal(&item.audio, i)))
+}
+
+/// Audio stream ids for a local file, from 500 (any non-zero id names a track).
+const AUDIO_ID: i64 = 500;
 
 /// Stream ids for a local file's subtitles: embedded tracks from 1, files beside it from 1000.
 /// Any non-zero id will do (0 is Off); the two ranges keep a file's sidecar from ever sharing an
@@ -231,7 +256,7 @@ mod tests {
         let item = playing_item(Path::new("/m/Film.mkv"), &p, &[side]);
         assert_eq!(item.rk, "/m/Film.mkv");
         assert_eq!(item.sid.raw(), plx_data::local::ART_SRV);
-        assert!(item.audio.is_empty());
+        assert_eq!(item.audio.len(), 0, "the fixture's probe lists no audio tracks");
         let (embedded, file) = (&item.subs[0], &item.subs[1]);
         assert_eq!((embedded.codec.as_str(), embedded.lang_code.as_str(), embedded.forced, embedded.external), ("srt", "eng", true, false));
         assert!(!embedded.lang.is_empty(), "a tagged track is named");
@@ -240,6 +265,17 @@ mod tests {
         assert_ne!(embedded.id, file.id);
         assert_eq!(plx_data::metadata::sub_render_ordinal(&item.subs, 0), 0, "the embedded track is the demuxer's first");
         assert_eq!(plx_data::metadata::sub_render_ordinal(&item.subs, 1), -1, "a file beside it is not the demuxer's");
+    }
+
+    #[test]
+    fn the_file_starts_on_its_first_decodable_audio_track() {
+        let mut p = probe("hevc", "ac3", &["truehd", "ac3"]);
+        let track = |codec: &str| crate::ff::LocalTrack { codec: codec.into(), channels: 6, ..Default::default() };
+        p.audio = vec![track("truehd"), track("ac3")];
+        let item = playing_item(Path::new("/m/Film.mkv"), &p, &[]);
+        assert_eq!(item.audio.iter().map(|s| s.codec.as_str()).collect::<Vec<_>>(), ["truehd", "ac3"]);
+        let start = starting_audio(&item, &p).unwrap();
+        assert_eq!((start.sid, start.ordinal, start.codec.as_str()), (item.audio[1].id, 1, "ac3"));
     }
 
     #[test]

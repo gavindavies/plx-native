@@ -5531,6 +5531,16 @@ pub fn source_acodec(ps: &PlaybackSession) -> String {
 /// The subtitle language the track menu ranks first ("your languages"). A Plex playback takes it
 /// from the account's preference at resolve time; a local file (`localplay::install`) has none,
 /// and names the interface's.
+/// Whether a server can convert an audio track this build cannot decode. The Linux build (`gst`)
+/// plays local files with no server behind them: an undecodable track is refused instead.
+pub const CONVERTS_AUDIO: bool = !cfg!(feature = "gst");
+
+/// The audio track a local file starts on (`localplay`): a Plex playback's resolve records the
+/// track it picked; a local file's is the first one the sink decodes.
+pub fn set_cur_audio(ps: &mut PlaybackSession, audio: CarriedAudio) {
+    ps.cur_audio = Some(audio);
+}
+
 pub fn set_sub_pref_lang(ps: &mut PlaybackSession, lang: &str) {
     ps.cur_sub_pref_lang = (!lang.is_empty()).then(|| lang.to_owned());
 }
@@ -6412,6 +6422,9 @@ pub fn audio_track_direct_plays(ps: &PlaybackSession, codec: &str, channels: i64
 /// session), so it cannot read the `direct_play_mode` the session captured and
 /// `commit_audio_selection` uses; the two agree unless the setting changes mid-playback.
 pub fn audio_converted_by_server(codec: &str, channels: i64) -> bool {
+    if !CONVERTS_AUDIO {
+        return false;
+    }
     let mode = direct_play_mode();
     mode != DirectPlayMode::Forced && !audio_direct_plays(mode, codec, channels)
 }

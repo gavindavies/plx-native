@@ -86,6 +86,9 @@ pub(crate) fn play(
     super::playback::start_playback(ps, pa, resume_ms.saturating_mul(1_000_000) as i64,
         super::playback::Origin::Here, plx_appkit::player_hud::LINGER_MS, ret, pages, bridge);
     // After the start: a new play retires the previous item's store as it begins.
+    if let Some(audio) = plx_media::localplay::starting_audio(&item, &probe) {
+        plx_media::route::set_cur_audio(ps, audio);
+    }
     bridge.metadata_mut().run(plx_data::stores::metadata::MetadataCmd::InstallPlaying(Some(item)));
 }
 

@@ -72,6 +72,12 @@ Unwatched**. The records are this machine's own — `$PLXNATIVE_RUNTIME_DIR/stat
 (by default `~/.local/state/plxnative/state/`), keyed by the file's path and size, so a file
 replaced by another of the same name starts fresh.
 
+## Audio tracks
+
+The player's audio button lists every audio track in the file, with its language and name. A file
+starts on its first track the player can decode; picking another switches to it in place, where it
+was. A track it cannot decode (WMA, for one) is refused with a message.
+
 ## Subtitles
 
 The player's subtitle menu lists the file's own subtitle tracks (text and image) and the subtitle
@@ -82,14 +88,13 @@ styling. Tracks in the interface's language are listed first. Subtitles start Of
 ## What plays
 
 Video: H.264, HEVC, AV1 and VP9, each when this machine's GStreamer has a decoder for it.
-Audio: AC3, E-AC3, DTS (core), AAC, FLAC, Opus, Vorbis, TrueHD, MP3, MP2 and plain PCM — the
-first track in the file in one of these is played, decoded to PCM. A file with no audio track
+Audio: AC3, E-AC3, DTS (core), AAC, FLAC, Opus, Vorbis, TrueHD, MP3, MP2 and plain PCM, decoded
+to PCM. A file with no audio track
 plays silent. A file that cannot play is refused with the reason shown on screen (the Linux
 build draws the toasts a television would show) and written to the event log.
 
 ## What does not work yet
 
-- No HDMI-CEC remote yet, and the player's audio menu is empty for a local file (the first playable
-  track plays; switching tracks is still to come).
+- No HDMI-CEC remote yet.
 - Video is copied to the GPU as RGBA each frame, scaled to fit 1920×1080 first: fine for 1080p on a
   PC, not yet measured on a small ARM board.
