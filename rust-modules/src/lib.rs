@@ -24,7 +24,6 @@ mod lab; // Cloud Lab bridge: pinned diagnostic uploads + optional outbound comm
 #[cfg(test)]
 mod release_line;
 mod remote; // dev/testing remote-control channel: a FIFO the loop drains into synthetic SDL keys
-#[cfg(feature = "hostsim")]
 mod shot; // simulator screenshots: read the frame back and write a PNG (see the module doc)
 mod system;
 
@@ -37,12 +36,10 @@ mod textinput; // the TV's own on-screen keyboard, via plain SDL_StartTextInput 
 /// keeps ONE definition of where that is — a second `env::var` read in the binary would be a
 /// second answer waiting to drift from this one.
 /// Play `path` once the app is running — `plxnative-sim <file>` (see `app::local_launch`).
-#[cfg(feature = "gst")]
 pub fn set_launch_file(path: std::path::PathBuf) {
     app::local_launch::set(path);
 }
 
-#[cfg(feature = "hostsim")]
 pub fn sim_runtime_dir() -> std::path::PathBuf {
     plx_base::paths::runtime_dir().to_path_buf()
 }
@@ -53,7 +50,6 @@ pub fn sim_runtime_dir() -> std::path::PathBuf {
 /// would mean a rename could leave the binary truncating a file the app never appends to — the
 /// simulator's log would silently start non-empty, which is exactly the state `tests/run.py` dates
 /// its first line from.
-#[cfg(feature = "hostsim")]
 pub fn sim_events_log() -> std::path::PathBuf {
     plx_base::eventlog::events_log()
 }
@@ -65,10 +61,6 @@ pub fn sim_events_log() -> std::path::PathBuf {
 /// path" was the one place a signature change would become a silent ABI mismatch instead of a
 /// compile error. There is deliberately no `pub use` here: a re-export would be a reference from
 /// the crate root into the port.
-#[cfg(feature = "hostsim")]
 pub mod port;
-#[cfg(not(feature = "hostsim"))]
-mod port;
-#[cfg(feature = "hostsim")]
 pub use app::synthetic_home_initial;
 

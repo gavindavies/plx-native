@@ -73,10 +73,7 @@ fn directory(root: &Path, create: bool) -> io::Result<(File, PathBuf)> {
     if !meta.is_dir() || meta.uid() != unsafe { libc::getuid() } || meta.mode() & 0o7777 != 0o700 {
         return Err(io::ErrorKind::PermissionDenied.into());
     }
-    #[cfg(target_os = "linux")]
     let anchor = PathBuf::from(format!("/proc/self/fd/{}", dir.as_raw_fd()));
-    #[cfg(not(target_os = "linux"))]
-    let anchor = { let _ = dir.as_raw_fd(); root.to_owned() };
     Ok((dir, anchor))
 }
 

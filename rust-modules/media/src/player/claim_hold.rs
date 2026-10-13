@@ -129,7 +129,7 @@ pub fn clear() {
     store(&mut slot(), None);
 }
 
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::player::shared::{HlsPlayCompletion, HlsPrimeKind};

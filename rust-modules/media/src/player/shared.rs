@@ -1157,7 +1157,7 @@ impl Shared {
     /// `false` when `epoch` no longer owns the `Active` phase (nothing to backdate) — callers
     /// must treat that as a precondition failure, not a silent no-op, per this project's
     /// silent-instrument rule (AGENTS.md).
-    #[cfg(all(any(test, feature = "test-support"), feature = "hostsim"))]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn test_backdate_native_load_issued(&self, epoch: u32, by: Duration) -> bool {
         let mut state = self
             .native_session
@@ -1182,7 +1182,7 @@ impl Shared {
     /// reads at least `by` older without a real wait. Requires `epoch` to already have returned
     /// (`LoadCall::Returned`) — `false` otherwise, including when it is still `InFlight` or the
     /// phase is no longer `Active`, per this project's silent-instrument rule (AGENTS.md).
-    #[cfg(all(any(test, feature = "test-support"), feature = "hostsim"))]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn test_backdate_native_load_returned(&self, epoch: u32, by: Duration) -> bool {
         let mut state = self
             .native_session
@@ -1257,7 +1257,7 @@ impl Shared {
 
     /// Test-only: drop an abandoned phase that a failing test left behind, which
     /// [`reset_session`](Self::reset_session) deliberately preserves.
-    #[cfg(all(any(test, feature = "test-support"), feature = "hostsim"))]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn test_force_native_idle(&self) {
         self.native_session
             .lock()
@@ -1652,7 +1652,7 @@ impl Shared {
     }
 
     /// Start (or restart after a rung commit) the proof for the media that will release this hold.
-    #[cfg(all(any(test, feature = "test-support"), feature = "hostsim"))]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn begin_hls_recovery(&self) {
         let mut clock = self.hls_clock.lock().unwrap_or_else(|e| e.into_inner());
         clock.recovery.begin();
@@ -1687,7 +1687,7 @@ impl Shared {
             .recovery
     }
 
-    #[cfg(all(any(test, feature = "test-support"), feature = "hostsim"))]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn finish_hls_recovery(&self) {
         let mut clock = self.hls_clock.lock().unwrap_or_else(|e| e.into_inner());
         clock.recovery = HlsRecoveryEpoch::idle();
@@ -1737,7 +1737,7 @@ impl Shared {
         self.reset_hls_clock();
     }
 
-    #[cfg(all(any(test, feature = "test-support"), feature = "hostsim"))]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn ensure_initial_clock_hold_for_test(&self) {
         let mut clock = self.hls_clock.lock().unwrap_or_else(|e| e.into_inner());
         if clock.phase == HlsClockPhase::Running {

@@ -192,7 +192,6 @@ const GL_DITHER: c_uint = 0x0BD0;
 const GL_ONE: c_uint = 0x0001;
 const GL_SRC_ALPHA: c_uint = 0x0302;
 const GL_ONE_MINUS_SRC_ALPHA: c_uint = 0x0303;
-#[cfg(feature = "hostsim")]
 const GL_ONE_MINUS_DST_ALPHA: c_uint = 0x0305;
 const GL_TEXTURE_2D: c_uint = 0x0DE1;
 const GL_TEXTURE0: c_uint = 0x84C0;
@@ -779,7 +778,7 @@ struct ArtWashProgram {
 /// Is this context an OpenGL **ES** driver, asked of the driver once?
 ///
 /// Hoisted out of `glsl_preamble` so the two GL-flavour adaptations cannot disagree. They very
-/// nearly did: the preamble probes, while `bind_core_profile_vao` trusted `cfg!(hostsim)` — so a
+/// nearly did: the preamble probes, while `bind_core_profile_vao` trusted `true` — so a
 /// host build against a Mesa GLES2 driver (a Pi, a Linux VM) would have bound a VAO into a context
 /// that has none *while* compiling ES shaders. A nonsense state that compiles clean.
 fn gl_is_es() -> bool {
@@ -813,7 +812,6 @@ fn glsl_preamble(ty: c_uint) -> &'static CStr {
 /// (`surface::render_scale`, simulator only), so every rounded corner would come out `n` times
 /// softer than the render it sits in. Narrow exactly that ramp to one physical pixel. `None` —
 /// the source untouched — at scale 1, so the default simulator compiles what the television does.
-#[cfg(feature = "hostsim")]
 unsafe fn supersample_aa(src: *const c_char) -> Option<std::ffi::CString> {
     let n = plx_base::surface::render_scale();
     if n <= 1 {
@@ -839,9 +837,7 @@ fn try_compile(ty: c_uint, src: *const c_char) -> Option<c_uint> {
         let s = glCreateShader(ty);
         // Two source strings rather than a concatenation: GL joins them itself, so the preamble
         // needs no allocation and the original `&CStr` sources stay untouched.
-        #[cfg(feature = "hostsim")]
         let supersampled = supersample_aa(src);
-        #[cfg(feature = "hostsim")]
         let src = supersampled.as_ref().map_or(src, |c| c.as_ptr());
         let srcs: [*const c_char; 2] = [glsl_preamble(ty).as_ptr(), src];
         glShaderSource(s, 2, srcs.as_ptr(), std::ptr::null());
@@ -962,7 +958,6 @@ fn field_mesh() -> Vec<f32> {
 /// `#[cfg]` rather than a runtime check because these two entry points do not EXIST in GLES2; the
 /// television's libGLESv2 exports neither, so merely naming them in the shared `extern` block
 /// would be a link-time undefined symbol on the device.
-#[cfg(feature = "hostsim")]
 fn bind_core_profile_vao() {
     extern "C" {
         fn glGenVertexArrays(n: c_int, arrays: *mut c_uint);
@@ -985,7 +980,6 @@ pub fn init_gl() {
         WARM_TARGET = None;
         // Before any buffer or attribute state is touched — in a core profile the calls below are
         // errors without it.
-        #[cfg(feature = "hostsim")]
         bind_core_profile_vao();
 
         PROG = link_program(VS_SRC.as_ptr(), FS_SRC.as_ptr()).unwrap_or_else(|| {
@@ -2116,7 +2110,6 @@ pub fn draw_art_wash(
 /// of a logical one, and the textures are rasterised at `n`x to match, so that is what it snaps to.
 #[inline]
 pub fn snap(v: f32) -> f32 {
-    #[cfg(feature = "hostsim")]
     {
         let n = plx_base::surface::render_scale();
         if n > 1 {
@@ -2642,7 +2635,6 @@ pub fn draw_tex_uv(
 /// the panel shows `ui.rgb + video.rgb * (1 - ui.a)`; drawing the picture with
 /// `(ONE_MINUS_DST_ALPHA, ONE)` computes exactly that, and leaves the surface opaque. Used by
 /// `player::sim_video` for the screenshot pipeline's player figure; restores the app's blend.
-#[cfg(feature = "hostsim")]
 pub fn draw_under(tex: c_uint, x: f32, y: f32, w: f32, h: f32) {
     unsafe {
         glBlendFuncSeparate(GL_ONE_MINUS_DST_ALPHA, GL_ONE, GL_ONE_MINUS_DST_ALPHA, GL_ONE);

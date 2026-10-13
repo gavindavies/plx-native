@@ -35,23 +35,7 @@ pub fn last_error_stage() -> &'static str {
     *LAST_ERROR_STAGE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-#[cfg(all(target_os = "linux", target_arch = "arm"))]
-fn stage_error(stage: &'static str, error: ErrorCode) -> ErrorCode {
-    remember_stage(stage);
-    use std::ffi::CString;
-    if let Ok(message) = CString::new(format!("plxstorage stage={stage} code={error:?}")) {
-        unsafe {
-            libc::syslog(
-                libc::LOG_USER | libc::LOG_ERR,
-                b"%s\0".as_ptr().cast(),
-                message.as_ptr(),
-            );
-        }
-    }
-    error
-}
 
-#[cfg(not(all(target_os = "linux", target_arch = "arm")))]
 fn stage_error(_stage: &'static str, error: ErrorCode) -> ErrorCode {
     remember_stage(_stage);
     error

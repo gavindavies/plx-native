@@ -2732,8 +2732,6 @@ fn refresh_if_current_locked(now: std::time::Instant, expected: Option<u64>) -> 
     let state = std::sync::Arc::new(CACHE_READ_FOR_TEST.with(|read| {
         read.get().unwrap_or(read_live_locked)()
     }));
-    #[cfg(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-    plx_base::eventlog::log("session: authority read reason=miss");
     #[cfg(not(any(test, feature = "test-support")))]
     let finished = std::time::Instant::now();
     #[cfg(any(test, feature = "test-support"))]
@@ -3707,21 +3705,7 @@ fn auto_quality_ready() -> bool {
     AUTO_QUALITY_READY.get().is_none_or(|ready| ready())
 }
 
-/// **The telemetry/consent legacy-file sweep that follows a durable canonical clear**
-/// ([`clear_for_erase`]'s ARM arm): `telemetry` owns the files and sits above `plex`, so the app
-/// installs its `cleanup_after_account_clear` as a hook ([`install_account_clear_cleanup`];
-/// `app::boot::install_plex_seams`). It answers whether every candidate was retired. Unset there is
-/// nothing registered to retire, which reads as retired, so the "could not be retired" branch is
-/// never taken without a sweep that failed. Compiled where the sweep is: ARM, not the simulator,
-/// not a test build.
-#[cfg(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-static ACCOUNT_CLEAR_CLEANUP: std::sync::OnceLock<fn() -> bool> = std::sync::OnceLock::new();
 
-/// Install the sweep [`ACCOUNT_CLEAR_CLEANUP`] runs. Once; later calls are ignored.
-#[cfg(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-pub fn install_account_clear_cleanup(sweep: fn() -> bool) {
-    let _ = ACCOUNT_CLEAR_CLEANUP.set(sweep);
-}
 
 /// **Hand the scrubber this household's names**, so `plx_base::eventlog::log` can redact them without ever
 /// touching this module.
@@ -4726,7 +4710,7 @@ pub struct Erasure {
 pub fn clear_for_erase(all_local: bool, retry_language: Option<plx_platform::i18n::Preference>) -> Erasure {
     let _io = io();
     let language = retry_language.unwrap_or_else(|| session_from_read(&read_live_locked()).language);
-    let native = cfg!(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))));
+    let native = false;
     // File backends need a credential-free resource before the credential file disappears.
     let mut preference_failures = Vec::new();
     if !all_local && !native && !install_preferences::save(language) {
@@ -4792,17 +4776,6 @@ pub fn clear_for_erase(all_local: bool, retry_language: Option<plx_platform::i18
             // moment, once this canonical commit is confirmed durable (Copilot review on PR #105,
             // finding 7; ported from `release/v0.6`'s `telemetry::cleanup_after_account_clear`,
             // called here in that release).
-            #[cfg(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-            if !ACCOUNT_CLEAR_CLEANUP.get().is_none_or(|sweep| sweep()) {
-                plx_base::eventlog::log(
-                    "session: canonical clear is durable but a telemetry/consent legacy \
-                     candidate could not be retired — it remains on disk and will be swept \
-                     again on the next sign-out",
-                );
-                if let ClearOutcome::Durable { legacy_swept } = &mut outcome {
-                    *legacy_swept = false;
-                }
-            }
             outcome
         }
         persistence::CanonicalCommit::Uncertain { stage, errno, helper } => {

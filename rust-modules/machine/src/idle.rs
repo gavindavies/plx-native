@@ -192,7 +192,6 @@ static PRESENTS: AtomicU32 = AtomicU32::new(0);
 /// `now` of the last [`should_present`] that found a CHANGE (motion, damage, a wake, the settle
 /// frame) — the keepalive and the bound video plane do not count. The simulator's settled-shot
 /// clock (`shot::tick`) reads it; nothing on the television does.
-#[cfg(feature = "hostsim")]
 static LAST_CHANGE: AtomicU32 = AtomicU32::new(0);
 /// Kill switch (`/tmp/plxnative-noidle`), so a device A/B is one file apart and a bad frame on the
 /// panel is one `rm` from being ruled out as this feature's fault.
@@ -649,7 +648,6 @@ pub fn should_present(now: u32) -> bool {
     let dirty = DIRTY.swap(false, Relaxed);
     let dirty = dirty || new_damage;
     let changed = moving || dirty || wake || settling;
-    #[cfg(feature = "hostsim")]
     if changed {
         LAST_CHANGE.store(now, Relaxed);
     }
@@ -704,7 +702,6 @@ pub fn page_layout_moving() -> bool {
 }
 
 /// `now` of the last frame that had something to change — see [`LAST_CHANGE`]. Simulator only.
-#[cfg(feature = "hostsim")]
 pub fn last_change_ms() -> u32 {
     LAST_CHANGE.load(Relaxed)
 }

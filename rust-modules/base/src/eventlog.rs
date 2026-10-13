@@ -12,10 +12,6 @@
 /// the default `make check`. See the module's doc for why there are two exits and why only the
 /// remote one may drop a line.
 pub mod scrub;
-/// The bounded in-memory record ring, tapped by [`log`] one call below the redaction. Behind the
-/// lab feature: a build without it has nothing to put in a ring.
-#[cfg(feature = "lab-diagnostics")]
-pub mod ring;
 
 /// Strip any PMS/plex.tv token from a line bound for the event log.
 ///
@@ -258,8 +254,6 @@ pub fn log(m: &str) {
     // The lab ring taps the log HERE, one call below the redaction, so it is by construction a
     // strict subset of the file every other tool reads and inherits the credential backstop above.
     // Compiled out without the `lab-diagnostics` feature — see `lab`.
-    #[cfg(feature = "lab-diagnostics")]
-    crate::eventlog::ring::record(&line);
     let _ = append_record(&p, &line);
 }
 

@@ -6,14 +6,10 @@
 
 use super::consent::Consent;
 use plx_platform::storage::{Record, RecordKey, RecordState, RecordStore};
-#[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support")))))]
 use plx_platform::storage::StoreError;
 use std::path::{Path, PathBuf};
 
-#[cfg(any(
-    all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))),
-    test
-))]
+#[cfg(test)]
 use plx_platform::storage::{
     client::{self, Load as HelperLoad},
     state::{self, Generation, MigrationProgress},
@@ -108,17 +104,14 @@ pub fn forget() -> PersistOutcome {
     forget_at(&super::resource_candidates(), root())
 }
 
-#[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support")))))]
 fn store() -> Result<impl RecordStore, StoreError> {
     plx_platform::storage::open(root())
 }
 
-#[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support")))))]
 fn store_at(root: PathBuf) -> Result<impl RecordStore, StoreError> {
     plx_platform::storage::open(root)
 }
 
-#[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support")))))]
 fn cleanup_canonical(store: &impl RecordStore) -> CleanupResult {
     if store.cleanup(RecordKey::Consent).is_ok() {
         CleanupResult::Complete
@@ -144,7 +137,7 @@ fn log_cleanup_failure(stage: &str, path: &Path, error: &std::io::Error) {
 /// here rather than doing it inline, because the immediately-following session ClearTenure is the
 /// one atomic DB8 revocation for both domains and legacy sources must survive until THAT commit is
 /// confirmed, not merely queued.
-#[cfg(any(test, feature = "test-support", all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"))))]
+#[cfg(any(test, feature = "test-support"))]
 pub fn cleanup_after_combined_clear(legacy: &[PathBuf]) -> CleanupResult {
     remove_legacy_sources(legacy.iter().cloned())
 }
@@ -181,11 +174,6 @@ fn remove_legacy_sources(paths: impl IntoIterator<Item = PathBuf>) -> CleanupRes
 /// Load canonical consent, falling back to trusted legacy candidates only when canonical is
 /// absent. A malformed, inaccessible, future, or otherwise present canonical record is terminal.
 pub fn load(legacy: &[PathBuf]) -> Consent {
-    #[cfg(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-    {
-        return load_helper(&mut client::NativeTransport, legacy);
-    }
-    #[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support")))))]
     {
     #[cfg(not(any(test, feature = "test-support")))]
     if plx_base::paths::ensure_persistent_state_root().is_err() {
@@ -268,18 +256,12 @@ pub fn load(legacy: &[PathBuf]) -> Consent {
     }
 }
 
-#[cfg(any(
-    all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))),
-    test
-))]
+#[cfg(test)]
 fn helper_expected(snapshot: &client::Snapshot) -> Option<(&str, state::Expected)> {
     Some((&snapshot.db_rev, snapshot.state.expected()))
 }
 
-#[cfg(any(
-    all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))),
-    test
-))]
+#[cfg(test)]
 #[derive(Clone, Copy)]
 struct HelperCommit {
     result: PersistResult,
@@ -288,10 +270,7 @@ struct HelperCommit {
     conflict: bool,
 }
 
-#[cfg(any(
-    all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))),
-    test
-))]
+#[cfg(test)]
 fn helper_commit(
     transport: &mut dyn client::Transport,
     loaded: &HelperLoad,
@@ -359,10 +338,7 @@ fn helper_commit(
     }
 }
 
-#[cfg(any(
-    all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))),
-    test
-))]
+#[cfg(test)]
 fn legacy_consent(legacy: &[PathBuf]) -> Result<Option<(Consent, Vec<PathBuf>)>, ()> {
     let mut found: Option<(Consent, Vec<PathBuf>)> = None;
     for path in legacy {
@@ -387,10 +363,7 @@ fn legacy_consent(legacy: &[PathBuf]) -> Result<Option<(Consent, Vec<PathBuf>)>,
     Ok(found)
 }
 
-#[cfg(any(
-    all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))),
-    test
-))]
+#[cfg(test)]
 enum PreviousCanonical {
     Missing,
     Data(Consent),
@@ -400,18 +373,12 @@ enum PreviousCanonical {
 
 /// Decode the complete `plxnative-record` wrapper used by the JSON canonical store that preceded
 /// DB8. A corrupt/future record is terminal and is never treated like an absent legacy source.
-#[cfg(any(
-    all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))),
-    test
-))]
+#[cfg(test)]
 fn previous_canonical_consent() -> PreviousCanonical {
     previous_canonical_consent_at(root())
 }
 
-#[cfg(any(
-    all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))),
-    test
-))]
+#[cfg(test)]
 fn previous_canonical_consent_at(root: PathBuf) -> PreviousCanonical {
     match std::fs::symlink_metadata(&root) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => PreviousCanonical::Missing,
@@ -440,10 +407,7 @@ fn previous_canonical_consent_at(root: PathBuf) -> PreviousCanonical {
     }
 }
 
-#[cfg(any(
-    all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))),
-    test
-))]
+#[cfg(test)]
 fn load_helper(transport: &mut dyn client::Transport, legacy: &[PathBuf]) -> Consent {
     let loaded = match client::load_with(transport) {
         Ok(loaded) => loaded,
@@ -615,7 +579,6 @@ fn read_legacy(path: &Path) -> LegacyRead {
     }
 }
 
-#[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support")))))]
 fn load_legacy_and_migrate(store: &impl RecordStore, legacy: &[PathBuf]) -> Consent {
     let mut found: Option<(Consent, Vec<(PathBuf, Vec<u8>)>)> = None;
     for path in legacy {
@@ -727,12 +690,6 @@ pub(super) fn record_at(
     legacy: &[PathBuf],
     canonical_root: PathBuf,
 ) -> PersistOutcome {
-    #[cfg(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-    {
-        let _ = canonical_root;
-        return record_helper(&mut client::NativeTransport, consent, legacy);
-    }
-    #[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support")))))]
     {
     let store = match store_at(canonical_root) {
         Ok(store) => store,
@@ -827,10 +784,7 @@ pub(super) fn record_at(
     }
 }
 
-#[cfg(any(
-    all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))),
-    test
-))]
+#[cfg(test)]
 fn record_helper(
     transport: &mut dyn client::Transport,
     consent: &Consent,
@@ -906,21 +860,6 @@ fn record_helper(
 
 /// Write a canonical cleared tombstone, then remove stale legacy copies best-effort.
 pub(super) fn forget_at(legacy: &[PathBuf], canonical_root: PathBuf) -> PersistOutcome {
-    #[cfg(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-    {
-        let _ = canonical_root;
-        // Session's immediately-following ClearTenure is the one atomic DB8 revocation for both
-        // domains. Consent has already been unpublished before this worker job runs. Legacy
-        // sources remain until that one transaction is confirmed durable.
-        let _ = legacy;
-        let outcome = PersistOutcome {
-            write: PersistResult::Delegated,
-            cleanup: CleanupResult::NotAttempted,
-        };
-        publish(outcome);
-        return outcome;
-    }
-    #[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support")))))]
     {
     let store = match store_at(canonical_root) {
         Ok(store) => store,

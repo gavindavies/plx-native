@@ -19,7 +19,7 @@ pub(crate) use plx_media::player::lifecycle::{
 };
 // Only `app::run`'s hostsim lifecycle tests name the machine's state, so a re-export outside
 // them would be an unused import.
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 pub(crate) use plx_media::player::lifecycle::ForegroundState;
 
 pub(crate) struct PlayerForegroundActuator<'a> {

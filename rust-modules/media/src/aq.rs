@@ -99,7 +99,6 @@ fn aq_init_cap(q: *mut AuQueue, cap: c_long) {
 /// exists to prevent. `pthread_condattr_setclock` does not exist on macOS, so the host build (and
 /// its tests, which check the drain LOGIC, not clock robustness) keeps the default REALTIME
 /// clock — matched by [`aq_park_deadline`]'s `#[cfg]` twin.
-#[cfg(target_os = "linux")]
 unsafe fn init_not_full_cond(cond: *mut libc::pthread_cond_t) {
     unsafe {
         let mut attr: libc::pthread_condattr_t = std::mem::zeroed();
@@ -110,12 +109,6 @@ unsafe fn init_not_full_cond(cond: *mut libc::pthread_cond_t) {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
-unsafe fn init_not_full_cond(cond: *mut libc::pthread_cond_t) {
-    unsafe {
-        libc::pthread_cond_init(cond, ptr::null());
-    }
-}
 
 pub fn aq_destroy(q: *mut AuQueue) {
     if q.is_null() {
@@ -166,7 +159,6 @@ pub fn aq_push_with_drain(
 /// documented to experience), everywhere else keeps the wall clock the condvar itself defaults
 /// to. Mixing clock bases between the condvar and its deadline would make the timeout meaningless
 /// rather than merely imprecise.
-#[cfg(target_os = "linux")]
 fn aq_park_deadline() -> libc::timespec {
     let mut ts = libc::timespec {
         tv_sec: 0,
@@ -178,20 +170,6 @@ fn aq_park_deadline() -> libc::timespec {
     add_10ms(ts)
 }
 
-#[cfg(not(target_os = "linux"))]
-fn aq_park_deadline() -> libc::timespec {
-    let mut tv = libc::timeval {
-        tv_sec: 0,
-        tv_usec: 0,
-    };
-    unsafe {
-        libc::gettimeofday(&mut tv, ptr::null_mut());
-    }
-    add_10ms(libc::timespec {
-        tv_sec: tv.tv_sec,
-        tv_nsec: i64::from(tv.tv_usec) * 1000,
-    })
-}
 
 fn add_10ms(ts: libc::timespec) -> libc::timespec {
     let mut nsec = ts.tv_nsec + 10_000_000;

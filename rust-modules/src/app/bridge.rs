@@ -989,7 +989,6 @@ impl Bridge {
         // content page's route: Home, Library and Search cards open their menus through their own
         // requests, which carry the `from_deck` / `from_home` bits this arm would drop.
         // The local library's video: its path is the menu's key, and its record is the app's own.
-        #[cfg(feature = "gst")]
         if let Some(page) = screen.downcast_ref::<plx_screens::local::LocalScreen>() {
             let (path, _size, mark) = page.focused_video(ret.focus)?;
             let rect = real.focused_card_rect(&cx, ret.focus, At::Drawn);
@@ -1201,7 +1200,7 @@ impl Bridge {
     /// (metadata, person, collection, search, view state) keep their claim inside the store and
     /// answer through `take_owed` alone, so a request spawned this iteration is seen by NEXT
     /// iteration's take, which waits for it (`plx_machine::landgate`'s module doc).
-    #[cfg(all(feature = "hostsim", feature = "devtriggers"))]
+    #[cfg(feature = "devtriggers")]
     pub(crate) fn open_claims(&self) -> Vec<&'static str> {
         let mut open = Vec::new();
         if self.stores.hubs.owed() {
@@ -1255,14 +1254,14 @@ impl Bridge {
     }
 
     /// [`seed_hubs_for_test`](Self::seed_hubs_for_test) as a grid of `rows` shelves of `items` cards.
-    #[cfg(all(test, feature = "hostsim"))]
+    #[cfg(test)]
     pub(crate) fn seed_hub_grid_for_test(&mut self, rows: usize, items: usize) {
         self.stores.hubs.seed_grid_for_test(rows, items);
     }
 
     /// Make the shelf card `rk` a collection: the item menu has nothing to offer it, so a hold on it
     /// is the one the app declines.
-    #[cfg(all(test, feature = "hostsim"))]
+    #[cfg(test)]
     pub(crate) fn retag_hub_item_as_collection_for_test(&mut self, rk: &str) {
         self.stores.hubs.retag_test_item_as_collection(rk);
     }
@@ -2004,7 +2003,7 @@ fn frame_ingest(
     // loop's gate presents it on its own video-plane term anyway, and the report would keep the
     // settled-capture clock (`plx_machine::idle::last_change_ms`) from ever seeing a paused player at rest
     // (`FrameReport::video_only`). The television keeps the unconditional report it always had.
-    let video_only = cfg!(feature = "hostsim") && report.video_only;
+    let video_only = true && report.video_only;
     if report.presented && !video_only {
         // The dispatcher's gate wants a frame: the loop's gate presents it. While a surface is up
         // this bump is the PANEL's — `take_page_damage` subtracts the panel's claims BY COUNT, and
@@ -3557,7 +3556,7 @@ mod session_endpoint_policy_tests;
 #[path = "session_stored_home_tests.rs"]
 mod session_stored_home_tests;
 
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 #[path = "restore_characterisation_tests.rs"]
 mod restore_characterisation_tests;
 

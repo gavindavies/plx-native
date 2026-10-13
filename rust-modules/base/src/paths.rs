@@ -51,7 +51,7 @@ use std::sync::OnceLock;
 /// split-brain above was reachable on the device; and a `--no-default-features --features hostsim`
 /// build had the opposite hole, writing its event log to a shared `/tmp` while the simulator
 /// binary truncated one inside the instance root.
-pub const ENV_STEERABLE: bool = cfg!(feature = "hostsim");
+pub const ENV_STEERABLE: bool = true;
 
 /// The app id this project ships to users, and the one every install falls back to.
 ///
@@ -224,58 +224,12 @@ pub fn in_app_dir(name: &str) -> PathBuf {
     app_dir().join(name)
 }
 
-/// `…/Contents/Resources` when `exe` is the executable of a macOS **application bundle**, else
-/// `None` — the one platform where the app's payload is not the executable's own directory.
-///
-/// Structural, not name-based: it asks whether the two directories above the binary are literally
-/// `Contents/MacOS`, which is what makes something a bundle. A `PlxNative.app` renamed by the
-/// person it was sent to still answers yes; a loose `plxnative-sim` in `target-sim/debug` still
-/// answers no, so the dev loop is untouched.
-///
-/// Must not log — [`runtime_dir`] calls the sibling below and that function's doc explains why a
-/// log there deadlocks the process. Cheap enough to keep both on the same rule.
-#[cfg(target_os = "macos")]
-fn macos_bundle_resources(exe: &Path) -> Option<PathBuf> {
-    let macos = exe.parent()?;
-    if macos.file_name()? != "MacOS" {
-        return None;
-    }
-    let contents = macos.parent()?;
-    if contents.file_name()? != "Contents" {
-        return None;
-    }
-    let res = contents.join("Resources");
-    res.is_dir().then_some(res)
-}
 
-#[cfg(not(target_os = "macos"))]
 fn macos_bundle_resources(_exe: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Where a **bundled macOS app** keeps everything it writes: `~/Library/Application
-/// Support/PlxNative`.
-///
-/// The default runtime root is `/tmp`, which is right on the television and wrong for a Mac app
-/// somebody was sent: `auth.json` lives in this root (see [`session_candidates`]), and `/tmp` is
-/// swept, so the friend would re-do the QR sign-in every few days without ever learning why. The
-/// app bundle itself is not an option either — it may sit in a read-only `/Applications`, and on a
-/// signed bundle writing inside `Contents/` invalidates the signature.
-///
-/// `None` unless this really is a bundle: a plain `make sim-run` keeps taking `/tmp` (or its
-/// `PLXNATIVE_RUNTIME_DIR` instance root) exactly as before, so no harness recipe moves.
-#[cfg(target_os = "macos")]
-fn macos_app_support() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    macos_bundle_resources(&exe)?;
-    let home = std::env::var_os("HOME")?;
-    if home.is_empty() {
-        return None;
-    }
-    Some(PathBuf::from(home).join("Library/Application Support/PlxNative"))
-}
 
-#[cfg(not(target_os = "macos"))]
 fn macos_app_support() -> Option<PathBuf> {
     None
 }
@@ -952,24 +906,6 @@ mod tests {
         );
     }
 
-    /// The bundle detector must answer on SHAPE — `…/Contents/MacOS/<exe>` — and must not be
-    /// fooled by a binary that merely sits in a directory called `MacOS`, nor confused by the
-    /// bundle having been renamed. Only meaningful where the function has a body.
-    #[test]
-    #[cfg(target_os = "macos")]
-    fn only_a_real_contents_macos_layout_reads_as_a_bundle() {
-        use std::path::Path;
-        // No `Contents` above it → not a bundle, whatever it is called.
-        assert!(super::macos_bundle_resources(Path::new("/x/MacOS/plxnative")).is_none());
-        // Right shape, but `Resources/` does not exist on this filesystem → still None, because
-        // the point of the probe is finding the payload, not recognising a layout.
-        assert!(super::macos_bundle_resources(Path::new("/x/Contents/MacOS/plxnative")).is_none());
-        // The dev-loop binary must keep resolving to its own directory.
-        assert!(
-            super::macos_bundle_resources(Path::new("/repo/target-sim/debug/plxnative-sim"))
-                .is_none()
-        );
-    }
 
     /// Two instances given different roots must not share a namespace — the whole point of the
     /// override. Asserted on the composed trigger path, not just the root, because that is what
@@ -1165,7 +1101,7 @@ mod tests {
 /// does not gets [`test_default_persistent_state_root`] — a directory keyed by this process's pid,
 /// the same idiom `session::fallback_file()` already uses for `auth.json`. Before this existed, an
 /// un-redirected test reached `runtime_dir().join("state")`, i.e. the real, shared `/tmp/state`
-/// (`ENV_STEERABLE` is `cfg!(feature = "hostsim")`, so this was every `hostsim` test) — writable by
+/// (`ENV_STEERABLE` is `true`, so this was every `hostsim` test) — writable by
 /// every worktree, every concurrent `cargo test` run and any running `make sim` on the same
 /// machine, and readable by an unrelated test's `session::prepare_load`/`ReadState` mapping as a
 /// real signed-in record. That cross-run pollution is what made

@@ -18,7 +18,7 @@ const SDL_INIT_VIDEO: u32 = 0x20;
 /// completely different GPU, driver and compositor, so those numbers are not merely optimistic —
 /// they are about a different machine. A log line is the unit that gets pasted into an issue or
 /// handed between agents, so the disclaimer has to travel ON the line rather than sit in a doc.
-const SIM_TAG: &str = if cfg!(feature = "hostsim") {
+const SIM_TAG: &str = if true {
     " sim=1"
 } else {
     ""
@@ -37,7 +37,7 @@ const SIM_TAG: &str = if cfg!(feature = "hostsim") {
 /// compositor then doubles, so the whole interface is an upscale of a half-size render. With it,
 /// the 960x540-point window `desktop_window_size` picks on a laptop has a 1920x1080 drawable —
 /// `surface::scale() == 1.0`, the same 1:1 texel contract the television gets.
-const SDL_WINDOW_FLAGS: u32 = if cfg!(feature = "hostsim") {
+const SDL_WINDOW_FLAGS: u32 = if true {
     0x2 | 0x2000
 } else {
     0x2 | 0x1
@@ -93,13 +93,11 @@ pub(crate) const COLS: c_int = 10;
 // Desktop-only window management. Apart for the mirror-image reason: a television owns the whole
 // panel and never asks how big a display is, so on that build these would be dead code — which
 // `[workspace.lints.rust] warnings = "deny"` makes a build failure, not a warning.
-#[cfg(feature = "hostsim")]
 extern "C" {
     /// `SDL_GetDisplayUsableBounds` — the display minus the menu bar and the Dock, which is what
     /// a window may actually occupy. The out parameter is an `SDL_Rect`: exactly four `c_int`.
     fn SDL_GetDisplayUsableBounds(display: c_int, rect: *mut c_int) -> c_int;
 }
-#[cfg(feature = "gst")]
 extern "C" {
     /// `SDL_GetDisplayBounds` — the whole display, which the Linux build's full-screen window is
     /// created at (`boot`).
@@ -126,11 +124,8 @@ mod window_activity;
 pub(crate) mod events;
 pub(crate) mod lifecycle;
 pub(crate) mod playback;
-#[cfg(feature = "gst")]
 pub(crate) mod local_launch; // `plxnative-sim <file>`: play a file from the command line
-#[cfg(feature = "gst")]
 pub(crate) mod toast;
-#[cfg(feature = "gst")]
 mod local_watch; // follows a local file's playback and keeps its place // the Linux build's toast, drawn by the app (the port delivers to it)
 mod preferences;
 pub(crate) mod input;
@@ -312,7 +307,6 @@ pub(crate) struct App {
     /// WSLg accepts swap interval 1 on X11/GLX without pacing the compositor. This boot-scoped
     /// flag enables the host-only software frame budget while leaving native Linux and macOS on
     /// their driver swap behavior.
-    #[cfg(all(feature = "hostsim", target_os = "linux"))]
     wslg_frame_pacing: bool,
     /// Boot time (`SDL_GetTicks` at the end of boot): the origin of every dev-script delay AND
     /// the clock a replay restores from controlled initial inputs — a field BOTH sides
@@ -518,7 +512,6 @@ fn finish_recording(rec: &mut recorder::Recplay, gate: &plx_machine::landgate::G
 }
 
 /// Simulator tooling emits the entire typed contract, never a patched household auth file.
-#[cfg(feature = "hostsim")]
 pub fn synthetic_home_initial(seed: u32, port: u16, settings: Option<String>)
     -> Result<String, &'static str> {
     let content = settings.as_deref() == Some("flow12");

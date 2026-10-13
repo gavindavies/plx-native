@@ -487,7 +487,7 @@ fn note_dump_failure(key: &[u8], transient: bool) {
 }
 
 /// The first art-request failure since the dump was armed, if any. See [`DUMP_FAILURE`].
-#[cfg(all(feature = "hostsim", feature = "devtriggers"))]
+#[cfg(feature = "devtriggers")]
 pub(crate) fn dump_failure() -> Option<String> {
     DUMP_FAILURE.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
@@ -619,7 +619,6 @@ fn built_key(srv: ServerId, path: &str, w: c_int, h: c_int, png: bool) -> Option
     }
     // Local library artwork (the Linux build): no server and no transcoder — the key names the
     // image file's token and the box it is decoded into.
-    #[cfg(feature = "gst")]
     if srv.raw() == plx_data::local::ART_SRV {
         // SAFETY: as below — main-thread only, consumed before the memo is touched again.
         let memo = unsafe {
@@ -1924,13 +1923,11 @@ fn bake_fan(
 }
 
 /// The store key of a local artwork token decoded into a `w`×`h` box (device pixels).
-#[cfg(feature = "gst")]
 fn local_art_key(token: &str, w: c_int, h: c_int) -> String {
     format!("local:{w}x{h}:{token}")
 }
 
 /// Read and decode the image a [`local_art_key`] names, fitted to its box. Off the frame thread.
-#[cfg(feature = "gst")]
 fn load_local_art(key: &str) -> Option<(u32, u32, Vec<u8>)> {
     let rest = key.strip_prefix("local:")?;
     let (bx, token) = rest.split_once(':')?;
@@ -1964,7 +1961,6 @@ fn poster_worker() {
         let mut px = std::ptr::null_mut();
         let mut stale = None;
         let mut transient = false;
-        #[cfg(feature = "gst")]
         if srv.raw() == plx_data::local::ART_SRV {
             match load_local_art(&key_s) {
                 Some((lw, lh, rgba)) => {
@@ -1974,10 +1970,7 @@ fn poster_worker() {
                 None => transient = false,
             }
         }
-        #[cfg(feature = "gst")]
         let local = srv.raw() == plx_data::local::ART_SRV;
-        #[cfg(not(feature = "gst"))]
-        let local = false;
         // Revoked servers cannot use disk as a route around sign-out. Keep this client snapshot
         // for both identity and transport; a later registry repoint must not mix the two.
         if local {

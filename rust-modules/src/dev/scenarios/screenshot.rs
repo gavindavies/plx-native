@@ -36,7 +36,6 @@ pub(crate) struct ScreenshotArms {
     libmenu_sent: Option<u32>,
     /// `clockstop`'s position, read once (`None` = not read yet), and whether it was reached.
     clockstop: Option<Option<u32>>,
-    #[cfg(feature = "hostsim")]
     clockstop_reached: bool,
 }
 
@@ -46,7 +45,6 @@ impl ScreenshotArms {
     /// waiting on its seek — and a capture of that rest is the wrong picture. An arm that was never
     /// armed, reached its state or gave up (and logged it) is not pending. Simulator only, as the
     /// settled capture is.
-    #[cfg(feature = "hostsim")]
     pub(crate) fn pending(&self) -> bool {
         !self.libtype_done
             || !self.libgrid.done
@@ -87,14 +85,8 @@ pub(super) fn parse_cell(v: &str) -> Option<(usize, usize)> {
 /// is `plx_machine::idle`'s change clock, which only the simulator keeps; on the television there is none,
 /// the wait is skipped, and the arm behaves exactly as it did before it took a value.
 pub(crate) fn at_rest(now: u32, rest: Option<u32>) -> bool {
-    #[cfg(feature = "hostsim")]
     {
         rest.is_none_or(|ms| now.wrapping_sub(plx_machine::idle::last_change_ms()) >= ms)
-    }
-    #[cfg(not(feature = "hostsim"))]
-    {
-        let _ = (now, rest);
-        true
     }
 }
 
@@ -288,7 +280,6 @@ pub(crate) fn libmenu_arm(app: &mut App, fr: &Frame) {
 /// there. The stop is a stall of the sink's own making (`ffi_host.rs::stop_clock_at`), re-armed
 /// every frame because a Load (a seek) starts a fresh fed timeline.
 pub(crate) fn clockstop_arm(app: &mut App, fr: &Frame) {
-    #[cfg(feature = "hostsim")]
     {
         let arms = &mut app.scenarios.shots;
         if arms.clockstop.is_none() {
@@ -319,16 +310,10 @@ pub(crate) fn clockstop_arm(app: &mut App, fr: &Frame) {
             plx_base::eventlog::log(&format!("clockstop: gave up; the playhead never reached {ms} ms"));
         }
     }
-    #[cfg(not(feature = "hostsim"))]
-    {
-        let _ = fr;
-        app.scenarios.shots.clockstop = Some(None);
-    }
 }
 
 /// How long `clockstop` waits for the playhead. Longer than [`CEILING_MS`]: its position is
 /// usually reached through `autoseek`, which only fires 12 s into a run.
-#[cfg(feature = "hostsim")]
 const CLOCKSTOP_CEILING_MS: u32 = 60_000;
 
 #[cfg(test)]

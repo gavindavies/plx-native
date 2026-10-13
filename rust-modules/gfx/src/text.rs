@@ -216,7 +216,7 @@ static mut TLF_VTOP: c_int = 0;
 static mut TLF_VBOT: c_int = 0;
 /// One opened face per pixel size, per array. 80 covers the whole `theme::size` ladder; the
 /// simulator's supersampled rendering (`surface::render_scale`, up to 4x) rasterises at up to 4x it.
-const FONT_SLOTS: usize = if cfg!(feature = "hostsim") { 320 } else { 80 };
+const FONT_SLOTS: usize = if true { 320 } else { 80 };
 static mut FONTS: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
 static mut FONTS_B: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
 static mut TEXT_OK: c_int = 0;
@@ -284,7 +284,7 @@ fn key_hash(s: &[u8], sz: c_int, bold: c_int) -> u64 {
 // headroom past the ~80 simultaneous worst case, stable text is a pure cache hit after first paint.
 // The simulator's supersampled rendering keeps a second, `n`x texture per visible string beside
 // the logical one layout measures, so it gets the room for both.
-const TCACHE: usize = if cfg!(feature = "hostsim") { 480 } else { 160 };
+const TCACHE: usize = if true { 480 } else { 160 };
 static mut TCACHE_A: [TCacheEntry; TCACHE] = [TCacheEntry::ZERO; TCACHE];
 static mut TCLOCK: c_uint = 0;
 
@@ -1920,7 +1920,6 @@ unsafe fn drawn_tex(
     bold: c_int,
     logical: (c_uint, c_int, c_int),
 ) -> (c_uint, f32, f32) {
-    #[cfg(feature = "hostsim")]
     {
         let n = plx_base::surface::render_scale();
         if n > 1 {
@@ -1930,8 +1929,6 @@ unsafe fn drawn_tex(
             }
         }
     }
-    #[cfg(not(feature = "hostsim"))]
-    let _ = (s_bytes, s, sz, bold);
     (logical.0, logical.1 as f32, logical.2 as f32)
 }
 

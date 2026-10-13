@@ -37,7 +37,6 @@ pub(crate) fn route_word(route: &AppArg) -> &'static str {
         AppArg::Search => "search",
         AppArg::Player => "player",
         AppArg::Home => "home",
-        #[cfg(feature = "gst")]
         AppArg::Local(_) => plx_screens::registry::word::LOCAL,
         // Not pages: a surface's word is ` overlay=`, and none of these reaches the page stack's
         // top. The arm is written out rather than swept into a `_` so a new PAGE variant is a

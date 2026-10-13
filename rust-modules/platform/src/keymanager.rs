@@ -195,7 +195,6 @@ fn call_with(client: &mut platform::Client, uri: &str, payload: &Value) -> Optio
         .and_then(|s| serde_json::from_str(&s).ok())
 }
 
-#[cfg(any(feature = "hostsim", test, feature = "test-support"))]
 mod platform {
     pub(super) struct Client;
 
@@ -214,64 +213,6 @@ mod platform {
     }
 }
 
-#[cfg(all(not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-mod platform {
-    use std::time::Duration;
-
-    /// Keymanager3's budget. A key generation on a cold set is not a 600 ms affair, and this
-    /// client never runs on the press path `webos::ls2::BUDGET` is sized for.
-    const BUDGET: Duration = Duration::from_secs(4);
-
-    /// One registration on the bus, kept alive for the length of a logical keymanager operation
-    /// (`modern_crypt` needs begin → finish on ONE connection). The registration itself is the
-    /// process-wide `webos::ls2` client — the shape it registers with and the reason are there.
-    ///
-    /// **A service that stalls once is not asked again on this client.** Registration succeeds on
-    /// the dev set since 2026-09-04, which makes [`BUDGET`] REACHABLE from a synchronous session
-    /// save for the first time, and `modern_crypt`'s begin → (finish | abort) is two calls: a
-    /// keymanager3 that hangs on the first would otherwise cost two budgets on a path that holds
-    /// the auth and session locks (Codex review, 2026-09-04). A timeout marks the client dead and
-    /// every later call on it answers at once; `seal` then records the backend unavailable.
-    pub(super) struct Client {
-        registration: crate::webos::ls2::Registration,
-        dead: bool,
-    }
-
-    impl Client {
-        pub(super) fn new() -> Result<Self, ()> {
-            crate::webos::ls2::register()
-                .map(|registration| Self {
-                    registration,
-                    dead: false,
-                })
-                .map_err(|e| {
-                    plx_base::eventlog::log(&format!("keymanager: LS2 {e}"));
-                })
-        }
-
-        pub(super) fn call(&mut self, uri: &str, payload: &str) -> Result<String, ()> {
-            if self.dead {
-                return Err(());
-            }
-            let started = std::time::Instant::now();
-            match self.registration.call(uri, payload, BUDGET) {
-                Ok(reply) => Ok(reply),
-                Err(crate::webos::ls2::Fail::Timeout) => {
-                    self.dead = true;
-                    plx_base::eventlog::log(&format!(
-                        "keymanager: no reply in {} ms — this client asks nothing more",
-                        started.elapsed().as_millis()
-                    ));
-                    Err(())
-                }
-                Err(crate::webos::ls2::Fail::Setup { stage, detail, .. }) => {
-                    plx_base::eventlog::log(&format!("keymanager: call failed stage={stage} ({detail})"));
-                    Err(())
-                }
-            }
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

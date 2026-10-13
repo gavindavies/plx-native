@@ -314,11 +314,10 @@ fn change_profile_then_back_cannot_restore_the_protected_profile_it_left() {
 /// Expected: the picker mounts once, the consent surface mounts once, and neither unmounts.
 ///
 /// `hostsim`-only, and this is a correctness gate rather than a convenience: `paths::ENV_STEERABLE`
-/// is `cfg!(feature = "hostsim")`, so `PLXNATIVE_RUNTIME_DIR` is only honoured in that build; off
+/// is `true`, so `PLXNATIVE_RUNTIME_DIR` is only honoured in that build; off
 /// it, `dev::any_trigger_present()` scans the literal shared `/tmp` regardless of the env var this
 /// test sets, and `make check`'s first (non-`hostsim`) pass grades this test against whatever
 /// stray `plxnative-*` file another process or an earlier run left there instead of a private root.
-#[cfg(feature = "hostsim")]
 #[test]
 fn first_run_consent_over_the_picker_does_not_flip_mounts_every_frame() {
     use super::test_support::tick;

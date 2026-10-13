@@ -44,10 +44,8 @@ impl WindowActivity {
 /// WSLg's X11/GLX swap can accept interval 1 without waiting for the Windows compositor. Keep
 /// that host-specific wall-clock adapter here, outside the app's logical clock: recorded UI
 /// replays must continue to see only their injected ticks.
-#[cfg(all(feature = "hostsim", target_os = "linux"))]
 pub(crate) struct WslgFrameBudget(std::time::Instant);
 
-#[cfg(all(feature = "hostsim", target_os = "linux"))]
 impl WslgFrameBudget {
     pub(crate) fn begin() -> Self { Self(std::time::Instant::now()) }
 

@@ -27,7 +27,6 @@ const MAX_BYTES: u64 = 4 * 1024 * 1024;
 
 /// The two records currently owned by the application.
 #[derive(Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(all(target_os = "linux", target_arch = "arm"), allow(dead_code))]
 pub enum RecordKey {
     Session,
     Consent,
@@ -83,7 +82,6 @@ pub struct Record {
     pub state: RecordState,
 }
 
-#[cfg_attr(all(target_os = "linux", target_arch = "arm"), allow(dead_code))]
 impl Record {
     pub fn data(revision: u64, payload: String) -> Self {
         Self {
@@ -120,15 +118,6 @@ pub enum CommitReceipt {
 
 /// The operation at which an I/O outcome occurred. These names intentionally carry no path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(
-    all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ),
-    allow(dead_code)
-)]
 pub enum CommitStage {
     CreateTemp,
     Write,
@@ -211,15 +200,6 @@ pub fn read_owned_bytes(path: &Path) -> Result<Option<(Vec<u8>, bool)>, StoreErr
 
 /// The backend contract. There is intentionally no blanket implementation: callers hold the
 /// single-writer contract for each `JsonStore` instance.
-#[cfg_attr(
-    all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ),
-    allow(dead_code)
-)]
 pub trait RecordStore {
     fn load(&self, key: RecordKey) -> Result<Option<Record>, StoreError>;
     fn commit(&self, key: RecordKey, record: &Record) -> Result<CommitReceipt, StoreError>;
@@ -320,15 +300,6 @@ impl JsonStore {
     /// Remove only abandoned temporary files for `key`, using the held directory descriptor.
     /// Callers serialize this with commits for the same key. Unrelated names, symlinks, foreign
     /// owners, and widened-mode files are left untouched.
-    #[cfg_attr(
-        all(
-            target_os = "linux",
-            target_arch = "arm",
-            not(feature = "hostsim"),
-            not(any(test, feature = "test-support"))
-        ),
-        allow(dead_code)
-    )]
     pub fn cleanup_temporaries(&self, key: RecordKey) -> Result<(), StoreError> {
         self.check_root()?;
         let prefix = format!(".{}.new-", key.file_name());
@@ -624,15 +595,6 @@ fn remove_at(directory: &File, name: &str) {
     }
 }
 
-#[cfg_attr(
-    all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ),
-    allow(dead_code)
-)]
 fn unlink_at(directory: &File, name: &str) -> io::Result<()> {
     let name = std::ffi::CString::new(name)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid temporary name"))?;
@@ -644,15 +606,6 @@ fn unlink_at(directory: &File, name: &str) -> io::Result<()> {
     }
 }
 
-#[cfg_attr(
-    all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ),
-    allow(dead_code)
-)]
 struct Directory(*mut libc::DIR);
 
 impl Drop for Directory {
@@ -663,15 +616,6 @@ impl Drop for Directory {
     }
 }
 
-#[cfg_attr(
-    all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ),
-    allow(dead_code)
-)]
 fn directory_names(directory: &File) -> io::Result<Vec<String>> {
     let duplicate = unsafe { libc::dup(directory.as_raw_fd()) };
     if duplicate < 0 {
@@ -697,15 +641,6 @@ fn directory_names(directory: &File) -> io::Result<Vec<String>> {
     Ok(names)
 }
 
-#[cfg_attr(
-    all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ),
-    allow(dead_code)
-)]
 fn safe_temp_name(name: &str, prefix: &str) -> bool {
     let Some(suffix) = name.strip_prefix(prefix) else {
         return false;

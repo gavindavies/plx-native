@@ -3209,12 +3209,10 @@ impl View for Spinner {
         if !plx_machine::motion::phase_clocks_held() {
             plx_machine::idle::invalidate();
         }
-        #[cfg_attr(feature = "placeholder-sentinel", allow(unused_variables))]
         let t = (self.phase % Self::PERIOD_MS) as f32 / Self::PERIOD_MS as f32;
         for i in 0..self.dots {
             let ang =
                 i as f32 / self.dots as f32 * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
-            #[cfg(not(feature = "placeholder-sentinel"))]
             let c = {
                 let lead = (t - i as f32 / self.dots as f32).rem_euclid(1.0);
                 let a = (1.0 - lead) * 0.85 + 0.12; // bright at the leading dot, fading behind it
@@ -3222,8 +3220,6 @@ impl View for Spinner {
             };
             // The sentinel build paints every dot at alpha 1 in the one exact colour, whatever the
             // tint, the leading-dot fade or the cascade (`placeholder.rs`).
-            #[cfg(feature = "placeholder-sentinel")]
-            let (c, p) = (theme::PLACEHOLDER_SENTINEL, crate::placeholder::painter(p));
             let (dx, dy) = (self.cx + self.r * ang.cos(), self.cy + self.r * ang.sin());
             let d = self.dot_r;
             p.rect(Rect::new(dx - d, dy - d, 2.0 * d, 2.0 * d), d, c, c, 0.0);

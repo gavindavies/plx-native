@@ -5533,7 +5533,7 @@ pub fn source_acodec(ps: &PlaybackSession) -> String {
 /// and names the interface's.
 /// Whether a server can convert an audio track this build cannot decode. The Linux build (`gst`)
 /// plays local files with no server behind them: an undecodable track is refused instead.
-pub const CONVERTS_AUDIO: bool = !cfg!(feature = "gst");
+pub const CONVERTS_AUDIO: bool = !true;
 
 /// The audio track a local file starts on (`localplay`): a Plex playback's resolve records the
 /// track it picked; a local file's is the first one the sink decodes.
@@ -6413,7 +6413,6 @@ pub fn audio_track_direct_plays(ps: &PlaybackSession, codec: &str, channels: i64
     // A local file (the Linux build) plays what its GStreamer sink decodes, in FFmpeg's codec
     // names (its tracks come from the file, `localplay::playing_item`); no server converts the
     // rest. Every other session keeps the television's table.
-    #[cfg(feature = "gst")]
     if crate::localfile::is_file_url(&ps.url) {
         return crate::player::engine::audio_payload_codec(codec).is_some();
     }
@@ -10221,11 +10220,11 @@ pub fn report_timeline(
 #[path = "decision_test_support.rs"]
 mod test_support;
 
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 #[path = "decision_flight_rig.rs"]
 pub(crate) mod flight_rig;
 
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 #[path = "decision_trial_flight_tests.rs"]
 mod trial_flight_tests;
 

@@ -83,24 +83,6 @@ pub fn path() -> PathBuf {
 }
 
 pub fn cleanup_temporaries() -> Result<(), StoreError> {
-    #[cfg(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ))]
-    {
-        // DB8 has no app-owned rename temporaries. Legacy paths are retired explicitly after the
-        // helper has verified the committed destination; absence of the old app/state directory
-        // is normal on a fresh install and must not turn sign-out into a cleanup failure.
-        Ok(())
-    }
-    #[cfg(not(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    )))]
     {
         store()?.cleanup(RecordKey::Session)
     }
@@ -162,21 +144,6 @@ pub fn load() -> CanonicalRead {
     if let Some(read) = READ_FOR_TEST.with(|hook| hook.get()) {
         return read();
     }
-    #[cfg(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ))]
-    {
-        return load_helper();
-    }
-    #[cfg(not(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    )))]
     {
         let store = match store() {
             Ok(store) => store,
@@ -285,25 +252,6 @@ fn commit(record: Record) -> CanonicalCommit {
 }
 
 pub fn commit_data(payload: String) -> CanonicalCommit {
-    #[cfg(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ))]
-    {
-        let session = match serde_json::from_str::<super::Session>(&payload) {
-            Ok(session) => session,
-            Err(_) => return CanonicalCommit::Failed(StoreError::InvalidSchema),
-        };
-        return commit_session(&session, false, super::SaveAuthority::Routine);
-    }
-    #[cfg(not(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    )))]
     {
         let revision = match load() {
             CanonicalRead::Data { revision, .. }
@@ -322,21 +270,6 @@ pub fn commit_data(payload: String) -> CanonicalCommit {
 }
 
 pub fn commit_cleared() -> CanonicalCommit {
-    #[cfg(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ))]
-    {
-        return commit_clear();
-    }
-    #[cfg(not(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    )))]
     {
         let revision = match load() {
             CanonicalRead::Data { revision, .. }
@@ -371,11 +304,6 @@ pub fn migrate_exact(source: &Path, payload: &[u8]) -> (CanonicalCommit, PathBuf
 
 /// Import an already decoded migration input through the same backend used by bootstrap.
 pub fn migrate_session(session: &super::Session) -> CanonicalCommit {
-    #[cfg(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-    {
-        commit_session(session, true, super::SaveAuthority::Routine)
-    }
-    #[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support")))))]
     {
         write_session(session, super::SaveAuthority::Routine)
     }
@@ -1056,21 +984,6 @@ pub fn write_session(
     session: &super::Session,
     authority: super::SaveAuthority,
 ) -> CanonicalCommit {
-    #[cfg(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ))]
-    {
-        commit_session_with_authority(session, authority)
-    }
-    #[cfg(not(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    )))]
     {
         let _ = authority;
         match serde_json::to_string(session) {
@@ -1390,30 +1303,6 @@ pub fn bootstrap(opener: &mut dyn LegacyOpener) -> Bootstrap {
     let candidates = plx_base::paths::session_migration_candidates();
     #[cfg(any(test, feature = "test-support"))]
     let candidates = super::auth_paths();
-    #[cfg(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ))]
-    {
-        let mut candidates = candidates;
-        insert_arm_canonical_wrapper(&mut candidates);
-        bootstrap_with(
-            &mut HelperMigration {
-                transport: &mut client::NativeTransport,
-                major: plx_platform::tv::device::info().major,
-            },
-            opener,
-            &candidates,
-        )
-    }
-    #[cfg(not(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    )))]
     {
         bootstrap_with(&mut FileMigration, opener, &candidates)
     }
@@ -1454,17 +1343,6 @@ pub fn cleanup_after_confirmed_clear() -> ClearCleanupOutcome {
     let candidates = plx_base::paths::session_migration_candidates();
     #[cfg(any(test, feature = "test-support"))]
     let candidates = super::auth_paths();
-    #[cfg(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ))]
-    let candidates = {
-        let mut candidates = candidates;
-        insert_arm_canonical_wrapper(&mut candidates);
-        candidates
-    };
     let mut complete = super::retry_pending_retirements_locked();
     for candidate in candidates {
         match plx_platform::storage::read_owned_bytes(&candidate) {

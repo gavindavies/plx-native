@@ -18,7 +18,6 @@ use super::*;
 /// screen and the bottom of the interface under the Dock.
 ///
 /// Falls back to the canvas size if SDL cannot answer, which is the behaviour this replaced.
-#[cfg(feature = "hostsim")]
 pub(crate) fn desktop_window_size() -> (c_int, c_int) {
     // `PLXNATIVE_WIN=<w>x<h>` overrides the fit entirely — `make sim-shot SIM_W=1920 SIM_H=1080`.
     // It exists because the fit below is chosen for a HUMAN looking at a window, and a screenshot
@@ -215,8 +214,6 @@ mod panic_log_tests {
 ///   (ARM, not the simulator, not a test build); unset, `plex` reads it as already retired.
 pub(crate) fn install_plex_seams() {
     plx_plex::plex::session::install_auto_quality_ready(plx_media::route::auto_quality_ready);
-    #[cfg(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(test)))]
-    plx_plex::plex::session::install_account_clear_cleanup(plx_telemetry::telemetry::cleanup_after_account_clear);
 }
 
 #[cfg(test)]
@@ -392,18 +389,6 @@ mod seam_order_tests {
 /// the process on the first D-pad press (`tools/fwcompat.py --release 3.4.0`).
 #[inline]
 pub(crate) unsafe fn hide_cursor() {
-    #[cfg(not(feature = "hostsim"))]
-    {
-        type CursorVisibility = unsafe extern "C" fn(c_int) -> c_int;
-        static SYM: std::sync::OnceLock<Option<CursorVisibility>> = std::sync::OnceLock::new();
-        let f = SYM.get_or_init(|| {
-            let p = plx_base::dynlib::Handle::self_handle().sym("SDL_webOSCursorVisibility")?;
-            (!p.is_null()).then(|| std::mem::transmute::<*mut std::ffi::c_void, CursorVisibility>(p))
-        });
-        if let Some(f) = f {
-            f(0);
-        }
-    }
 }
 /// Advance the once-per-second LOOP-RATE window: bump `iters_ct` and, when a full second has
 /// elapsed, recompute `loop_shown`, reset the window, and return `true` so the caller logs the
@@ -546,7 +531,6 @@ pub(crate) enum BootTo {
     Login,
     Profiles,
     /// The Linux build's local library: no account, no server, no sign-in.
-    #[cfg(feature = "gst")]
     Local,
 }
 
@@ -720,7 +704,7 @@ pub(crate) unsafe fn construct(
     // everything this renderer does: a real VBO (never client arrays) and RGBA/UNSIGNED_BYTE
     // textures, both core-profile-legal. The shader sources are adapted at compile time by
     // `gfx::glsl_preamble`, which reads the driver's GLSL version rather than assuming.
-    if cfg!(feature = "hostsim") {
+    if true {
         SDL_GL_SetAttribute(A_CTX_PROFILE_MASK, CTX_PROFILE_CORE);
         SDL_GL_SetAttribute(A_CTX_MAJOR, 4);
         SDL_GL_SetAttribute(A_CTX_MINOR, 1);
@@ -751,39 +735,30 @@ pub(crate) unsafe fn construct(
     SDL_GL_SetAttribute(A_STENCIL, 0);
     // The television is placed at 0,0 at exactly canvas size and takes the panel. A desktop
     // window is centred (`SDL_WINDOWPOS_CENTERED`) at whatever fits — see `desktop_window_size`.
-    #[cfg(feature = "hostsim")]
     let (wx, wy, ww_req, wh_req) = {
         let (w, h) = desktop_window_size();
         (0x2FFF_0000u32 as c_int, 0x2FFF_0000u32 as c_int, w, h)
     };
-    #[cfg(not(feature = "hostsim"))]
-    let (wx, wy, ww_req, wh_req) = (0, 0, SCR_W, SCR_H);
     // The title is furniture a television never draws (no window manager, no decoration) and
     // the first thing a desktop shows, so the two builds spell it differently: the device keeps
     // the process-shaped name every log, `pidof` recipe and skill already uses.
-    #[cfg(feature = "hostsim")]
     let title = c"PlxNative";
-    #[cfg(not(feature = "hostsim"))]
-    let title = c"plxnative";
     // A frame dump's drawable is exactly the window's size in points: ALLOW_HIGHDPI (0x2000) would
     // make a Retina display's drawable 3840x2160 for a 1920x1080 window, which the master cannot
     // be, and which differs from the canonical Linux host. (Absent from every shipping build.)
-    #[cfg(all(feature = "hostsim", feature = "devtriggers"))]
+    #[cfg(feature = "devtriggers")]
     let window_flags = if crate::dev::framedump::requested() { SDL_WINDOW_FLAGS & !0x2000 } else { SDL_WINDOW_FLAGS };
-    #[cfg(not(all(feature = "hostsim", feature = "devtriggers")))]
+    #[cfg(not(feature = "devtriggers"))]
     let window_flags = SDL_WINDOW_FLAGS;
     // The Linux build is a media player on a television: full screen on the display it opens on
     // (`SDL_WINDOW_FULLSCREEN_DESKTOP`, no mode switch), unless `PLXNATIVE_FULLSCREEN=0` asks for
     // the desktop window. A fixed `PLXNATIVE_WIN` size (screenshots) keeps the window too.
-    #[cfg(feature = "gst")]
     let fullscreen = !(std::env::var_os("PLXNATIVE_FULLSCREEN").is_some_and(|v| v == "0")
         || std::env::var_os("PLXNATIVE_WIN").is_some());
-    #[cfg(feature = "gst")]
     let window_flags = if fullscreen { window_flags | 0x1001 } else { window_flags };
     // Created AT the display's size, not resized to it afterwards: the GL surface of a window that
     // goes full screen after creation can stay at the requested size for the first frames (seen
     // under X11 without a window manager), which draws the canvas into one corner.
-    #[cfg(feature = "gst")]
     let (wx, wy, ww_req, wh_req) = if fullscreen {
         let mut r = [0 as c_int; 4];
         if SDL_GetDisplayBounds(0, r.as_mut_ptr()) == 0 && r[2] > 0 && r[3] > 0 {
@@ -810,13 +785,12 @@ pub(crate) unsafe fn construct(
     // blocking, so the software budget in `run` follows the same switch.
     // A frame dump never waits on the display: every iteration is a render, at swap interval 0 and
     // with the Linux software pacer off (`vsync_enabled` also gates `wslg_frame_pacing`).
-    #[cfg(all(feature = "hostsim", feature = "devtriggers"))]
+    #[cfg(feature = "devtriggers")]
     let dumping = crate::dev::framedump::requested();
-    #[cfg(not(all(feature = "hostsim", feature = "devtriggers")))]
+    #[cfg(not(feature = "devtriggers"))]
     let dumping = false;
     let vsync_enabled = !dumping && (controlled || !crate::dev::scenarios::novsync_armed());
     SDL_GL_SetSwapInterval(if vsync_enabled { 1 } else { 0 });
-    #[cfg(all(feature = "hostsim", target_os = "linux"))]
     let wslg_frame_pacing = vsync_enabled
         && std::env::var_os("WSL_DISTRO_NAME").is_some()
         && std::env::var("SDL_VIDEODRIVER").as_deref() == Ok("x11");
@@ -1052,7 +1026,7 @@ pub(crate) unsafe fn construct(
             plx_telemetry::telemetry::consent::current().unwrap_or_default(), &mt)
     };
     // Construct the one dispatcher before bootstrap commands; move this same queue into App.
-    #[cfg_attr(feature = "gst", allow(unused_mut))]
+    #[allow(unused_mut)]
     let mut pages = plx_ui::dispatch::Dispatcher::with_transition(Box::new(
         plx_ui::containers::transition::PageDip::new(),
     ));
@@ -1169,17 +1143,12 @@ pub(crate) unsafe fn construct(
     };
     // Controlled Home constructs its App before executing the same bootstrap command path.
     // The Linux build plays the machine's own disk and has no Plex account to activate.
-    #[cfg(feature = "gst")]
     let boot_to = {
         let _ = &activate_session;
         log("boot: local library (no Plex session)");
         // Before the frame loop: the one blocking read of where each file was left.
         plx_data::local_progress::load();
         BootTo::Local
-    };
-    #[cfg(not(feature = "gst"))]
-    let boot_to = if controlled { BootTo::Home } else {
-        activate_session(&mut bridge, &mut pages, &mut super::recorder::Recplay::Off)
     };
     if !controlled {
         plx_media::player::acb_init(&mt);
@@ -1524,7 +1493,6 @@ pub(crate) unsafe fn construct(
         // soon as the account is authorized — earlier than here, and before the picker.
         BootTo::Login => AppArg::Login,
         BootTo::Profiles => AppArg::Profiles,
-        #[cfg(feature = "gst")]
         BootTo::Local => AppArg::Local(plx_screens::registry::LocalArg { path: String::new() }),
     };
     // (dev: /tmp/plxnative-acct used to open the profile menu HERE, beside a
@@ -1632,7 +1600,6 @@ pub(crate) unsafe fn construct(
         ev,
         remote,
         win,
-        #[cfg(all(feature = "hostsim", target_os = "linux"))]
         wslg_frame_pacing,
         t0,
         instr,

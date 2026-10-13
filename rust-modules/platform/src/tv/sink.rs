@@ -77,7 +77,7 @@ pub trait VideoSink: Sync {
 
 /// The installed sink: the only way out of `tv` for the Starfish verbs, and only `player/` may
 /// call it (`ci/check-deps.sh`, rule `sink`).
-#[cfg_attr(all(any(test, feature = "test-support"), feature = "hostsim"), allow(dead_code))] // player::sink() answers HostSink there
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))] // player::sink() answers HostSink there
 pub fn installed() -> &'static dyn VideoSink { super::port().sink }
 
 /// No sink: exactly `ffi_host.rs`'s disabled answers.

@@ -117,28 +117,23 @@
 //! hook costs one relaxed atomic load; in every other build [`armed`] and [`held_repeat`] are
 //! constant `false`, so the hooks fold away. Nothing else in the crate changes behaviour.
 
-#[cfg(any(feature = "hostsim", feature = "test-support", test))]
 use std::sync::atomic::{AtomicBool, Ordering};
 
-#[cfg(any(feature = "hostsim", feature = "test-support", test))]
 static DUMP: AtomicBool = AtomicBool::new(false);
 
 // Thread-local, unlike the switch: only the loop's own thread reads or writes it, and a host test
 // that sets it must not leak a "this is a repeat" into a concurrent test's page dip.
-#[cfg(any(feature = "hostsim", feature = "test-support", test))]
 thread_local! {
     static REPEAT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Arm dump mode for this process. A no-op outside the simulator (`hostsim`) and host tests.
 pub fn arm() {
-    #[cfg(any(feature = "hostsim", feature = "test-support", test))]
     DUMP.store(true, Ordering::Relaxed);
 }
 
 /// Disarm: the ordinary behaviour, and what a host test restores.
 pub fn disarm() {
-    #[cfg(any(feature = "hostsim", feature = "test-support", test))]
     DUMP.store(false, Ordering::Relaxed);
 }
 
@@ -148,13 +143,8 @@ pub fn disarm() {
 /// relaxed atomic load.
 #[inline(always)]
 pub fn armed() -> bool {
-    #[cfg(any(feature = "hostsim", feature = "test-support", test))]
     {
         DUMP.load(Ordering::Relaxed)
-    }
-    #[cfg(not(any(feature = "hostsim", feature = "test-support", test)))]
-    {
-        false
     }
 }
 
@@ -167,22 +157,14 @@ pub fn armed() -> bool {
 /// [`armed`] is.
 #[inline(always)]
 pub fn held_repeat() -> bool {
-    #[cfg(any(feature = "hostsim", feature = "test-support", test))]
     {
         REPEAT.with(std::cell::Cell::get)
-    }
-    #[cfg(not(any(feature = "hostsim", feature = "test-support", test)))]
-    {
-        false
     }
 }
 
 /// Driver only (and host tests): publish whether this iteration is a held repeat. See [`held_repeat`].
 pub fn set_held_repeat(on: bool) {
-    #[cfg(any(feature = "hostsim", feature = "test-support", test))]
     REPEAT.with(|r| r.set(on));
-    #[cfg(not(any(feature = "hostsim", feature = "test-support", test)))]
-    let _ = on;
 }
 
 /// A host test's guard: this thread is a held repeat until it drops. It does not arm the dump.

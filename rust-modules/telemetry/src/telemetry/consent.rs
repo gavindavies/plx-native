@@ -195,7 +195,7 @@ pub fn migrate_loaded(mut c: Consent) -> Consent {
     c
 }
 
-#[cfg(any(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))), test, feature = "test-support"))]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CanonicalDecision {
@@ -207,7 +207,7 @@ struct CanonicalDecision {
     extensions: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
-#[cfg(any(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))), test, feature = "test-support"))]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CanonicalScopes {
@@ -215,7 +215,7 @@ struct CanonicalScopes {
     usage: u32,
 }
 
-#[cfg(any(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))), test, feature = "test-support"))]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CanonicalIds {
@@ -223,7 +223,7 @@ struct CanonicalIds {
     errors: Option<String>,
 }
 
-#[cfg(any(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))), test, feature = "test-support"))]
+#[cfg(any(test, feature = "test-support"))]
 /// Split consent into the three DB8-public slots the canonical state clears atomically on logout.
 pub fn split_canonical(consent: &Consent) -> Result<plx_platform::storage::state::ConsentPayload, ()> {
     Ok(plx_platform::storage::state::ConsentPayload {
@@ -249,7 +249,7 @@ pub fn split_canonical(consent: &Consent) -> Result<plx_platform::storage::state
     })
 }
 
-#[cfg(any(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))), test, feature = "test-support"))]
+#[cfg(any(test, feature = "test-support"))]
 pub fn join_canonical(payload: &plx_platform::storage::state::ConsentPayload) -> Result<Consent, ()> {
     let decision: CanonicalDecision = serde_json::from_value(payload.consent.clone()).map_err(|_| ())?;
     let scopes: CanonicalScopes = serde_json::from_value(payload.scopes.clone()).map_err(|_| ())?;

@@ -126,7 +126,6 @@ pub fn select(server: plx_plex::plex::ServerId, stream_id: i64, key: String, cod
 /// Select a subtitle FILE on this machine's disk (the Linux build's local library: `key` is its
 /// path). The same store and the same worker as a server's sidecar, reading the file instead.
 /// MAIN THREAD.
-#[cfg(feature = "gst")]
 pub fn select_file(stream_id: i64, key: String, codec: String) {
     let server = plx_plex::plex::ServerId::from_raw(plx_data::local::ART_SRV);
     select_with_fetch(server, stream_id, key, codec, |_, path, _| {

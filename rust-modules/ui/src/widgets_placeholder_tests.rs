@@ -203,7 +203,6 @@ fn a_profile_with_no_picture_is_absence_and_counts_nothing() {
 
 /// The accounting adds no pixel: outside the sentinel build the three tokens are the stops they
 /// always were, and the absence ground is the very same stop.
-#[cfg(not(feature = "placeholder-sentinel"))]
 #[test]
 fn the_placeholder_tokens_keep_their_default_values() {
     assert_eq!(theme::SKELETON_TOP, theme::CARD_PLACEHOLDER);

@@ -67,9 +67,7 @@ fn main() {
     }
     // `plxnative-sim <file>` (the GStreamer build): play a file on this machine's own disk, with
     // no server. Anything that names an existing regular file is taken as one.
-    #[cfg_attr(not(feature = "gst"), allow(unused_mut))]
     let mut launching_file = false;
-    #[cfg(feature = "gst")]
     let host = if std::path::Path::new(&host).is_file() {
         launching_file = true;
         plxnative_modules::set_launch_file(std::fs::canonicalize(&host).unwrap_or_else(|_| host.clone().into()));
@@ -92,7 +90,7 @@ fn main() {
     // launch when `SIM_PMS` is empty, so `make sim-run` still says "no PMS host" rather than
     // silently booting a sign-in screen at somebody expecting Home.
     // The Linux media player (`gst`) has no server to name: its home is the local library.
-    if host.is_empty() && !launching_file && !cfg!(feature = "gst") {
+    if host.is_empty() && !launching_file && !true {
         eprintln!(
             "plxnative-sim: no PMS host given — starting the plex.tv sign-in flow.\n\
              (pass one as `plxnative-sim <numeric-ip> [port]`, or set PLXNATIVE_PMS_HOST, to boot\n\
@@ -116,10 +114,6 @@ fn main() {
     // The banner is the FIRST line of the log, so a log read from the middle, tailed, or pasted
     // into an issue still declares what produced it. Every heartbeat additionally carries `sim=1`
     // (see `app.rs`'s SIM_TAG) — one marker at the top is easy to scroll past.
-    #[cfg(not(feature = "gst"))]
-    let banner = "sim: THIS IS THE DESKTOP SIMULATOR, not a television. No video pipeline; \
-                  frame rates here describe this Mac's GPU and must never be read as an fps gate.\n";
-    #[cfg(feature = "gst")]
     let banner = "linux: PlxNative for Linux (GStreamer playback, local library). Not a television: \
                   frame rates here describe this machine's GPU and must never be read as an fps gate.\n";
     if let Err(e) = std::fs::write(&events, banner) {

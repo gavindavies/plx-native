@@ -547,7 +547,6 @@ impl ItemMenuScreen {
             ItemMenuKind::Episode { mark } => build_episode(&self.arg.rk, *mark),
             ItemMenuKind::Season { mark } => build_season(&self.arg.rk, *mark),
             // A local video is a leaf with no page to go to: an episode's rows exactly.
-            #[cfg(feature = "local")]
             ItemMenuKind::Local { mark } => build_episode(&self.arg.rk, *mark),
         };
         // a short list of one-line actions — BODY labels, not menu-size HEADLINE

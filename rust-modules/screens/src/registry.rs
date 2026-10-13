@@ -352,7 +352,6 @@ pub enum ItemMenuKind {
     /// A video in the local library (`screens::local`). The menu's `rk` is the file's path and its
     /// `sid` `plx_data::local::ART_SRV`: the rows are an episode's (the watched pair and Play from
     /// Start), and the application keeps the record itself (`plx_data::local_progress`).
-    #[cfg(feature = "local")]
     Local { mark: plx_ui::widgets::PosterMark },
 }
 
@@ -368,7 +367,6 @@ impl PartialEq for ItemMenuKind {
                 da == db && a.sid == b.sid && a.rk == b.rk && a.kind == b.kind,
             (Self::Episode { mark: a }, Self::Episode { mark: b }) => a == b,
             (Self::Season { mark: a }, Self::Season { mark: b }) => a == b,
-            #[cfg(feature = "local")]
             (Self::Local { mark: a }, Self::Local { mark: b }) => a == b,
             _ => false,
         }
@@ -393,7 +391,6 @@ impl plx_machine::machine::LogicalState for ItemMenuArg {
             ItemMenuKind::Card { row, from_deck } => { c.u32(0).bool(*from_deck).u32(row.kind as u32); }
             ItemMenuKind::Episode { mark } => { c.u32(1).u32(*mark as u32); }
             ItemMenuKind::Season { mark } => { c.u32(2).u32(*mark as u32); }
-            #[cfg(feature = "local")]
             ItemMenuKind::Local { mark } => { c.u32(3).u32(*mark as u32); }
         }
         c.u32(self.host.0);
@@ -939,11 +936,9 @@ pub enum ContentReq {
     Push(ContentArg),
     Present(ContentArg),
     /// The local library (`local`): open a folder as a page of its own, so BACK returns here.
-    #[cfg(feature = "local")]
     LocalOpen(LocalArg),
     /// The local library: play a file on this machine's disk. The loop probes it and starts the
     /// engine, which needs the playback session a screen may not name.
-    #[cfg(feature = "local")]
     LocalPlay(String),
     Back,
     Play { play: PlayIntent, resume_ns: i64 },
@@ -1274,7 +1269,6 @@ pub mod word {
     pub const PERSON: &str = "person";
     pub const COLLECTION: &str = "collection";
     /// The local library's folder page (`screens::local`).
-    #[cfg(feature = "local")]
     pub const LOCAL: &str = "local";
     pub const SETTINGS: &str = "settings";
     pub const PRIVACY: &str = "privacy";
@@ -1648,12 +1642,10 @@ pub enum AppArg {
     FirstRunConsent(u8),
     /// One folder of the local library (the Linux build's home and folder browser). The path is
     /// the folder's, empty for the library's top level.
-    #[cfg(feature = "local")]
     Local(LocalArg),
 }
 
 /// The argument of [`AppArg::Local`]: which folder the page shows.
-#[cfg(feature = "local")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LocalArg {
     pub path: String,
@@ -1700,7 +1692,6 @@ impl LogicalState for AppArg {
             Self::Settings(page) => { c.u32(2); page.write(c); }
             Self::FirstRunConsent(stage) => { c.u32(3).u8(*stage); }
             // 13: allocated forward, past the twelve tags above.
-            #[cfg(feature = "local")]
             Self::Local(arg) => { c.u32(13).str(&arg.path); }
         }
     }
@@ -1732,7 +1723,6 @@ impl plx_ui::screen::ScreenArg for AppArg {
             | AppArg::AboutPanel
             | AppArg::PersonBio
             | AppArg::CollectionAbout => Chrome::None,
-            #[cfg(feature = "local")]
             AppArg::Local(_) => Chrome::None,
         }
     }
@@ -1779,7 +1769,6 @@ impl plx_ui::screen::ScreenArg for AppArg {
             AppArg::Content(ContentArg::Filmography { .. }) => 14,
             AppArg::Content(ContentArg::Collection(_)) => 23,
             // 25: allocated forward. Every folder page is one SCREEN; which folder is its argument.
-            #[cfg(feature = "local")]
             AppArg::Local(_) => 25,
         })
     }
@@ -1799,7 +1788,6 @@ impl plx_ui::screen::ScreenArg for AppArg {
         // carries no overlay at all any more, which is what makes a BACK out of the track menu
         // dismiss a surface instead of remounting the page (the reuse-vs-remount risk this rule
         // exists for).
-        #[cfg(feature = "local")]
         if let (Self::Local(a), Self::Local(b)) = (self, other) {
             return a == b;
         }
@@ -1996,7 +1984,6 @@ where
             AppArg::Settings(root) => {
                 Box::new(RouteSurface::new(entry, id, Family::Settings, *root, H::hubs(cx)))
             }
-            #[cfg(feature = "local")]
             AppArg::Local(arg) => Box::new(crate::local::LocalScreen::new(entry, id, arg)),
             AppArg::FirstRunConsent(stage) => Box::new(RouteSurface::new(
                 entry,
@@ -2091,7 +2078,6 @@ pub fn every_surface_arg() -> Vec<AppArg> {
             | AppArg::Content(_) => {
                 panic!("a page argument is not a surface: its word is `route=`")
             }
-            #[cfg(feature = "local")]
             AppArg::Local(_) => panic!("a page argument is not a surface: its word is `route=`"),
         }
     }
@@ -2146,9 +2132,7 @@ pub const SCREEN_SHAPES: &[&str] = &[
     "LocalizationSettingsV4{Root:{language:system|en|es|be},Language:{selected:system|en|es|be,focus:u32,busy:bool,failed:bool},Contribute:QrLink,LoginReportAlert:{send:bool,scroll_target_bits:u32},ConsentDisclosure:{scroll_target_bits:u32,scroll_owner:answer_band},ConsentDeleteDisclosure:{scroll_target_bits:u32},BandPart:MeasuredRowOrColumn}",
     crate::preferences::SHAPE,
     crate::preferences::PICKER_SHAPE,
-    #[cfg(feature = "local")]
     "AppArg+Local{path:str}",
-    #[cfg(feature = "local")]
     crate::local::LocalScreen::SHAPE,
 ];
 
@@ -2263,7 +2247,7 @@ pub const SCREEN_SHAPES: &[&str] = &[
 // About panel scroll: `AboutPanelScreen{}` gains the synopsis viewport's cursor and spring
 // (`page:usize,scroll:Spring{pos:f32,vel:f32}`, person_bio's shape); the previous pin was
 // 0x7435_d234_b769_60c2.
-#[cfg_attr(feature = "local", allow(dead_code))]
+#[allow(dead_code)]
 const SCREEN_SHAPES_PIN: u64 = 0x6a55_c53a_d931_3acf;
 
 #[cfg(test)]
@@ -2276,11 +2260,6 @@ mod arg_tests {
     /// same file, and the same commit, as the entry that caused it.
     // The local library's build appends its own shapes and records no replay fixtures; the pin
     // is the television's and the simulator's.
-    #[cfg(not(feature = "local"))]
-    #[test]
-    fn the_screen_shape_inventory_is_pinned() {
-        assert_eq!(plx_ui::rec::state_fp(SCREEN_SHAPES), SCREEN_SHAPES_PIN);
-    }
 
     /// **One `ScreenId` per surface VARIANT.** Ids are allocated forward here precisely so a
     /// retired identity is never handed to the screen that replaced it, and `same_instance` is

@@ -301,7 +301,6 @@ fn read_module_head(m: &ModuleMapping) -> Option<Vec<u8>> {
 /// kernel prints its internal `MAJOR(dev):MINOR(dev)`; `stat` hands out the glibc encoding of it,
 /// which spreads a 12-bit major and a 20-bit minor over 64 bits.
 fn split_dev(dev: u64) -> (u32, u32) {
-    #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         let major = ((dev >> 8) & 0xfff) | ((dev >> 32) & !0xfff);
         let minor = (dev & 0xff) | ((dev >> 12) & !0xff);
@@ -309,10 +308,6 @@ fn split_dev(dev: u64) -> (u32, u32) {
     }
     // Hosts that cannot be a target (the macOS simulator): there is no maps file there, so this
     // arm only has to be self-consistent for the tests.
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    {
-        ((dev >> 24) as u32, (dev & 0xff_ffff) as u32)
-    }
 }
 
 /// One `at:` line as a [`ModuleMapping`], or `None` for anything that is not a plain, executable,
@@ -2027,7 +2022,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(target_os = "linux", target_os = "android"))]
     fn st_dev_is_split_the_way_the_kernel_prints_maps() {
         // glibc makedev(0xfe, 0x01), and a minor wider than 8 bits (makedev(8, 0x1_0001)).
         assert_eq!(split_dev(0xfe01), (0xfe, 0x01));

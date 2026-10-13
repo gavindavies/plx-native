@@ -13,19 +13,12 @@
 //! reader is not compiled at all, and both answers below are constant `false` at compile time, so
 //! the call sites in `ui/` and `screens/` carry no `#[cfg]` of their own.
 
-#[cfg(feature = "lab-diagnostics")]
-pub mod config;
 
 /// Is this press the configured lab trigger? Consulted by `ui::consts::is_bound` so that pressing
 /// it does not ALSO wake the player HUD and abort an armed click — the unsupported-key invariant
 /// in `design/specs/remote-keys.md` §6, seen from the side of a key that is genuinely bound in this build.
 #[inline]
 pub fn is_trigger_key(_sym: u32, _wcode: u32) -> bool {
-    #[cfg(feature = "lab-diagnostics")]
-    {
-        return config::get().is_some_and(|c| c.is_trigger(_sym, _wcode));
-    }
-    #[cfg(not(feature = "lab-diagnostics"))]
     false
 }
 
@@ -33,10 +26,5 @@ pub fn is_trigger_key(_sym: u32, _wcode: u32) -> bool {
 /// does not have a working lab configuration, so the row cannot be a dead control.
 #[inline]
 pub fn menu_row_enabled() -> bool {
-    #[cfg(feature = "lab-diagnostics")]
-    {
-        return config::get().is_some();
-    }
-    #[cfg(not(feature = "lab-diagnostics"))]
     false
 }

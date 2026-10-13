@@ -650,7 +650,6 @@ fn opening_the_item_menu_leaves_the_press_springing_and_the_opener_lift_follows_
 /// frames (a host test has no GL, so the page PASS itself, which is what tells the press the card
 /// is left out, is `cards::tests::the_lifted_card_is_left_out_of_the_page_pass_and_drawn_by_the_lift`;
 /// here it is said by hand after the mount frame). The control run (no lift owning the card) proves the counter sees the old behaviour.
-#[cfg(feature = "hostsim")]
 fn page_damage_frames_across_a_taken_holds_spring(lift_owns_the_card: bool) -> (usize, usize) {
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
@@ -711,7 +710,6 @@ fn page_damage_frames_across_a_taken_holds_spring(lift_owns_the_card: bool) -> (
     (moving, damaged)
 }
 
-#[cfg(feature = "hostsim")]
 #[test]
 fn a_taken_holds_release_spring_raises_no_page_damage_under_the_open_menu() {
     let _g = plx_base::testlock::serial();
@@ -720,7 +718,6 @@ fn a_taken_holds_release_spring_raises_no_page_damage_under_the_open_menu() {
     assert_eq!(damaged, 0, "none of its {moving} moving frames may be page damage (each is a full page capture)");
 }
 
-#[cfg(feature = "hostsim")]
 #[test]
 fn the_page_damage_counter_sees_a_spring_the_lift_does_not_own() {
     let _g = plx_base::testlock::serial();

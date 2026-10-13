@@ -614,7 +614,7 @@ impl LoadVideo {
 /// decoder. Only reachable when a server ignores the profile we sent, so the refusal is a refusal
 /// to declare a codec the set may not have, never a fallback to H.264 for another bitstream.
 // The Linux build asks GStreamer instead (`gst_sink::decodes_video`); the tests still grade this.
-#[cfg_attr(feature = "gst", allow(dead_code))]
+#[allow(dead_code)]
 pub(crate) fn load_video_refused(lv: LoadVideo, caps: &plx_platform::devcaps::Caps) -> bool {
     match lv {
         LoadVideo::Av1 => !caps.av1,
@@ -778,10 +778,7 @@ pub fn audio_payload_codec(codec: &str) -> Option<(&'static str, u8)> {
         "eac3" => Some(("AC3 PLUS", 2)),
         "aac" => Some(("AAC", 3)),
         "dts" => Some(("DTS", 4)),
-        #[cfg(feature = "gst")]
         _ => GST_AUDIO_PAYLOAD_CODECS.iter().find(|(f, _, _)| *f == codec || (*f == "pcm" && super::gst_sink::pcm_format(codec).is_some())).map(|&(_, p, d)| (p, d)),
-        #[cfg(not(feature = "gst"))]
-        _ => None,
     }
 }
 
@@ -789,7 +786,6 @@ pub fn audio_payload_codec(codec: &str) -> Option<(&'static str, u8)> {
 /// The sink reads the stream's parameters from the demuxer (`gst_sink::note_audio`), since these
 /// formats need more than a codec name to be described (FLAC's STREAMINFO, Opus's header, PCM's
 /// sample format). `pcm` stands for every plain interleaved `pcm_*` (`gst_sink::pcm_format`).
-#[cfg(feature = "gst")]
 pub const GST_AUDIO_PAYLOAD_CODECS: [(&str, &str, u8); 7] = [
     ("flac", "FLAC", 5),
     ("opus", "OPUS", 6),
@@ -1286,7 +1282,6 @@ fn start_bufferfeed_inner(
     let no_audio = plx_base::devtrig::flag("noaudio");
     // On the Linux build a local file with no audio track at all plays silent
     // (`localplay::admit`); its declaration carries no audio codec.
-    #[cfg(feature = "gst")]
     let no_audio = no_audio || crate::route::stream_acodec(ps).is_empty();
     crate::ff::set_feed_audio(!no_audio);
     let stream_payload;
@@ -1310,10 +1305,7 @@ fn start_bufferfeed_inner(
             return Err(crate::route::RouteStartResult::StartFailed);
         };
         // The Linux build's decoders are this machine's GStreamer's, not a television's table.
-        #[cfg(feature = "gst")]
         let refused = !super::gst_sink::decodes_video(lv.payload_name());
-        #[cfg(not(feature = "gst"))]
-        let refused = load_video_refused(lv, plx_platform::devcaps::caps());
         if refused {
             log(&format!(
                 "start_bufferfeed: {} stream but the device table lists no such decoder; refusing the Load",
@@ -3169,7 +3161,7 @@ mod native_lifecycle_proof_tests {
     }
 }
 
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod native_lifecycle_host_seam_tests {
     use super::*;
 
@@ -3884,7 +3876,7 @@ mod stream_open_log_line_tests {
 /// **This test drives the real [`feed_stream`] and [`feed_audio_lane`] against the real host feed
 /// seam** — it is not a restatement of the predicate, which is correct and would pass on the
 /// broken build. What it grades is WHERE the predicate is evaluated.
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod prime_livelock_tests {
     use super::*;
 
@@ -4677,7 +4669,7 @@ mod prime_livelock_tests {
     }
 }
 
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod lifecycle_clock_tests {
     use super::*;
 
@@ -4712,7 +4704,7 @@ mod lifecycle_clock_tests {
 /// Gated on `hostsim` for the same reason [`lifecycle_clock_tests`] is: `stop_bufferfeed` reaches
 /// the video sink, and only the simulator's (`ffi_host::HostSink`) keeps the state this asserts;
 /// the default build's `NoSink` answers every verb with nothing.
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod replay_after_stop_tests {
     use super::*;
 
@@ -4757,7 +4749,7 @@ mod replay_after_stop_tests {
 
 /// Test-only: an Engine parked at `Stage::Streaming` on the host sink, for the pump-level rigs
 /// that live outside this module (`pump::flight_tests`).
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 pub(super) fn streaming_engine_for_test(native_epoch: u32) -> Engine {
     let mut eng = prime_livelock_tests::engine_after_reload();
     eng.native_epoch = native_epoch;
@@ -4771,7 +4763,7 @@ pub(super) fn streaming_engine_for_test(native_epoch: u32) -> Engine {
 /// `sf_play`/`sf_feed`/etc. could dispatch into an object whose LoadCommon ctor path was still
 /// running on the load thread: investigation.md's run A (a null-arg SIGSEGV on the priming path)
 /// and run B (a Play-vs-LoadCommon mutex deadlock ending in an OMX_VideoComp abort).
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod load_in_flight_tests {
     use super::*;
 
@@ -5629,11 +5621,6 @@ mod sink_envelope_tests {
     fn audio_payload_names_dts_and_refuses_unsupported_formats() {
         assert_eq!(audio_payload_codec("dts"), Some(("DTS", 4)));
         assert_eq!(audio_payload_codec("eac3"), Some(("AC3 PLUS", 2)));
-        #[cfg(not(feature = "gst"))]
-        for codec in ["truehd", "flac", "", "unknown"] {
-            assert_eq!(audio_payload_codec(codec), None);
-        }
-        #[cfg(feature = "gst")]
         {
             assert_eq!(audio_payload_codec("flac"), Some(("FLAC", 5)));
             assert_eq!(audio_payload_codec("pcm_s24le"), Some(("PCM", 11)));
@@ -5849,7 +5836,7 @@ mod sink_envelope_tests {
     }
 }
 
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod load_refusal_tests {
     use super::*;
     use std::sync::atomic::Ordering;
@@ -5954,7 +5941,7 @@ mod audio_lead_in_tests {
 /// [`AUDIO_STALE_AHEAD_NS`] past that video. These tests drive the real lanes through
 /// [`feed_both_lanes`] against the host feed seam, in the state a progressive start leaves:
 /// Play already issued, nothing presented (`pres_fed` 0, not [`PRES_NONE`]).
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod late_audio_start_tests {
     use super::*;
 

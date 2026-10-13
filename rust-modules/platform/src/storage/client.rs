@@ -261,9 +261,7 @@ pub fn install_activation_hint(hint: fn(&str)) -> Result<(), fn(&str)> {
 
 /// The platform's way to wake the helper, installed by the port at boot. With none installed (a
 /// host, the simulator) activation is [`Stage::Unsupported`].
-#[cfg(target_os = "linux")]
 static ACTIVATOR: std::sync::OnceLock<fn(&str) -> failure::Detail> = std::sync::OnceLock::new();
-#[cfg(target_os = "linux")]
 pub fn install_activator(
     activator: fn(&str) -> failure::Detail,
 ) -> Result<(), fn(&str) -> failure::Detail> {
@@ -272,7 +270,6 @@ pub fn install_activator(
 
 /// The helper is a dynamic LS2 service: nothing starts it but a call to it (0.6.6's
 /// `activate_storage_helper`). Without this a television with no running helper never answers.
-#[cfg(target_os = "linux")]
 fn activate(service: &str) -> failure::Detail {
     match ACTIVATOR.get() {
         Some(activator) => activator(service),
@@ -280,13 +277,6 @@ fn activate(service: &str) -> failure::Detail {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
-fn transact(_command: Request) -> Result<Response, ClientError> {
-    let _block = plx_base::task::assert_may_block(const { &plx_base::task::BlockingLabel::new("storage helper transact") });
-    failure::clear();
-    let _report = TransactionReport::new();
-    Err(failed(Stage::Unsupported, None, ClientError::Unavailable))
-}
 
 struct TransactionReport {
     started: Instant,
@@ -350,7 +340,6 @@ static START_GATE: std::sync::Mutex<StartGate> = std::sync::Mutex::new(StartGate
     attempt: None,
 });
 
-#[cfg(target_os = "linux")]
 fn transact(command: Request) -> Result<Response, ClientError> {
     let _block = plx_base::task::assert_may_block(const { &plx_base::task::BlockingLabel::new("storage helper transact") });
     failure::clear();
@@ -528,10 +517,7 @@ fn read_helper_failure(root: &Path, generation: Option<&str>, activation_nonce: 
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC).open(root) else { return; };
     let Ok(meta) = directory.metadata() else { return; };
     if !meta.is_dir() || meta.uid() != unsafe { libc::getuid() } || meta.mode() & 0o7777 != 0o700 { return; }
-    #[cfg(target_os = "linux")]
     let path = PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd())).join("last-error");
-    #[cfg(not(target_os = "linux"))]
-    let path = root.join("last-error");
     let Ok(mut file) = OpenOptions::new().read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK).open(path) else { return; };
     let Ok(meta) = file.metadata() else { return; };
@@ -544,7 +530,6 @@ fn read_helper_failure(root: &Path, generation: Option<&str>, activation_nonce: 
     }
 }
 
-#[cfg(target_os = "linux")]
 fn connect(root: &Path) -> Result<(UnixStream, Descriptor), ClientError> {
     let directory = OpenOptions::new()
         .read(true)
@@ -616,7 +601,6 @@ fn read_descriptor(path: &Path) -> Result<Descriptor, ClientError> {
     serde_json::from_slice(&bytes).map_err(|_| failed(Stage::DescriptorInvalid, None, ClientError::Protocol))
 }
 
-#[cfg(target_os = "linux")]
 fn authenticate(stream: &UnixStream) -> Result<(), ClientError> {
     let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
     let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;

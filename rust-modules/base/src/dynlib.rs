@@ -412,12 +412,6 @@ macro_rules! dynlib_wrapper {
 mod tests {
     use super::*;
 
-    /// The host's own C library, so these tests need no fixture and run wherever `cargo test`
-    /// does. They grade the LOADER, not FFmpeg — the dev machine has neither libavformat nor a
-    /// television, which is exactly why the loader is the part worth testing here.
-    #[cfg(target_os = "macos")]
-    static HOST_LIBC: &[&str] = &["libSystem.B.dylib"];
-    #[cfg(not(target_os = "macos"))]
     static HOST_LIBC: &[&str] = &["libc.so.6"];
 
     /// A SONAME that exists on no platform must report `NoLibrary` rather than opening something.
@@ -483,9 +477,6 @@ mod tests {
     /// mapped candidate is the one reported.
     #[test]
     fn open_loaded_finds_only_what_is_already_mapped() {
-        #[cfg(target_os = "macos")]
-        let mapped = "/usr/lib/libSystem.B.dylib";
-        #[cfg(not(target_os = "macos"))]
         let mapped = "libc.so.6";
         assert!(Handle::open_loaded(&["libplxnative-nope.so.1"]).is_none());
         let (h, name) = Handle::open_loaded(&["libplxnative-nope.so.1", mapped])
@@ -494,18 +485,6 @@ mod tests {
         assert!(h.sym("malloc").is_some_and(|p| !p.is_null()));
     }
 
-    /// Libraries that ship with the base system but that a test process has no reason to map.
-    /// A LIST, because no single one is on every host: the GitHub Ubuntu runner has no
-    /// `libthread_db.so.1`. glibc ships the rest in `libc6` itself (`libanl`/`libutil` survive
-    /// 2.34's merge as compat stubs; `libBrokenLocale`, the NSS modules and `libresolv` never
-    /// moved).
-    #[cfg(target_os = "macos")]
-    const UNMAPPED_CANDIDATES: &[&str] = &[
-        "/usr/lib/libpanel.5.4.dylib",
-        "/usr/lib/libform.5.4.dylib",
-        "/usr/lib/libmenu.5.4.dylib",
-    ];
-    #[cfg(not(target_os = "macos"))]
     const UNMAPPED_CANDIDATES: &[&str] = &[
         "libthread_db.so.1",
         "libBrokenLocale.so.1",

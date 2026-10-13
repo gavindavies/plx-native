@@ -109,7 +109,6 @@ pub(crate) unsafe fn run(app: &mut App) {
     while app.running {
         watchdog.advance();
         let _frame_scope = plx_base::task::FrameScope::enter();
-        #[cfg(all(feature = "hostsim", target_os = "linux"))]
         let wslg_frame_budget = app.wslg_frame_pacing.then(super::window_activity::WslgFrameBudget::begin);
         // Resolve the control row ONCE per iteration, before the event pump, and pass this
         // value to input, update and draw alike. `player_hud::slot()` reads `playpos_ns`, which
@@ -141,7 +140,7 @@ pub(crate) unsafe fn run(app: &mut App) {
         }
         // The frame dump (`dev::framedump`) owns the clock and the placeholder count from here:
         // it must run before anything reads `clock::now()`.
-        #[cfg(all(feature = "hostsim", feature = "devtriggers"))]
+        #[cfg(feature = "devtriggers")]
         if crate::dev::framedump::requested() {
             crate::dev::framedump::iteration_begin(app);
         }
@@ -186,9 +185,7 @@ pub(crate) unsafe fn run(app: &mut App) {
             let _ = plx_base::diag::spans::take();
             continue;
         }
-        #[cfg(feature = "gst")]
         crate::app::local_launch::tick(app, fr.now);
-        #[cfg(feature = "gst")]
         crate::app::local_watch::tick(app, fr.now);
         plx_base::diag::spans::span("pump", || unsafe { playback_tick(app, fr) });
         clock_and_press(app, fr);
@@ -290,7 +287,6 @@ pub(crate) unsafe fn run(app: &mut App) {
         present_and_swap(
             app,
             fr,
-            #[cfg(all(feature = "hostsim", target_os = "linux"))]
             wslg_frame_budget,
         );
         if fr.present { watchdog.presented(); }
@@ -329,9 +325,9 @@ fn clock_and_press(app: &mut App, fr: &mut Frame) {
     // a bare units-per-second. The decision itself is taken just above `glViewport`.
     // A dump's held repeat judges rest with its first pass's `dt` (`framedump::idle_dt`); the
     // clock `now_ms` reads still advances by `fr.dt` alone.
-    #[cfg(all(feature = "hostsim", feature = "devtriggers"))]
+    #[cfg(feature = "devtriggers")]
     let rest_dt = if crate::dev::framedump::active() { crate::dev::framedump::idle_dt(fr.dt) } else { fr.dt };
-    #[cfg(not(all(feature = "hostsim", feature = "devtriggers")))]
+    #[cfg(not(feature = "devtriggers"))]
     let rest_dt = fr.dt;
     plx_machine::idle::frame_begin_judging_rest_with(fr.dt, rest_dt);
     // Is a page capture still in flight on the GPU, and is recorded text still warming? Latched
@@ -438,7 +434,6 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
     // The simulator's settled capture (`PLXNATIVE_SHOT_SETTLE`): once nothing has changed for the
     // asked-for quiet, invalidate so the NEXT present is the settled frame and `maybe_capture`
     // takes it. Before the decision below, so that invalidate selects this very frame.
-    #[cfg(feature = "hostsim")]
     crate::shot::tick(fr.now, app.pages.budget.has_queued_work() || plx_gfx::gfx::snapshot_pending()
         || app.scenarios.shots.pending());
     fr.present = !plx_gfx::gfx::snapshot_pending()
@@ -450,7 +445,7 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
     // asked: it takes-and-clears the damage the deferred frame still needs.)
     fr.deferred = !fr.present && plx_gfx::gfx::snapshot_pending() && app.window_activity.allow_present(true);
     // A dump draws every iteration: a held repeat and a written frame alike are a draw.
-    #[cfg(all(feature = "hostsim", feature = "devtriggers"))]
+    #[cfg(feature = "devtriggers")]
     if crate::dev::framedump::active() {
         fr.present = true;
     }
@@ -535,12 +530,11 @@ const FONT_WARM_SLICE_US: u64 = 2_000;
 unsafe fn present_and_swap(
     app: &mut App,
     fr: &mut Frame,
-    #[cfg(all(feature = "hostsim", target_os = "linux"))]
     wslg_frame_budget: Option<super::window_activity::WslgFrameBudget>,
 ) {
     if fr.present {
         // The dump's full prewarm drain and pre-draw debt sample, after the takes and before the draw.
-        #[cfg(all(feature = "hostsim", feature = "devtriggers"))]
+        #[cfg(feature = "devtriggers")]
         if crate::dev::framedump::active() {
             crate::dev::framedump::pre_draw(app);
         }
@@ -564,29 +558,26 @@ unsafe fn present_and_swap(
         app.instr.mark(plx_base::diag::heartbeat::Phase::Capture); // capture
         // `plxnative-simvideo`: the decoded picture goes UNDER the finished UI, as the television's
         // compositor puts its video plane under ours — before the capture, so shots include it.
-        #[cfg(feature = "hostsim")]
         if fr.player {
             plx_media::player::sim_video::composite_under();
         }
         // The Linux build's decoded picture, under the UI the same way (`player::gst_sink`).
-        #[cfg(feature = "gst")]
         if fr.player {
             plx_media::player::gst_sink::composite_under();
         }
         // Before the swap, never after: the back buffer is undefined once presented.
         // A dump decides here whether this frame is written (`dev::framedump`); otherwise the
         // ordinary screenshot seam.
-        #[cfg(all(feature = "hostsim", feature = "devtriggers"))]
+        #[cfg(feature = "devtriggers")]
         let dumping = crate::dev::framedump::active();
-        #[cfg(all(feature = "hostsim", feature = "devtriggers"))]
+        #[cfg(feature = "devtriggers")]
         if dumping && crate::dev::framedump::after_draw(app, _vx, _vy, _vw, _vh) {
             app.running = false;
         }
-        #[cfg(all(feature = "hostsim", feature = "devtriggers"))]
+        #[cfg(feature = "devtriggers")]
         let screenshot_seam = !dumping;
-        #[cfg(all(feature = "hostsim", not(feature = "devtriggers")))]
+        #[cfg(not(feature = "devtriggers"))]
         let screenshot_seam = true;
-        #[cfg(feature = "hostsim")]
         if screenshot_seam && crate::shot::maybe_capture(_vx, _vy, _vw, _vh) {
             // The headless one-shot is done: finish this frame, then leave through the ordinary
             // shutdown rather than exiting from inside the frame (see `shot::maybe_capture`).
@@ -595,7 +586,6 @@ unsafe fn present_and_swap(
         {
             #[cfg(feature = "threadcheck")]
             let _present_scope = plx_base::task::watchdog::present_scope();
-            #[cfg(feature = "hostsim")]
             plx_base::surface::present_supersampled();
             // dev (`/tmp/plxnative-framecb`): this frame's compositor callback, requested before
             // the swap that commits it. One latched bool unarmed.
@@ -634,7 +624,6 @@ unsafe fn present_and_swap(
         // no longer names `ui`'s metrics.
         #[cfg(feature = "devtriggers")]
         plx_ui::card_motion_metrics::presented(fr.now);
-        #[cfg(all(feature = "hostsim", target_os = "linux"))]
         if let Some(budget) = wslg_frame_budget {
             budget.finish();
         }
@@ -1438,7 +1427,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
             // `SDL_PushEvent`d in this shape (item 13's `wheel:<dy>` FIFO token hit
             // this the first time anything synthesized a wheel event at all — nothing
             // needed one before). `cfg!`, not `#[cfg]`, so both arms keep compiling.
-            let dy = if cfg!(feature = "hostsim") {
+            let dy = if true {
                 rd_f32(&app.ev, 32).round() as i32
             } else {
                 rd_i32(&app.ev, 20)
@@ -1606,7 +1595,6 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
         // on the last frame.
         if playback_may_run(app) && super::bridge::player(&app.pages).is_some() && plx_media::player::ended() {
             // A local file's record is settled as finished (`finish_playback` clears the flag).
-            #[cfg(feature = "gst")]
             super::local_watch::note_ended();
             let handed_off_to_up_next = finish_playback(&mut app.player.session,
                 &mut app.adapters.player,
@@ -2223,7 +2211,6 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         app.diagnostics.update(&app.player.session, fr.now);
         // …and the lab upload's toast, which expires on a clock rather than a spring.
         crate::lab::update(fr.now);
-        #[cfg(feature = "gst")]
         super::toast::update(fr.now);
         #[cfg(feature = "threadcheck")]
         plx_ui::runtime_warning::update(app.boot_initial.is_some());
@@ -2379,7 +2366,7 @@ fn finish_landed_play(app: &mut App, resume_prepared: bool) {
             // A host Load of 0 with the clock sink off is "no video path", not an
             // admitted slot. Counting it spends the cycle and the later failure
             // opens the breaker, so every later title is skipped.
-            let seam_absent = cfg!(feature = "hostsim") && !plx_base::devtrig::flag("clocksink");
+            let seam_absent = true && !plx_base::devtrig::flag("clocksink");
             if started && !seam_absent {
                 plx_media::player::preview::note_admitted();
             } else if plx_media::route::url(&app.player.session).is_empty() {
@@ -2622,7 +2609,6 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                                                      // The lab upload read-out, over everything, on every route — including the
                                                      // player, where the two branches above diverge and this one must not.
                     crate::lab::draw(app.diagnostics.frame_if_shown());
-                    #[cfg(feature = "gst")]
                     super::toast::draw();
                     #[cfg(feature = "threadcheck")]
                     plx_ui::runtime_warning::draw(app.boot_initial.is_some());
@@ -2721,7 +2707,6 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
                 AppArg::Content(plx_screens::registry::ContentArg::Collection(_)) =>
                     crate::focusprobe::Screen::Collection,
                 AppArg::Search => crate::focusprobe::Screen::Search,
-                #[cfg(feature = "gst")]
                 AppArg::Local(_) => crate::focusprobe::Screen::Local,
                 // The same words the heartbeat's `overlay=` uses, and — since phase 9 — from the
                 // same place: the SURFACE that is up. There is no second table; see
@@ -3108,7 +3093,7 @@ unsafe fn controlled_key_input(app: &mut App, event: plx_machine::machine::Input
     app.inputs.push(event);
 }
 
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod lifecycle_regression_tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read, Write};
@@ -3164,7 +3149,6 @@ mod lifecycle_regression_tests {
             ev: [0; 128],
             remote: Default::default(),
             win: Default::default(),
-            #[cfg(target_os = "linux")]
             wslg_frame_pacing: false,
             t0: Default::default(),
             instr: plx_base::diag::heartbeat::Instruments::new(false, 22.0),
@@ -3964,7 +3948,6 @@ mod lifecycle_regression_tests {
                 present_and_swap(
                     app,
                     &mut fr,
-                    #[cfg(all(feature = "hostsim", target_os = "linux"))]
                     None,
                 );
             }

@@ -21,7 +21,6 @@ default = []
 # only because some code in this crate has a `cfg` on it (`net::post_pinned`, the `keypin` readers
 # of the `tls-selftest` dev trigger).
 devtriggers = ["plx_base/devtriggers"]
-lab-diagnostics = ["plx_base/lab-diagnostics"]
 # The `cfg(test)` seams other crates' tests use (`net::keypin`'s and `net::resolve`'s test hooks,
 # the loopback PMS fixtures, the canned-response helpers) plus the test-only CA-bundle override of
 # `net::request_result`. The fixtures mint certificates and run a TLS server, so this feature is

@@ -141,7 +141,6 @@ pub(crate) enum Screen {
     Person,
     Collection,
     /// The local library's folder page (the Linux build).
-    #[cfg(feature = "gst")]
     Local,
     Search,
     /// `overlay` is the same word the heartbeat prints after `overlay=`, supplied by `app.rs` from
@@ -267,7 +266,6 @@ fn push_fields(ps: &plx_media::route::PlaybackSession, s: &mut String, screen: S
         Screen::Home => s.push_str(content),
         Screen::Library => s.push_str(content),
         Screen::Detail | Screen::Person | Screen::Collection => s.push_str(content),
-        #[cfg(feature = "gst")]
         Screen::Local => s.push_str(content),
         // Owned like Library/Detail/Person: the content string is built generically by the
         // caller (`super::bridge::content_probe`, from the mounted `SearchScreen`'s own

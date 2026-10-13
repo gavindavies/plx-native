@@ -24,30 +24,27 @@ default = []
 # behaviour here, not plumbing: the quality-override, track-name, playurl and forced-route triggers
 # read their files through `plx_base::devtrig`, which is compile-time `None` without it, and
 # 130-odd `cfg`s select the dev surface.
-devtriggers = ["plx_base/devtriggers", "plx_machine/devtriggers", "plx_net/devtriggers", "plx_platform/devtriggers", "plx_gfx?/devtriggers", "plx_plex/devtriggers", "plx_telemetry/devtriggers", "plx_data/devtriggers"]
+devtriggers = ["plx_base/devtriggers", "plx_machine/devtriggers", "plx_net/devtriggers", "plx_platform/devtriggers", "plx_gfx/devtriggers", "plx_plex/devtriggers", "plx_telemetry/devtriggers", "plx_data/devtriggers"]
 # `player::ffi_host` (the simulator's `VideoSink`) and `player::sim_video` replace `player::ffi`
 # (Starfish/ACB) under it. `sim_video` is the one thing here that draws, so `plx_gfx` is a
 # dependency of this feature only.
-hostsim = ["dep:plx_gfx", "plx_base/hostsim", "plx_machine/hostsim", "plx_platform/hostsim", "plx_gfx/hostsim", "plx_plex/hostsim", "plx_telemetry/hostsim", "plx_data/hostsim"]
 # The Linux build's real player: `player::gst_sink` decodes the fed access units with the system
 # GStreamer (video composited under the UI, audio decoded to PCM) instead of discarding them as the
 # simulator's clock sink does. Builds on `hostsim`, whose desktop window and GL compositing it uses.
-gst = ["hostsim", "dep:gstreamer", "dep:gstreamer-app"]
 # Two `cfg_attr(not(feature = "lab-diagnostics"), allow(dead_code))` in `player`; the Cloud Lab bridge
 # that reads those items is the application crate's.
-lab-diagnostics = []
 # The `cfg(test)` seams other crates' tests use (`player::preview::reset_for_test`,
 # `player::restore_state_for_test`, `player::swap_state_for_test`, ...) plus the test-mode arms
 # `cfg(test)` alone cannot give a dependent (the stand-in sink, the stepped feed clock, the asset
 # directory, the settled route start). Enabled from the dependents' `[dev-dependencies]`; never in a
 # shipped build.
-test-support = ["plx_base/test-support", "plx_machine/test-support", "plx_platform/test-support", "plx_gfx?/test-support", "plx_net/test-support", "plx_plex/test-support", "plx_telemetry/test-support", "plx_data/test-support"]
+test-support = ["plx_base/test-support", "plx_machine/test-support", "plx_platform/test-support", "plx_gfx/test-support", "plx_net/test-support", "plx_plex/test-support", "plx_telemetry/test-support", "plx_data/test-support"]
 
 [dependencies]
 plx_base = { path = "../base" }
 plx_machine = { path = "../machine" }
 plx_platform = { path = "../platform" }
-plx_gfx = { path = "../gfx", optional = true }
+plx_gfx = { path = "../gfx" }
 plx_net = { path = "../net" }
 plx_plex = { path = "../plex" }
 plx_telemetry = { path = "../telemetry" }
@@ -55,8 +52,8 @@ plx_data = { path = "../data" }
 libc = "0.2"
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc", "std"] }
-gstreamer = { version = "0.25", optional = true }
-gstreamer-app = { version = "0.25", optional = true }
+gstreamer = { version = "0.25" }
+gstreamer-app = { version = "0.25" }
 
 [dev-dependencies]
 # THE rule of the layer crates: dev-depend on ITSELF with `devtriggers`, so `cargo test -p plx_media`

@@ -565,7 +565,6 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
     // (`ItemMenuScreen::activate`): a row with no target never becomes a request at all.
     //
     // A local video's menu names no server: its record is the app's own.
-    #[cfg(feature = "gst")]
     if sid.raw() == plx_data::local::ART_SRV {
         super::local_watch::apply_menu_action(ps, pa, act, pages, bridge);
         return;
@@ -743,7 +742,7 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
 #[path = "menu_play_season_tests.rs"]
 mod menu_play_season_tests;
 
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 #[path = "item_menu_player_return_tests.rs"]
 mod item_menu_player_return_tests;
 

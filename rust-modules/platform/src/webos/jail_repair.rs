@@ -7,13 +7,7 @@
 use crate::tv::sandbox::Failure;
 use serde_json::Value;
 use std::path::Path;
-#[cfg(all(not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-use std::time::Duration;
 
-#[cfg(all(not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-const EXEC_URI: &str = "luna://org.webosbrew.hbchannel.service/exec";
-#[cfg(all(not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-const BUDGET: Duration = Duration::from_secs(10);
 const OK_MARKER: &str = "PLXNATIVE_JAIL_REPAIR_OK_74";
 const NOT_ROOT_MARKER: &str = "PLXNATIVE_JAIL_REPAIR_NOT_ROOT_74";
 const HBC_ABSENT_TEXT: &str = "Service does not exist: org.webosbrew.hbchannel.service.";
@@ -30,18 +24,7 @@ pub fn execute() -> Result<(), Failure> {
 
 const RTKMEM: &str = "/dev/rtkmem";
 
-#[cfg(all(not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-fn call_hbc(payload: &str) -> Result<String, Failure> {
-    let registration = super::ls2::register().map_err(|_| Failure::HbcUnavailable)?;
-    registration
-        .call(EXEC_URI, payload, BUDGET)
-        .map_err(|failure| match failure {
-            super::ls2::Fail::Timeout => Failure::Timeout,
-            super::ls2::Fail::Setup { .. } => Failure::HbcUnavailable,
-        })
-}
 
-#[cfg(any(feature = "hostsim", test, feature = "test-support"))]
 fn call_hbc(_payload: &str) -> Result<String, Failure> {
     Err(Failure::HbcUnavailable)
 }

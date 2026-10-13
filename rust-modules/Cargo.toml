@@ -64,7 +64,6 @@ crate-type = ["rlib"]
 [[bin]]
 name = "plxnative-sim"
 path = "src/bin/sim.rs"
-required-features = ["hostsim"]
 
 [features]
 # On by default, so every ordinary `make`, every `make test` and every on-device harness run
@@ -115,14 +114,12 @@ threadcheck = ["plx_base/threadcheck", "plx_ui/threadcheck"]
 # it adds: a bounded in-memory copy of the lines `crate::log` already writes, one key arm, one row
 # in two menus, one overlay, pinned diagnostic POSTs and an opt-in pinned HTTPS long-poll worker.
 # Everything else compiles identically.
-lab-diagnostics = ["plx_base/lab-diagnostics", "plx_net/lab-diagnostics", "plx_platform/lab-diagnostics", "plx_media/lab-diagnostics"]
 
 # **The demo-video dump build's pixel oracle** (`rust-modules/ui/src/placeholder.rs`): every
 # placeholder the UI draws is painted flat in one exact colour (#FF00FE) at alpha 1, so the dump's
 # frame scanner can find one by pixel value. OFF by default and in NO default set, so no ordinary
 # `make`, `make check`, harness run or `RELEASE=1` build has it; only the dump build names it.
 # `plx_ui` is the one crate with a `cfg` on it.
-placeholder-sentinel = ["plx_ui/placeholder-sentinel"]
 
 # **There is no `telemetry` cargo feature, and this comment is here so nobody adds one back.**
 #
@@ -162,10 +159,8 @@ placeholder-sentinel = ["plx_ui/placeholder-sentinel"]
 # (LG's SDL fork shifts SDL_KeyboardEvent; stock SDL2 does not), and the wayland/glib calls that
 # have no host equivalent. Everything else — all of `ui/`, the whole Plex data layer, the demux
 # orchestration — is compiled identically for both.
-hostsim = ["dep:xxhash-rust", "plx_base/hostsim", "plx_machine/hostsim", "plx_platform/hostsim", "plx_gfx/hostsim", "plx_plex/hostsim", "plx_telemetry/hostsim", "plx_data/hostsim", "plx_session/hostsim", "plx_media/hostsim"]
 # The Linux build: the desktop window of `hostsim` plus a real player (`plx_media/gst`) that decodes
 # with the system GStreamer, for playing a library on this machine's own disk.
-gst = ["hostsim", "plx_media/gst", "plx_screens/local"]
 
 # Warnings are ERRORS, for both workspace packages, in every cargo invocation — build, check, test, clippy, the
 # ARM cross-build and the simulator alike. The tree reached zero warnings in all four
@@ -265,7 +260,7 @@ libc = "0.2"
 # XXH3-64 of every written frame of the demo-video dump (`src/dev/framedump.rs`, the `frames.tsv`
 # column `tools/site_video.py` reads). Optional, and pulled by `hostsim` alone: no television or
 # shipping build compiles it.
-xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"], optional = true }
+xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
 # JSON parsing for the pms module (replaces the C's hand-rolled string scrape)
 # std exposes the writer API used to bound manifest encoding before any filesystem write.
 serde_json = { version = "1", default-features = false, features = ["alloc", "std"] }

@@ -85,7 +85,6 @@ pub fn prepare(ps: &mut crate::route::PlaybackSession, path: &Path) -> Result<cr
     let probe = crate::ff::probe_local(path).map_err(LocalPlayError::Unreadable)?;
     // The Linux build asks this machine's GStreamer, so an AV1 or VP9 file on a machine without
     // that decoder is refused here, with a reason, rather than by a Load that never shows a frame.
-    #[cfg(feature = "gst")]
     if let Some(name) = payload_video(&probe.vcodec) {
         if !crate::player::gst_sink::decodes_video(name) {
             return Err(LocalPlayError::VideoCodec(probe.vcodec.clone()));

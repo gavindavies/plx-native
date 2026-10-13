@@ -11,7 +11,7 @@ use std::os::raw::c_void;
 use std::sync::OnceLock;
 
 /// What the platform's settings service said about the locale. i18n owns the parse and the log lines.
-#[cfg_attr(any(feature = "hostsim", test, feature = "test-support"), allow(dead_code))] // Reply/Unavailable: TV arm only
+#[allow(dead_code)] // Reply/Unavailable: TV arm only
 pub enum LocaleReply { NoPlatform, Unavailable, Reply(String) }
 
 pub struct Port {

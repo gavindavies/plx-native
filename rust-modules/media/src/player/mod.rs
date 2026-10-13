@@ -30,22 +30,17 @@ pub mod preview;
 // own test build, and `cargo check --lib --tests` builds that library with this crate's
 // `test-support` on. The application's test binaries therefore carry this module's code, but port.rs
 // installs `NoSink` there, so nothing reaches its externs and the linker drops them.
-#[cfg(all(not(feature = "hostsim"), not(test)))]
-pub mod ffi;
-#[cfg(feature = "hostsim")]
 pub mod ffi_host;
-#[cfg(feature = "gst")]
 pub mod gst_sink; // the Linux build's player: the fed AUs decoded by the system GStreamer
 mod pump;
 pub mod report;
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod foreground_flight_tests;
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod resume_tests;
 mod shared;
 pub mod sidecar;
 pub mod subside; // the side subtitle reader's thread and state (dev trigger `plxnative-subside`)
-#[cfg(feature = "hostsim")]
 pub mod sim_video; // the simulator's decoded picture, for screenshots (see its doc)
 pub mod threads;
 pub mod video_geometry;
@@ -69,11 +64,11 @@ use shared::{
 /// (`player::ffi::StarfishSink`) or the simulator's (`player::ffi_host::HostSink`) once at boot; a
 /// hostsim test binary reads the host sink directly, so it needs no port. Everything in `player/`
 /// reaches the seam as `sink().<verb>(mt, ..)`, and nothing branches on which platform it is.
-#[cfg(not(all(any(test, feature = "test-support"), feature = "hostsim")))]
+#[cfg(not(any(test, feature = "test-support")))]
 fn sink() -> &'static dyn plx_platform::tv::sink::VideoSink {
     plx_platform::tv::sink::installed()
 }
-#[cfg(all(any(test, feature = "test-support"), feature = "hostsim"))]
+#[cfg(any(test, feature = "test-support"))]
 fn sink() -> &'static dyn plx_platform::tv::sink::VideoSink {
     &ffi_host::HostSink
 }
@@ -443,12 +438,12 @@ pub fn finish_paused_seek(pa: &mut adapter::PlayerAdapter) -> bool {
     true
 }
 
-#[cfg(all(any(test, feature = "test-support"), feature = "hostsim"))]
+#[cfg(any(test, feature = "test-support"))]
 pub fn force_pause_result_for_test(result: Option<c_int>) {
     ffi_host::force_pause_result_for_test(result);
 }
 
-#[cfg(all(any(test, feature = "test-support"), feature = "hostsim"))]
+#[cfg(any(test, feature = "test-support"))]
 pub fn force_play_result_for_test(result: Option<c_int>) {
     ffi_host::force_play_result_for_test(result);
 }
@@ -1272,7 +1267,6 @@ pub use engine::aq_caps;
 /// itself.
 pub use engine::feed_leads_ms;
 pub use plx_platform::tv::sink::{VP_ACB, VP_EXPORTED, VP_NONE};
-#[cfg(feature = "hostsim")]
 /// The simulator's clock-sink stop; the television's pipeline has no such control.
 pub use ffi_host::stop_clock_at as stop_sim_clock_at;
 
@@ -1404,7 +1398,7 @@ fn playable_buffer_ms(
 
 impl Diag {
     /// The lab snapshot's wire spelling; the on-screen read-out words its own labels.
-    #[cfg_attr(not(feature = "lab-diagnostics"), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn vp_mode_str(&self) -> &'static str {
         match self.vp_mode {
             VP_EXPORTED => "exported window (webOS 5+)",
@@ -1423,7 +1417,6 @@ impl Diag {
             2 => "AC3 PLUS",
             3 => "AAC",
             4 => "DTS",
-            #[cfg(feature = "gst")]
             n if n >= 5 => engine::GST_AUDIO_PAYLOAD_CODECS.iter().find(|c| c.2 == n).map_or("NONE (needAudio:false)", |c| c.1),
             _ => "NONE (needAudio:false)",
         }
@@ -1439,7 +1432,7 @@ impl Diag {
     /// state a healthy playback sits in most of the time, because the feeder deliberately stays
     /// within `MAX_FEED_AHEAD_NS` of the presented position. The first person to see the panel in
     /// the wild asked why playback was stuck; it was not.
-    #[cfg_attr(not(feature = "lab-diagnostics"), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn feed_state_str(&self) -> &'static str {
         match self.feed_state {
             1 => "accepting",
@@ -2979,7 +2972,6 @@ mod tests {
     /// User Play releases the transport pause, but an internal runway hold owns the media clock.
     /// Calling the ordinary seam here would bypass the only place that checks fresh A/V media and
     /// recreate the short burst/freeze cycle after a manual Pause/Play during rebuffering.
-    #[cfg(feature = "hostsim")]
     #[test]
     fn user_resume_cannot_bypass_an_internal_hls_rebuffer_hold() {
         let _guard = plx_base::testlock::serial();
@@ -3868,7 +3860,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod native_failure_regressions {
     use super::*;
     struct JailGuard;

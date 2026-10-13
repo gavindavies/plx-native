@@ -21,14 +21,6 @@
 //!
 //! So: rewrite locally, rewrite-or-refuse remotely, and never a second scrubber anywhere.
 
-/// What [`scrub`] decided about one record.
-#[cfg(feature = "lab-diagnostics")]
-pub enum Scrubbed {
-    /// keep it, in this (possibly rewritten) form
-    Keep(String),
-    /// drop it entirely and count it — used where a line cannot be made safe by rewriting
-    Refuse,
-}
 
 /// Header names whose VALUE is a credential wherever it appears. Matched case-insensitively and
 /// followed to the end of the line: a header value has no in-line terminator to stop at, and half
@@ -53,17 +45,6 @@ const CREDENTIAL_PARAMS: [&str; 6] = [
     "api_key=",
 ];
 
-/// One record, made safe.
-///
-/// Four rewrites, in order, each narrower than dropping the line: header values, query-parameter
-/// values, `plex.direct` hostnames (which ENCODE a household's LAN address in their leftmost
-/// label), and any remaining `scheme://host` authority. A record that still contains a credential
-/// header name after rewriting is refused outright rather than shipped — that can only happen if
-/// the rewrite failed to find the value it was sure was there.
-#[cfg(feature = "lab-diagnostics")]
-pub fn scrub(line: &str) -> Scrubbed {
-    scrub_with(line, &identities())
-}
 
 /// **The LOCAL exit — what `crate::eventlog::log` applies to every line before the file write.**
 ///
@@ -93,24 +74,6 @@ pub fn scrub_local_with(line: &str, ids: &[String]) -> String {
     scrub_identities(&s, ids)
 }
 
-/// [`scrub`], against a caller-supplied identity list — the testable half. The list is what the
-/// APP knows about this household (see [`identities`]); everything else here is a pure rewrite.
-#[cfg(feature = "lab-diagnostics")]
-pub fn scrub_with(line: &str, ids: &[String]) -> Scrubbed {
-    let s = crate::eventlog::redact_tokens(line).into_owned();
-    let s = scrub_headers(&s);
-    let s = scrub_params(&s);
-    let s = scrub_authority(&s);
-    let s = scrub_host_kv(&s);
-    let s = scrub_ipv6(&s);
-    let s = scrub_addresses(&s);
-    let s = scrub_viewing(&s);
-    let s = scrub_identities(&s, ids);
-    if still_looks_secret(&s) {
-        return Scrubbed::Refuse;
-    }
-    Scrubbed::Keep(s)
-}
 
 /// **A BARE IPv4 ADDRESS, outside any URL** — `203.0.113.7:32400`, `10.0.0.2`.
 /// [`scrub_ipv6`] handles IPv6 first, including the unbracketed `address:port` spelling emitted by
@@ -437,26 +400,6 @@ fn identities() -> Vec<String> {
     IDENTITIES.read().map(|g| g.clone()).unwrap_or_default()
 }
 
-/// The last gate: a line that STILL looks like it carries a credential after all four rewrites is
-/// dropped rather than shipped.
-///
-/// It exists because the rewrites are string surgery on a format nobody validates — a credential
-/// spelled some way none of them anticipated (`Bearer` with no header name in front of it, a
-/// parameter separated by `;`) would sail through every one of them. Dropping a record costs one
-/// line of a several-hundred-line document and is counted in the envelope; shipping it costs a
-/// credential.
-#[cfg(feature = "lab-diagnostics")]
-fn still_looks_secret(s: &str) -> bool {
-    let lower = s.to_ascii_lowercase();
-    if lower.contains("bearer ") {
-        return true;
-    }
-    CREDENTIAL_PARAMS.iter().any(|k| {
-        lower
-            .find(k)
-            .is_some_and(|at| !s[at + k.len()..].starts_with("<redacted>"))
-    })
-}
 
 /// `Authorization: Bearer abc` → `Authorization: <redacted>`. To end of line, deliberately.
 fn scrub_headers(s: &str) -> String {
@@ -773,22 +716,6 @@ mod tests {
         }
     }
 
-    #[test]
-    #[cfg(feature = "lab-diagnostics")]
-    fn ambiguous_decimal_final_groups_are_redacted_on_the_remote_exit_too() {
-        for (line, address) in [
-            ("peer ::1:80 connected", "::1:80"),
-            ("utf8 — ::0:80 — tail", "::0:80"),
-        ] {
-            match scrub_with(line, &[]) {
-                Scrubbed::Keep(out) => {
-                    assert!(!out.contains(address), "leaked: {out}");
-                    assert!(out.contains("<addr>"), "address was not replaced: {out}");
-                }
-                Scrubbed::Refuse => panic!("address-only line should be safely rewritable"),
-            }
-        }
-    }
 
     #[test]
     fn ipv6_loopback_unspecified_and_lookalikes_survive() {

@@ -67,7 +67,7 @@ pub struct RouteStartAttempt {
 
 
 impl RouteStartAttempt {
-    #[cfg(all(any(test, feature = "test-support"), feature = "hostsim"))]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn fixture() -> Self {
         Self {
             serial: 1,

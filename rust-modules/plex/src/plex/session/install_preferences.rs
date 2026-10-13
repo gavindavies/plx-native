@@ -17,7 +17,7 @@ fn candidates() -> Vec<PathBuf> {
     #[cfg(not(any(test, feature = "test-support")))]
     let redirected = false;
     let mut paths = Vec::new();
-    if !cfg!(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))))
+    if !false
         && !redirected {
         paths.push(plx_base::paths::persistent_state_root().join("language.json"));
     }

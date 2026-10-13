@@ -1051,7 +1051,6 @@ mod tests {
     /// (`ffi_host::HostSink`) to hold a native session, which the default build's `NoSink` does
     /// not — `make check` runs the full suite a second time with it on for exactly this class of test.
     #[test]
-    #[cfg(feature = "hostsim")]
     fn seek_refuses_and_touches_no_user_seek_bookkeeping_with_no_live_preview() {
         let _serial = plx_base::testlock::serial();
         let mut ps = crate::route::PlaybackSession::IDLE;

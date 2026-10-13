@@ -568,7 +568,7 @@ fn finish_preview_open_failure(
     if crate::player::preview::abandoning() {
         return;
     }
-    let seam_absent = cfg!(feature = "hostsim") && !plx_base::devtrig::flag("clocksink");
+    let seam_absent = true && !plx_base::devtrig::flag("clocksink");
     if seam_absent {
         crate::player::preview::note_admission_refused();
     } else {
@@ -2134,7 +2134,7 @@ mod tests {
 /// the physical encoder through PMS. These tests run the REAL `pump` inside a `FrameScope` against
 /// the hostsim Engine and the loopback server of `route::flight_rig`, and grade what the frame
 /// thread did: a frame that makes a PMS round trip is a frame the viewer waits on.
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod flight_tests {
     use super::*;
     use crate::player::{begin_resume, land_resume, suspend_bufferfeed, ResumeOutcome, ResumeStart};

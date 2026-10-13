@@ -1709,7 +1709,7 @@ mod foreground_resume_tests {
     }
 }
 
-#[cfg(all(test, feature = "hostsim"))]
+#[cfg(test)]
 mod transport_pause_contract_tests {
     use super::{
         drive_foreground, paused, poll_foreground_load, set_transport_paused, FlightLanding,

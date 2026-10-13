@@ -1372,7 +1372,6 @@ fn autopause_arm(app: &mut App, fr: &mut Frame) {
         // scheduling had got to: the same frame and clock every run (`ffi_host.rs::stop_clock_at`).
         // Re-armed every frame until accepted: a Load in between rebases the fed timeline, and
         // the stop is kept in movie time, so re-arming is idempotent.
-        #[cfg(feature = "hostsim")]
         if let Some(ms) = at_ms {
             plx_media::player::stop_sim_clock_at(Some(i64::from(ms) * 1_000_000));
         }
@@ -1385,7 +1384,6 @@ fn autopause_arm(app: &mut App, fr: &mut Frame) {
                 ));
                 app.scenarios.pause_script = None;
                 app.scenarios.pause_resume_at = hold_ms.map(|hold| fr.now.wrapping_add(hold));
-                #[cfg(feature = "hostsim")]
                 plx_media::player::stop_sim_clock_at(None);
                 pin_headless_hud(app, fr.now, None);
             }

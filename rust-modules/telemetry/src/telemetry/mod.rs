@@ -227,17 +227,6 @@ pub fn forget() {
     transition::forget(&prior);
 }
 
-/// Called after the shared account tombstone (`plex::session::clear`'s canonical commit) is
-/// confirmed durable. On ARM, `persistence::forget_at` deliberately leaves telemetry/consent's own
-/// legacy files in place when a decision is cleared, relying on this sweep to run once the ONE
-/// atomic DB8 revocation for both domains — session and telemetry/consent — is confirmed rather
-/// than merely queued. Ported from `release/v0.6`'s `telemetry::cleanup_after_account_clear` /
-/// `persistence::cleanup_after_combined_clear`, which the 0.7 forward-port dropped along with
-/// their only caller (Copilot review on PR #105, finding 7).
-#[cfg(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-pub fn cleanup_after_account_clear() -> bool {
-    persistence::cleanup_after_combined_clear(&candidates()) != persistence::CleanupResult::Failed
-}
 
 // ---- the spool, and the one worker that drains it ---------------------------------------------
 

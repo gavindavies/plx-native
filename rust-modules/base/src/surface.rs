@@ -133,7 +133,6 @@ fn recompute() {
 /// drawable is capped by the display it sits on. The rasterised caches that assume 1:1 texels
 /// (glyphs, icon masks, poster requests) consult this to rasterise at `n`x and draw at the same
 /// logical size; layout never sees it.
-#[cfg(feature = "hostsim")]
 pub fn render_scale() -> i32 {
     static S: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
     *S.get_or_init(|| {
@@ -143,11 +142,6 @@ pub fn render_scale() -> i32 {
             .filter(|n| (1..=4).contains(n))
             .unwrap_or(1)
     })
-}
-#[cfg(not(feature = "hostsim"))]
-#[inline]
-pub const fn render_scale() -> i32 {
-    1
 }
 
 /// The framebuffer a frame is drawn into — what every "back to the screen" bind must name instead
@@ -162,15 +156,9 @@ pub fn default_fb() -> u32 {
 }
 
 /// The framebuffer the frame is PRESENTED from — [`default_fb`] without the page redirect.
-#[cfg(feature = "hostsim")]
 #[inline]
 pub fn frame_fb() -> u32 {
     SS_FBO.load(Ordering::Relaxed)
-}
-#[cfg(not(feature = "hostsim"))]
-#[inline]
-pub const fn frame_fb() -> u32 {
-    0
 }
 
 /// The framebuffer a host page is being drawn into instead of [`frame_fb`], or 0. See [`PageTarget`].
@@ -217,16 +205,12 @@ unsafe fn bind_framebuffer(fbo: u32) {
     gl_bind_framebuffer(GL_FRAMEBUFFER, fbo);
 }
 
-#[cfg(feature = "hostsim")]
 static SS_FBO: AtomicU32 = AtomicU32::new(0);
 /// The WINDOW's own mapping while supersampling: the rect the offscreen frame is blitted into and
 /// the scale pointer coordinates are converted with. Unused (and zero) when [`SS_FBO`] is 0.
-#[cfg(feature = "hostsim")]
 static WIN_VIEW: [AtomicI32; 4] = [const { AtomicI32::new(0) }; 4];
-#[cfg(feature = "hostsim")]
 static WIN_SCALE_BITS: AtomicU32 = AtomicU32::new(1.0f32.to_bits());
 
-#[cfg(feature = "hostsim")]
 extern "C" {
     fn glGenTextures(n: c_int, textures: *mut u32);
     fn glBindTexture(target: u32, texture: u32);
@@ -263,7 +247,6 @@ extern "C" {
 
 /// Create the `n`x offscreen target and leave it bound. `None` (and nothing bound) if the driver
 /// refuses it, in which case the caller renders to the window as it always did.
-#[cfg(feature = "hostsim")]
 unsafe fn create_supersample_fb(w: c_int, h: c_int) -> Option<u32> {
     const TEX_2D: u32 = 0x0DE1;
     const FB: u32 = 0x8D40;
@@ -288,7 +271,6 @@ unsafe fn create_supersample_fb(w: c_int, h: c_int) -> Option<u32> {
 /// Downscale the finished offscreen frame into the window so the loop still presents something to
 /// look at, then rebind the offscreen target for the next frame. Call after the shot, before the
 /// swap. A no-op unless supersampling.
-#[cfg(feature = "hostsim")]
 pub fn present_supersampled() {
     let fbo = frame_fb();
     if fbo == 0 {
@@ -321,7 +303,6 @@ pub fn present_supersampled() {
 /// when the frame is drawn offscreen and the pointer still lives in the window.
 #[inline]
 fn pointer_map() -> (f32, i32, i32) {
-    #[cfg(feature = "hostsim")]
     if frame_fb() != 0 {
         return (
             f32::from_bits(WIN_SCALE_BITS.load(Ordering::Relaxed)),
@@ -374,7 +355,6 @@ pub fn probe(win: *mut c_void) {
             dw = ww;
             dh = wh;
         }
-        #[cfg(feature = "hostsim")]
         if render_scale() > 1 && dw > 0 && dh > 0 {
             let n = render_scale();
             let (sw, sh) = (LOGICAL_W as i32 * n, LOGICAL_H as i32 * n);
@@ -425,7 +405,7 @@ pub fn probe(win: *mut c_void) {
             // it is the ordinary case — the window is an exact divisor of the canvas by design
             // (`app.rs`'s `desktop_window_size`) — and asking a Mac user for their webOS version
             // reads as a malfunction. Same measurement either way; only the sentence differs.
-            let tail = if cfg!(feature = "hostsim") {
+            let tail = if true {
                 "This is expected on a desktop: the window is a whole fraction of the canvas."
             } else {
                 "Please report this with your webOS version; the app has only ever been seen on a \

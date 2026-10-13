@@ -135,7 +135,7 @@ const TEXT_CAP: usize = 32;
 ///
 /// `cfg!` and not `#[cfg]`, matching `app::decode_key`: both arms stay compiled on both platforms,
 /// so the one nobody is building cannot rot into a compile error nobody sees for a month.
-const TEXT_OFF: usize = if cfg!(feature = "hostsim") { 12 } else { 16 };
+const TEXT_OFF: usize = if true { 12 } else { 16 };
 
 /// How many un-drained commits to hold before dropping the oldest.
 ///

@@ -453,18 +453,13 @@ fn record(reason: Reason, key: &str) {
 /// are dropped (translate, clip, zoom and pop stay), so the colour lands exactly; otherwise `p`.
 #[inline]
 pub fn painter(p: Painter) -> Painter {
-    #[cfg(feature = "placeholder-sentinel")]
-    {
-        Painter { a: 1.0, rgb: 1.0, ..p }
-    }
-    #[cfg(not(feature = "placeholder-sentinel"))]
     {
         p
     }
 }
 
 /// True in a build whose placeholders are sentinel-painted.
-pub const SENTINEL: bool = cfg!(feature = "placeholder-sentinel");
+pub const SENTINEL: bool = false;
 
 /// **Can this draw's placeholder accounting be seen at all?** `note`, `note_absent` and `ink` record
 /// only when armed, and `ink` changes the colour only in the sentinel build, so these are the only
@@ -488,33 +483,21 @@ const _: () = assert!(sentinel_alpha_is_one());
 /// unfaded and without the rim.
 pub fn skeleton(p: Painter, reason: Reason, key: &str, r: Rect, rad: f32) {
     note(p, reason, key);
-    #[cfg(not(feature = "placeholder-sentinel"))]
     p.rect_sheened(r, rad, theme::SKELETON_TOP, theme::SKELETON_BOT);
-    #[cfg(feature = "placeholder-sentinel")]
-    painter(p).rect(r, rad, theme::SKELETON_TOP, theme::SKELETON_BOT, 0.0);
 }
 
 /// **A sheened face with `top`→`bot` fills**, counted: a placeholder that is not a skeleton token
 /// (the profile chip's disc). The sentinel build paints the flat sentinel in its place.
 pub fn face(p: Painter, reason: Reason, key: &str, r: Rect, rad: f32, top: [f32; 4], bot: [f32; 4]) {
     note(p, reason, key);
-    #[cfg(not(feature = "placeholder-sentinel"))]
     p.rect_sheened(r, rad, top, bot);
-    #[cfg(feature = "placeholder-sentinel")]
-    {
-        let _ = (top, bot);
-        painter(p).rect(r, rad, theme::PLACEHOLDER_SENTINEL, theme::PLACEHOLDER_SENTINEL, 0.0);
-    }
 }
 
 /// **The sheened flat ground** (`CARD_PLACEHOLDER`) at `r`, counted — a `Thumb` or `Person` tile
 /// whose picture has not arrived.
 pub fn ground(p: Painter, reason: Reason, key: &str, r: Rect, rad: f32) {
     note(p, reason, key);
-    #[cfg(not(feature = "placeholder-sentinel"))]
     p.rrect_sheened(r, rad, theme::CARD_PLACEHOLDER);
-    #[cfg(feature = "placeholder-sentinel")]
-    painter(p).rrect(r, rad, rad, theme::CARD_PLACEHOLDER);
 }
 
 /// **The unsheened flat ground** (`CARD_PLACEHOLDER`) at `r`, counted — the info panel's still.
@@ -528,12 +511,6 @@ pub fn flat(p: Painter, reason: Reason, key: &str, r: Rect, rad: f32) {
 /// `false` and draw nothing. `skeleton_bar` and `skeleton_sheet` call it after [`note`].
 #[inline]
 pub fn sentinel_fill(p: Painter, r: Rect, rad: f32) -> bool {
-    #[cfg(feature = "placeholder-sentinel")]
-    {
-        painter(p).rect(r, rad, theme::PLACEHOLDER_SENTINEL, theme::PLACEHOLDER_SENTINEL, 0.0);
-        true
-    }
-    #[cfg(not(feature = "placeholder-sentinel"))]
     {
         let _ = (p, r, rad);
         false
@@ -544,12 +521,6 @@ pub fn sentinel_fill(p: Painter, r: Rect, rad: f32) -> bool {
 /// every build but the sentinel's, where it is the unfaded painter and [`theme::PLACEHOLDER_SENTINEL`].
 pub fn ink(p: Painter, reason: Reason, key: &str, col: [f32; 4]) -> (Painter, [f32; 4]) {
     note(p, reason, key);
-    #[cfg(feature = "placeholder-sentinel")]
-    {
-        let _ = col;
-        (painter(p), theme::PLACEHOLDER_SENTINEL)
-    }
-    #[cfg(not(feature = "placeholder-sentinel"))]
     {
         (p, col)
     }
@@ -709,7 +680,6 @@ mod tests {
 
     /// The default paint output is unchanged: in a build without the sentinel every token is the
     /// stop it always was, so `placeholder.rs` added accounting and not a single pixel.
-    #[cfg(not(feature = "placeholder-sentinel"))]
     #[test]
     fn the_non_sentinel_colour_constants_are_unchanged() {
         use plx_gfx::gfx::tokens::rgb8;
@@ -720,17 +690,6 @@ mod tests {
         assert!(!SENTINEL);
     }
 
-    #[cfg(feature = "placeholder-sentinel")]
-    #[test]
-    fn the_sentinel_build_paints_one_exact_colour() {
-        assert!(SENTINEL);
-        for c in [theme::CARD_PLACEHOLDER, theme::SKELETON_TOP, theme::SKELETON_BOT] {
-            assert_eq!(c, theme::PLACEHOLDER_SENTINEL);
-        }
-        assert_eq!(theme::CARD_ABSENT, plx_gfx::gfx::tokens::rgb8(0x1f, 0x21, 0x29), "absence is never sentinel");
-        let faded = Painter::root().alpha(0.35).rgb(0.5);
-        assert_eq!((painter(faded).opacity(), painter(faded).scale()), (1.0, 1.0));
-    }
 
     #[test]
     fn the_sentinel_is_opaque_and_matches_its_byte_code() {

@@ -604,10 +604,7 @@ pub const PLACEHOLDER_SENTINEL_RGB8: [u8; 3] = [0xff, 0x00, 0xfe];
 
 /// Poster/thumb skeleton flat placeholder. Under the `placeholder-sentinel` feature this is
 /// [`PLACEHOLDER_SENTINEL`] (`placeholder.rs`); in every other build it is `COOL_850`.
-#[cfg(not(feature = "placeholder-sentinel"))]
 pub const CARD_PLACEHOLDER: [f32; 4] = COOL_850;
-#[cfg(feature = "placeholder-sentinel")]
-pub const CARD_PLACEHOLDER: [f32; 4] = PLACEHOLDER_SENTINEL;
 /// A tile that has **nothing to load** — a person the server has no headshot of, a collection with
 /// no artwork of its own (the neutral tile). The same `COOL_850` stop as [`CARD_PLACEHOLDER`] and
 /// painted identically, but it is ABSENCE, not a wait: the sentinel build leaves it alone, so the
@@ -617,15 +614,9 @@ pub const CARD_ABSENT: [f32; 4] = COOL_850;
 /// artwork is on the way and one with none to load are the same object at rest. Both lean BLUE,
 /// away from the neutral panel greys, so a missing poster never reads as a panel. The sentinel
 /// build paints [`PLACEHOLDER_SENTINEL`] here.
-#[cfg(not(feature = "placeholder-sentinel"))]
 pub const SKELETON_TOP: [f32; 4] = COOL_850;
-#[cfg(feature = "placeholder-sentinel")]
-pub const SKELETON_TOP: [f32; 4] = PLACEHOLDER_SENTINEL;
 /// Loading-skeleton gradient — bottom (the sentinel build paints [`PLACEHOLDER_SENTINEL`]).
-#[cfg(not(feature = "placeholder-sentinel"))]
 pub const SKELETON_BOT: [f32; 4] = COOL_900;
-#[cfg(feature = "placeholder-sentinel")]
-pub const SKELETON_BOT: [f32; 4] = PLACEHOLDER_SENTINEL;
 
 // ── Scrims (near-black; alpha supplied per call) ─────────────────────────────
 // Hero/scroll scrim ink; use via [`scrim`]. Defined in `gfx::tokens` (the renderer paints with it).

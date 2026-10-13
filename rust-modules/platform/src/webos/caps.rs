@@ -104,96 +104,7 @@ fn run_probe() {
     run_transport(started);
 }
 
-#[cfg(all(
-    target_arch = "arm",
-    target_os = "linux",
-    not(feature = "hostsim"),
-    not(any(test, feature = "test-support"))
-))]
-fn run_transport(started: Instant) {
-    use std::time::Duration;
 
-    let registration = match super::ls2::register() {
-        Ok(registration) => registration,
-        Err(super::ls2::RegisterFail::Setup {
-            stage,
-            detail,
-            code,
-        }) => {
-            publish(
-                DvProbe {
-                    capability: DvCapability::Unknown,
-                    source: ProbeSource::Failure,
-                    reason: stage,
-                },
-                started,
-                code.map(i64::from),
-                Some(&detail),
-            );
-            return;
-        }
-    };
-    let reply = registration.call(
-        "luna://com.webos.service.config/getConfigs",
-        r#"{"configNames":["tv.config.supportDolbyHDRContents"]}"#,
-        Duration::from_millis(1500),
-    );
-    match reply {
-        Ok(reply) => match parse_dv_reply(&reply) {
-            Ok(capability) => publish(
-                DvProbe {
-                    capability,
-                    source: ProbeSource::Configd,
-                    reason: "configd",
-                },
-                started,
-                None,
-                None,
-            ),
-            Err(failure) => publish(
-                DvProbe {
-                    capability: DvCapability::Unknown,
-                    source: ProbeSource::Failure,
-                    reason: failure.stage(),
-                },
-                started,
-                reply_error_code(&reply),
-                None,
-            ),
-        },
-        Err(super::ls2::Fail::Timeout) => publish(
-            DvProbe {
-                capability: DvCapability::Unknown,
-                source: ProbeSource::Failure,
-                reason: "timeout",
-            },
-            started,
-            None,
-            None,
-        ),
-        Err(super::ls2::Fail::Setup {
-            stage,
-            detail,
-            code,
-        }) => publish(
-            DvProbe {
-                capability: DvCapability::Unknown,
-                source: ProbeSource::Failure,
-                reason: stage,
-            },
-            started,
-            code.map(i64::from),
-            Some(&detail),
-        ),
-    }
-}
-
-#[cfg(not(all(
-    target_arch = "arm",
-    target_os = "linux",
-    not(feature = "hostsim"),
-    not(any(test, feature = "test-support"))
-)))]
 fn run_transport(started: Instant) {
     publish(
         DvProbe {
@@ -207,25 +118,9 @@ fn run_transport(started: Instant) {
     );
 }
 
-#[cfg(all(
-    target_arch = "arm",
-    target_os = "linux",
-    not(feature = "hostsim"),
-    not(any(test, feature = "test-support"))
-))]
-fn reply_error_code(reply: &str) -> Option<i64> {
-    serde_json::from_str::<serde_json::Value>(reply)
-        .ok()?
-        .as_object()?
-        .get("errorCode")?
-        .as_i64()
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg(any(
-    test,
-    all(target_arch = "arm", target_os = "linux", not(feature = "hostsim"))
-))]
+#[cfg(test)]
 enum ProbeFailure {
     Json,
     ReplyReturnValue,
@@ -234,35 +129,14 @@ enum ProbeFailure {
     ValueType,
 }
 
-#[cfg(any(
-    test,
-    all(target_arch = "arm", target_os = "linux", not(feature = "hostsim"))
-))]
+#[cfg(test)]
 impl ProbeFailure {
-    #[cfg(all(
-        target_arch = "arm",
-        target_os = "linux",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
-    ))]
-    const fn stage(self) -> &'static str {
-        match self {
-            Self::Json => "json",
-            Self::ReplyReturnValue => "reply-returnValue",
-            Self::MissingKey => "missing-key",
-            Self::MissingConfigs => "missingConfigs",
-            Self::ValueType => "value-type",
-        }
-    }
 }
 
 /// Strictly grade the one configd shape this decision is allowed to trust. A syntactically valid
 /// service refusal is still uncertainty, and a contradictory `missingConfigs` cannot be rescued
 /// by a boolean elsewhere in the object.
-#[cfg(any(
-    test,
-    all(target_arch = "arm", target_os = "linux", not(feature = "hostsim"))
-))]
+#[cfg(test)]
 fn parse_dv_reply(reply: &str) -> Result<DvCapability, ProbeFailure> {
     let value: serde_json::Value = serde_json::from_str(reply).map_err(|_| ProbeFailure::Json)?;
     let root = value.as_object().ok_or(ProbeFailure::Json)?;

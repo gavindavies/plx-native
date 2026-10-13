@@ -4,5 +4,3 @@
 
 pub mod heartbeat; // the frame's own instruments: the eight phase stamps, FRAMEDROP, worstframe=/worstprep=
 pub mod spans; // named sub-spans of one frame (results, update, draw), printed on its FRAMEDROP line
-#[cfg(feature = "lab-diagnostics")]
-pub mod zlib;

@@ -8744,7 +8744,7 @@ pub fn demux(
                 // down to it. The Linux build's GStreamer decodes the whole stream (FFmpeg's DCA
                 // decoder reads the XLL lossless extension), so there it is fed as it is: a DTS-HD
                 // MA track plays lossless, at its own channel count.
-                let dts_audio = is_dts && !cfg!(feature = "gst");
+                let dts_audio = is_dts && !true;
                 if is_dts {
                     let profile = dts_profile_name((*stream_codecpar(*streams.add(ai as usize))).profile);
                     crate::player::log(&if dts_audio {
@@ -8760,7 +8760,6 @@ pub fn demux(
                 }
                 // The GStreamer sink describes FLAC, Opus, Vorbis and PCM from the stream's own
                 // parameters rather than a codec name; hand them over before any audio is pushed.
-                #[cfg(feature = "gst")]
                 if ai >= 0 {
                     let acp = stream_codecpar(*streams.add(ai as usize));
                     let (ed, n) = ((*acp).extradata, (*acp).extradata_size);

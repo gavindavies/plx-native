@@ -75,7 +75,7 @@ pub(crate) fn rd_u32(ev: &[u8], off: usize) -> u32 {
 /// has one window, and nothing in the event loop reads that field.
 #[inline]
 pub(crate) fn decode_key(ev: &[u8]) -> (u32, u32, u32) {
-    if cfg!(feature = "hostsim") {
+    if true {
         let pressed = *ev.get(12).unwrap_or(&0) as u32;
         let repeat = *ev.get(13).unwrap_or(&0) as u32;
         let sym = rd_u32(ev, 20);
@@ -138,7 +138,7 @@ pub(crate) fn host_wcode(sym: u32) -> u32 {
 pub(crate) fn encode_key(sym: c_uint, wcode: c_uint, down: bool) -> [u8; 128] {
     let mut ev = [0u8; 128];
     ev[0..4].copy_from_slice(&if down { SDL_KEYDOWN } else { SDL_KEYUP }.to_ne_bytes());
-    if cfg!(feature = "hostsim") {
+    if true {
         ev[12] = u8::from(down); // state
         ev[13] = 0; // repeat
         ev[20..24].copy_from_slice(&sym.to_ne_bytes());
@@ -166,7 +166,7 @@ pub(crate) fn encode_key(sym: c_uint, wcode: c_uint, down: bool) -> [u8; 128] {
 /// `Edge::Repeat` a screen receives without a real remote's own repeat cadence.
 pub(crate) fn encode_key_repeat(sym: c_uint, wcode: c_uint) -> [u8; 128] {
     let mut ev = encode_key(sym, wcode, true);
-    if cfg!(feature = "hostsim") {
+    if true {
         ev[13] = 1; // the `repeat` byte `decode_key`'s hostsim arm folds into `state & 0x100`
     } else {
         let state = rd_u32(&ev, 16) | 0x100;
@@ -498,13 +498,12 @@ pub(crate) fn dispatch_remote_token(tok: &str, ps: &plx_media::route::PlaybackSe
             RemotePointer::Up => remote_synth_pointer(SDL_MOUSEBUTTONUP, x, y),
         }
         true
-    } else if cfg!(feature = "hostsim") && tok == "shot" {
+    } else if true && tok == "shot" {
         // Simulator only. Screenshotting has to be a TOKEN rather than a launch option, because
         // the interesting frame is the one AFTER driving, and `PLXNATIVE_SHOT_FRAME` is fixed
         // before the app starts — worse, presented frames only accrue when something repaints
         // (the idle gate), so no frame number can be predicted from outside. This makes
         // `down down right ok shot` a single composable line.
-        #[cfg(feature = "hostsim")]
         crate::shot::request();
         true
     } else if tok == "okdown" || tok == "okup" {

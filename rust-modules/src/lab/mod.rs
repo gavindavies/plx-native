@@ -41,17 +41,8 @@
 
 // `lab.json`'s reader, `is_trigger_key` and `menu_row_enabled` live in `plx_platform::labcfg` (platform):
 // `ui/` and `screens/` ask those two questions and may not name this module.
-#[cfg(feature = "lab-diagnostics")]
-use plx_platform::labcfg::config;
 
-#[cfg(feature = "lab-diagnostics")]
-pub(crate) mod control;
-#[cfg(feature = "lab-diagnostics")]
-pub(crate) mod snapshot;
-#[cfg(feature = "lab-diagnostics")]
-pub(crate) mod toast; // the upload read-out; it moved here from `ui/` because only this module draws it
-#[cfg(feature = "lab-diagnostics")]
-pub(crate) mod upload;
+// the upload read-out; it moved here from `ui/` because only this module draws it
 
 /// A command delivered by Lab Control and waiting for the SDL main thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,44 +60,19 @@ pub(crate) struct ControlCommand {
 /// of the log, because the alternative is a tester pressing a button in a rented lab hour and
 /// getting silence that looks exactly like a key that was never delivered.
 pub(crate) fn boot() {
-    #[cfg(feature = "lab-diagnostics")]
-    {
-        plx_base::eventlog::ring::start_clock();
-        match config::get() {
-            Some(c) => plx_base::eventlog::log(&format!(
-                "lab: armed session={} endpoint={} control={} triggers={:?} ring={}rec/{}KiB",
-                c.session,
-                c.endpoint,
-                if c.control { "on" } else { "off" },
-                c.trigger_wcodes,
-                plx_base::eventlog::ring::MAX_RECORDS,
-                plx_base::eventlog::ring::MAX_BYTES / 1024
-            )),
-            None => plx_base::eventlog::log(&format!("lab: INERT — {}", config::why_not())),
-        }
-    }
 }
 
 /// Start the outbound command poll after libcurl's process-global initialisation.
 pub(crate) fn start_control() {
-    #[cfg(feature = "lab-diagnostics")]
-    control::start();
 }
 
 /// Commands waiting to enter SDL. Empty in every non-lab build.
 pub(crate) fn take_commands() -> Vec<ControlCommand> {
-    #[cfg(feature = "lab-diagnostics")]
-    {
-        return control::take();
-    }
-    #[cfg(not(feature = "lab-diagnostics"))]
     Vec::new()
 }
 
 /// Acknowledge main-thread dispatch to the long-poll worker.
 pub(crate) fn command_done(_id: u32, _ok: bool) {
-    #[cfg(feature = "lab-diagnostics")]
-    control::finish(_id, _ok);
 }
 
 /// The key ladder's lab arm: `true` when the press was taken and the ladder must `continue`.
@@ -115,13 +81,6 @@ pub(crate) fn command_done(_id: u32, _ok: bool) {
 /// wants a snapshot of is the playback failure read-out, whose own arm `continue`s on every key.
 #[inline]
 pub(crate) fn key_press(_sym: u32, _wcode: u32, _ps: &plx_media::route::PlaybackSession) -> bool {
-    #[cfg(feature = "lab-diagnostics")]
-    {
-        if plx_platform::labcfg::is_trigger_key(_sym, _wcode) {
-            request_upload("key", _ps);
-            return true;
-        }
-    }
     false
 }
 
@@ -135,29 +94,21 @@ pub(crate) fn key_press(_sym: u32, _wcode: u32, _ps: &plx_media::route::Playback
 /// The session is a PARAMETER for the reason every other `player::diag` caller's is (phase 9):
 /// there is no `route::decision::SESSION` global left to read it out of, and the loop owns it.
 pub(crate) fn request_upload(_reason: &str, _ps: &plx_media::route::PlaybackSession) {
-    #[cfg(feature = "lab-diagnostics")]
-    upload::request(_reason, _ps);
 }
 
 /// The app's current route, by the name the heartbeat uses. Stored for the next snapshot's
 /// envelope; called once per frame from the tail of the loop.
 #[inline]
 pub(crate) fn note_route(_r: &'static str) {
-    #[cfg(feature = "lab-diagnostics")]
-    upload::note_route(_r);
 }
 
 /// Expire the toast. Called once per frame from the update block.
 #[inline]
 pub(crate) fn update(_now: u32) {
-    #[cfg(feature = "lab-diagnostics")]
-    toast::update(_now);
 }
 
 /// Draw the toast, over everything, on every route. `stats` is the diagnostics read-out's frame
 /// when it is on screen: the toast sits immediately below it, and neither may cover the other.
 #[inline]
 pub(crate) fn draw(_stats: Option<plx_ui::Rect>) {
-    #[cfg(feature = "lab-diagnostics")]
-    toast::draw(_stats);
 }

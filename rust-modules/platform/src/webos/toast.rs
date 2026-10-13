@@ -22,22 +22,19 @@ use crate::tv::toast::{Identity, Outcome, Sent};
 /// The service method every call here targets.
 const CREATE_TOAST: &str = "luna://com.webos.notification/createToast";
 
-/// How long one round trip may take. Off the UI thread, so generous next to `ls2::BUDGET`.
-#[cfg(all(not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-const BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// The `createToast` payload for `message`, attributed to `source_id`. `noaction` removes the
 /// launch arrow so the card is a notice, not a shortcut. Built with `serde_json` so every quote,
 /// backslash, newline and non-ASCII character is escaped by the same writer the rest of the crate
 /// trusts.
-#[cfg_attr(feature = "hostsim", allow(dead_code))] // Built only for a real bus call.
+#[allow(dead_code)] // Built only for a real bus call.
 pub fn payload(source_id: &str, message: &str) -> String {
     serde_json::json!({ "sourceId": source_id, "noaction": true, "message": message }).to_string()
 }
 
 /// Grade the service's own reply: `returnValue: true` is acceptance; anything else is a refusal,
 /// carrying the `errorText` when there is one.
-#[cfg_attr(feature = "hostsim", allow(dead_code))] // Graded only against a real bus reply.
+#[allow(dead_code)] // Graded only against a real bus reply.
 pub fn grade(reply: &str) -> Outcome {
     let value = serde_json::from_str::<serde_json::Value>(reply).ok();
     let field = |name: &str| value.as_ref().and_then(|v| v.get(name));
@@ -52,7 +49,6 @@ pub fn grade(reply: &str) -> Outcome {
 
 /// One attempt under the chosen [`Identity`], reply and grade both. Blocks. The port's
 /// `deliver_toast`: `tv::toast::send` is the door callers use.
-#[cfg(any(feature = "hostsim", test, feature = "test-support"))]
 pub fn deliver(_message: &str, identity: Identity) -> Sent {
     plx_base::eventlog::log(&format!(
         "toast: no LS2 bus off-device — {identity:?} call to {CREATE_TOAST} not sent"
@@ -60,32 +56,6 @@ pub fn deliver(_message: &str, identity: Identity) -> Sent {
     Sent { reply: None, outcome: Outcome::NoBus }
 }
 
-/// The on-device arm of [`deliver`] above.
-#[cfg(all(not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
-pub fn deliver(message: &str, identity: Identity) -> Sent {
-    use super::ls2::{self, Fail};
-    let payload = payload(plx_base::paths::app_id(), message);
-    let bus = |fail: Fail| match fail {
-        Fail::Timeout => Outcome::Bus { stage: "timeout", code: None, detail: String::new() },
-        Fail::Setup { stage, code, detail } => Outcome::Bus { stage, code, detail },
-    };
-    let registration = match ls2::register() {
-        Ok(r) => r,
-        Err(e) => return Sent { reply: None, outcome: bus(e.into()) },
-    };
-    let called = match identity {
-        #[cfg(any(feature = "devtriggers", test, feature = "test-support"))]
-        Identity::Anonymous => registration.call(CREATE_TOAST, &payload, BUDGET),
-        Identity::AsApp => registration.call_as_app(CREATE_TOAST, &payload, plx_base::paths::app_id(), BUDGET),
-    };
-    match called {
-        Ok(reply) => {
-            let outcome = grade(&reply);
-            Sent { reply: Some(reply), outcome }
-        }
-        Err(fail) => Sent { reply: None, outcome: bus(fail) },
-    }
-}
 
 #[cfg(test)]
 mod tests {

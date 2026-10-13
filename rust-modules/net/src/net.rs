@@ -1433,7 +1433,7 @@ pub enum Tls<'a> {
     CaBundle(&'a str),
     /// **Pinned**, and CA verification deliberately off — see [`CURLOPT_PINNEDPUBLICKEY`]. Only the
     /// lab receiver, which is a self-signed certificate on a developer's Mac.
-    #[cfg_attr(not(feature = "lab-diagnostics"), allow(dead_code))]
+    #[allow(dead_code)]
     Pinned(&'a str),
 }
 
@@ -1441,7 +1441,7 @@ pub enum Tls<'a> {
 enum TlsCfg {
     Ca,
     CaBundle(CString),
-    #[cfg_attr(not(feature = "lab-diagnostics"), allow(dead_code))]
+    #[allow(dead_code)]
     Pinned(CString),
 }
 
@@ -2116,30 +2116,6 @@ pub fn https_post(url: &str, headers: &[String], body: &[u8]) -> Option<Resp> {
     request(url, headers, "POST", Some(body), API, false, None, None)
 }
 
-/// Blocking **pinned** HTTPS POST — used by Lab Diagnostics uploads and Lab Control's long poll.
-/// Their receiver is a self-signed certificate on a developer's Mac. Redirects are OFF (a pinned
-/// endpoint that redirects is not the endpoint) and the response body is capped: the receiver
-/// answers one small JSON object, and this is the one transport in the app whose far end is not a
-/// Plex service.
-#[cfg(feature = "lab-diagnostics")]
-pub fn post_pinned(
-    url: &str,
-    headers: &[String],
-    body: &[u8],
-    pin: &str,
-    t: Timeouts,
-) -> Option<Resp> {
-    request_tls(
-        url,
-        headers,
-        "POST",
-        Some(body),
-        t,
-        false,
-        Some(4096),
-        Tls::Pinned(pin),
-    )
-}
 
 /// Blocking **CA-verified, unpinned** HTTPS POST to a third-party endpoint — the telemetry sinks.
 ///
