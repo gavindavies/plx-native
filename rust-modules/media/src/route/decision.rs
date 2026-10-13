@@ -6410,6 +6410,13 @@ pub fn forced_direct_play(ps: &PlaybackSession) -> bool {
 }
 
 pub fn audio_track_direct_plays(ps: &PlaybackSession, codec: &str, channels: i64) -> bool {
+    // A local file (the Linux build) plays what its GStreamer sink decodes, in FFmpeg's codec
+    // names (its tracks come from the file, `localplay::playing_item`); no server converts the
+    // rest. Every other session keeps the television's table.
+    #[cfg(feature = "gst")]
+    if crate::localfile::is_file_url(&ps.url) {
+        return crate::player::engine::audio_payload_codec(codec).is_some();
+    }
     audio_direct_plays(ps.direct_play_mode, codec, channels)
 }
 
