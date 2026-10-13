@@ -39,7 +39,7 @@ No `static mut` here either: a screen's state is a field of the instance the con
 The spec's done-criterion 5 is a measured claim, not an aspiration: *a new screen touches its own
 `screens/<name>.rs`, `screens/registry.rs`, `dev/scenarios.rs` and `tests/manifest.json` and
 nothing else.* Two conversions were run to prove it, and
-[`docs/ui-system-migration.md` §(E)](../../../docs/ui-system-migration.md) records what
+[`design/specs/ui-system-migration.md` §(E)](../../../design/specs/ui-system-migration.md) records what
 `git diff --name-only` actually said for each — the real answer is those four plus `screens/lib.rs`
 (`screens/mod.rs` before the crate split), `rust-modules/ui/src/lib.rs` and `ci/allow/statics-migration.txt`.
 

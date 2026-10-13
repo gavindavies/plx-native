@@ -261,7 +261,7 @@ unchanged shape (`tools/plxnative-rec import`, `anchor: true` restored by hand).
 fresh recordings diverged on replay by one to three frames at a timing-dependent frame; the one
 committed replayed SAME in Targets and Resolve on three consecutive runs.
 
-The Settings-form keyed focus (`docs/settings-form.md` PR 2) changed the recorded STATE shape of
+The Settings-form keyed focus (`design/specs/settings-form.md` PR 2) changed the recorded STATE shape of
 the Settings root on purpose: focus elements, the surface's `remembered` seats and `RootState.sel`
 are now each row's `RowKey` (Playback 1, Language 4, Privacy 7, Legal 8, About 9) instead of its
 table index, so the old `6-settings-family` recording was REFUSED at its first focus resolution

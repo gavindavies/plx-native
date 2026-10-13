@@ -568,13 +568,13 @@ class CiPathFilter(unittest.TestCase):
         "rust-modules/ui/src/widgets.rs", "rust-modules/Cargo.lock", "rust-modules/build.rs", "src/main.c",
         "Makefile", ".gitignore", "ci/check-package.py", "ci/check-python-steps.txt",
         "tests/test_harness.py", "tests/README.md", "tools/check-parallel.py", "locales/en/settings.json",
-        "pkg/appinfo.json", "assets/icons/play.svg",
+        "pkg/appinfo.json", "design/icons/play.svg", "design/brand/logo-master.png",
         ".github/workflows/ci.yml", ".github/workflows/pages.yml", ".github/workflows/release.yml",
         ".github/actions/host-rust/action.yml",
         ".claude/hooks/outbound-guard.py", ".claude/hooks/outbound-guard-test.py",
         ".agents/skills/wake-tv/wake-tv.sh",
         "PRIVACY.md", "LICENSE", "LICENSING.md", "TRADEMARKS.md", "THIRD-PARTY-NOTICES.md",
-        "docs/screenshots/CREDITS.md", "site/credits.html", "site/index.html", "site/ci/index.html",
+        "design/screenshots/CREDITS.md", "site/credits.html", "site/index.html", "site/ci/index.html",
         "docs/measurements/p1b-logs/pipe_abr_pin_320.log",
     )
     # Prose, images and repository metadata: no gate reads them (the evidence is in ci.yml).
@@ -584,7 +584,9 @@ class CiPathFilter(unittest.TestCase):
         ".github/CODEOWNERS", ".github/dependabot.yml",
         "README.md", "CONTRIBUTING.md", "SECURITY.md", "AGENTS.md", "CLAUDE.md",
         "docs/agent-reference.md", "docs/troubleshooting.md", "docs/release-notes/v0.8.0.md",
-        "docs/plex-openapi.json", "docs/screenshots/home.jpg", "docs/assets/sentry-wordmark-dark.svg",
+        "docs/plex-openapi.json", "design/screenshots/home.jpg", "docs/assets/sentry-wordmark-dark.svg",
+        "design/README.md", "design/specs/ui-framework.md", "design/screenshots/linux/02-films.jpg",
+        "design/demo-library/generate.sh",
         "docs/webosbrew-package.yml", "docs/measurements/m2-verbose-rerun.txt",
         "site/404.html", "site/media/closeup-glass.jpg", "tools/render-doc-page.py",
         "rust-modules/media/src/player/CLAUDE.md", ".agents/skills/ui-sim/SKILL.md",
@@ -770,9 +772,9 @@ class SiteVideoRelease(unittest.TestCase):
         sys.path.insert(0, str(ROOT / "tools"))
         import site_stills
         for path in site_stills.output_files():
-            if path.startswith("docs/screenshots/") or path.startswith("site/media/"):
+            if path.startswith("design/screenshots/") or path.startswith("site/media/"):
                 self.assertTrue(admitted.search(path), f"{path} is written by the refresh but not allowed to change")
-        self.assertFalse(admitted.search("docs/screenshots/navblur-transition.jpg"))
+        self.assertFalse(admitted.search("design/screenshots/navblur-transition.jpg"))
         self.assertEqual(publish.count("git commit -F"), 1)
         self.assertIn("--stills-manifest", publish)
         self.assertEqual(code("release.yml").count("gh workflow run site-video.yml"), 1)

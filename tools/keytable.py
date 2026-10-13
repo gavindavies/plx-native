@@ -82,7 +82,7 @@ if not os.path.isabs(SIM):
 #   k:0,301   the real CH-down rocker (evdev 403), which must still page the Library…
 #   k:0,300   …and the real CH-up, which pages back, so the script's later rows are unperturbed.
 #   k:0,269   HOME — `SDL_SCANCODE_AC_HOME`, evdev 172. Unbound by decision, not by omission
-#             (`docs/remote-keys.md` §HOME); the row that records it staying inert is the evidence.
+#             (`design/specs/remote-keys.md` §HOME); the row that records it staying inert is the evidence.
 #
 # `back` is NOT here, and the comment that used to explain why said it "is last in every script
 # because at a screen's root it EXITS the app" — which described neither the list (there was no

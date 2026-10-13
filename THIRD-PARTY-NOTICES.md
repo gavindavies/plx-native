@@ -150,12 +150,12 @@ The upstream headers credit, and we reproduce, the following derivations:
 The following SVG icons are compiled into the binary. All are visually modified from upstream
 (stroke width and/or colour); modifications are stated where the licence requires it.
 
-**Google Material Design Icons** — the `person` icon (`assets/icons/user.svg`)
+**Google Material Design Icons** — the `person` icon (`design/icons/user.svg`)
 Copyright Google LLC. Licence: **Apache License 2.0** (`licenses/Apache-2.0.txt`).
 *Modified*: the transparent bounding-box path was removed and an explicit white fill added.
 The upstream repository contains no `NOTICE` file, so no NOTICE content is propagated.
 
-**Feather Icons** — the `delete` icon (`assets/icons/backspace.svg`)
+**Feather Icons** — the `delete` icon (`design/icons/backspace.svg`)
 Copyright (c) 2013-2023 Cole Bemis. Licence: **MIT** (`licenses/MIT.txt`).
 *Modified*: stroke width 2 → 2.2, stroke colour set to white.
 The three chevron icons (`chevron.svg`, `chevron-down.svg`, `chevron-up.svg`) use the same vertex
@@ -163,7 +163,7 @@ coordinates as Feather's `chevron-right` / `chevron-down` / `chevron-up`, re-exp
 at stroke width 3. Whether that constitutes derivation or independent authorship of trivial
 geometry was **not established**; they are credited here out of caution under the same notice.
 
-**Heroicons** — the `check` icon (`assets/icons/check.svg`)
+**Heroicons** — the `check` icon (`design/icons/check.svg`)
 Copyright (c) Tailwind Labs, Inc. Licence: **MIT** (`licenses/MIT.txt`).
 The path data `M5 13l4 4L19 7` on a 24×24 grid is identical to Heroicons v1
 `optimized/outline/check.svg` (confirmed against upstream). *Modified*: stroke width 2 → 3,

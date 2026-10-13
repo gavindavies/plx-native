@@ -34,7 +34,7 @@ on:
     #     telemetry/src/diag/schema.rs), `LICENSE` (`include_str!`ed by screens/src/legal.rs and
     #     packaged), and `LICENSING.md`, `TRADEMARKS.md`, `THIRD-PARTY-NOTICES.md` (ci/check-package.py
     #     grades the packaged payload against them; the Makefile ships them in the .ipk);
-    #   * `docs/screenshots/CREDITS.md` and `site/credits.html` (tests/test_demo_library.py
+    #   * `design/screenshots/CREDITS.md` and `site/credits.html` (tests/test_demo_library.py
     #     cross-checks the two), `site/index.html` (same file, footer link) and `site/ci/**`
     #     (tools/test_ci_history.py reads the CI page), and `docs/measurements/*-logs/*.log` (the tools/test_abr_*.py and
     #     tools/test_scrub_logs.py suites replay them).
@@ -61,12 +61,19 @@ on:
       - '!SECURITY.md'
       - '!AGENTS.md'
       - '!CLAUDE.md'
-      # docs: nothing under docs/ is read by a gate except the two re-includes below
+      # docs: nothing under docs/ is read by a gate except the re-include below
       # (docs/macos-app-readme.md is only copied into the macOS bundle by `make macapp`, which
       # this workflow does not run; docs/plex-openapi.json and the images are referenced by prose)
       - '!docs/**'
+      # design/: the design prose, briefs, screenshots and the Linux demo library are read by no gate
+      # (they are referenced by prose and by the UI code's comments); the three re-includes are
+      - '!design/**'
+      # compiled into the app (ui/src/icons.rs include_str!): must stay a trigger
+      - 'design/icons/**'
+      # the masters ci/mkmacapp.py cuts the macOS icon from: must stay a trigger
+      - 'design/brand/**'
       # graded by tests/test_demo_library.py (make check): must stay a trigger
-      - 'docs/screenshots/CREDITS.md'
+      - 'design/screenshots/CREDITS.md'
       # replayed by tools/test_abr_calibrate_plant.py, test_abr_transfer_bound.py and
       # test_scrub_logs.py (make check): must stay a trigger
       - 'docs/measurements/*-logs/*.log'

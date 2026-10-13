@@ -1195,7 +1195,7 @@ focus) resolved to "already correct" on inspection rather than needing a decisio
 
 | Check | Status |
 |---|---|
-| Scope gate (user pointed at `docs/trailer-ux-plan.md`, this skill's own explicit-path exception) | Applied |
+| Scope gate (user pointed at `design/specs/trailer-ux-plan.md`, this skill's own explicit-path exception) | Applied |
 | Codebase reconnaissance (`sections()`, `player/preview.rs`, `draw_backdrop`/`base_scrim_a`, `hero::focusable`/`reconcile`/`valid`) via a dedicated research pass, independent of this doc's own "implemented" claims | Done |
 | 2-question decision pass (play-once scope; scrim fade target) | Done — answers folded into §8.2/§8.3 |
 | Mid-review scope addition (Play/Resume visible+focused) verified against source before being added to the plan | Done — §8.4 |
@@ -1247,7 +1247,7 @@ available in this environment today.
 
 ### Diagrams
 
-- `docs/trailer-ux-plan.md` §2's state table now carries a "Bottom scrim" column and the
+- `design/specs/trailer-ux-plan.md` §2's state table now carries a "Bottom scrim" column and the
   Idle→Background transition note both this review's issue 2B and §8.2's rewrite required — kept in
   sync with the code it describes rather than left to drift, per the standing rule that a stale
   diagram actively misleads.

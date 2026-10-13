@@ -1,4 +1,4 @@
-//! Unit tests for `ui/form.rs` (design record: docs/settings-form.md).
+//! Unit tests for `ui/form.rs` (design record: design/specs/settings-form.md).
 
 use super::form::*;
 use crate::table::{Row, Section};

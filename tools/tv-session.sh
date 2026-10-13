@@ -73,7 +73,7 @@
 # measure, so a dark screen makes them either meaningless or silently wrong.
 # The one exception is a scene on the PLAYER route: the bound video plane forces presents
 # (`plx_machine::idle`'s VIDEO_PLANE gate), so its frame times are real with the panel off
-# (docs/player-submenus.md, "Device frame-time check").
+# (design/specs/player-submenus.md, "Device frame-time check").
 #
 # SOUND is the television's own mute, separate from the panel above and from playback: it silences
 # whatever the set would otherwise put out, panel on or off, app running or not.

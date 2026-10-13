@@ -341,7 +341,7 @@ impl AltId {
 
 /// The panel's one section, declared from the resolved rows alone (pure, so the text-fit suite
 /// drives it): every row carries its own destination ([`action_for`]). The dynamic rows' focus key
-/// is their position in the list (docs/settings-form.md, "Dynamic rows"): the list is one
+/// is their position in the list (design/specs/settings-form.md, "Dynamic rows"): the list is one
 /// unheaded section whose length and order the store decides.
 pub fn form_for(rows: &[AltRow], here_sid: ServerId, here_rk: &str) -> Form<AltId, Action, Infallible> {
     let mut sec = FormSection::new("");

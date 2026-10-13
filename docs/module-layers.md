@@ -883,7 +883,7 @@ What it taught beyond the recipe and Splits 1 to 5:
   "cannot find macro in the crate root" plus six unsatisfied `Focusable` bounds. Their bodies name
   `$crate::screen::...` and `plx_machine::machine::...`: the second works because every crate that
   invokes them depends on `plx_machine`, which `ci/module-layers.ini` guarantees for `appkit` and
-  `screens`. `include_str!("../../../assets/icons/...")` needed no change: `rust-modules/src/ui/`
+  `screens`. `include_str!("../../../design/icons/...")` needed no change: `rust-modules/src/ui/`
   and `rust-modules/ui/src/` are the same depth below the repository root.
 - **`pub(crate)` became `pub` across the crate, including `pub mod` for every module** (a private
   module of a `pub` item is still dead code to rustc once the item has no outside caller), and

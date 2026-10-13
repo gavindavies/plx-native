@@ -16,7 +16,7 @@
 //! The values began as the player screen's literals promoted to canonical (it was the one screen
 //! with a coherent design language); the two *lossy* collapses (several near-whites → `COOL_0`;
 //! several dim greys → [`TEXT_SECONDARY`]/[`TEXT_TERTIARY`]) are deliberate and only visible
-//! on-device — see `docs/ui-system-migration.md` §A. Colors are `[f32; 4]` (r,g,b,a); scrims supply
+//! on-device — see `design/specs/ui-system-migration.md` §A. Colors are `[f32; 4]` (r,g,b,a); scrims supply
 //! their alpha per call via [`scrim`]/[`scrim_black`].
 //!
 //! `ACCENT`/`ACCENT_INK` live here and are re-exported from `ui` (`mod.rs`) so the existing

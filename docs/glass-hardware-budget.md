@@ -368,7 +368,7 @@ cross-fades a full-bleed blur slab over it, with a tab-track-shaped glass capsul
   the composition looks deliberate. It just is not "glass over blur" in the sense of two different
   amounts of blur — that is unavailable.
 
-![the blurred route transition, held still, photographed off the panel](screenshots/navblur-transition.jpg)
+![the blurred route transition, held still, photographed off the panel](../design/screenshots/navblur-transition.jpg)
 
 *The prototype on the television: the whole page blurred, with the tab-track capsule composited over
 it. The capsule's rim light, its edge refraction and its darker scrim are all doing their job; what

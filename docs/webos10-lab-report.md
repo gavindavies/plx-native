@@ -617,7 +617,7 @@ remote sends RED, GREEN or YELLOW. The trigger stays a list.
 **Two corrections to the wcodes the session turned up.** The remote also delivered `wcode` **484**
 (73 presses) and **485** (53 presses), and these are *not* unmapped mystery codes:
 
-* **484 is already documented and already handled.** `docs/remote-keys.md` §2 "Swallowed" lists it
+* **484 is already documented and already handled.** `design/specs/remote-keys.md` §2 "Swallowed" lists it
   as `PointerHidden` — *"the Magic Remote reporting its pointer auto-hid… evdev 614, an LG-private
   code and not a key"* — consumed by an arm with an empty body. So it matches something in our
   ladder, and the fact that it arrives at all on a virtual remote is mildly interesting in itself.

@@ -1236,7 +1236,7 @@ def main() -> int:
     s.add_argument("--trigger", default="489",
                    help="comma-separated wcodes that fire an upload on the remote. 489 is BLUE, "
                         "measured on the dev set 2026-08-26 (486 RED / 487 GREEN / 488 YELLOW); "
-                        "one remote, one firmware — docs/remote-keys.md §9")
+                        "one remote, one firmware — design/specs/remote-keys.md §9")
     s.set_defaults(fn=cmd_start)
 
     sub.add_parser("serve", help=argparse.SUPPRESS).set_defaults(fn=serve)

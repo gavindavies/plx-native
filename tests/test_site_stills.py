@@ -33,10 +33,10 @@ class FileSet(unittest.TestCase):
     def test_automated_and_manual_are_disjoint_and_cover_every_simulator_made_still(self):
         auto, manual = set(ss.output_files()), set(ss.output_files(manual=True))
         self.assertFalse(auto & manual)
-        committed = tracked("docs/screenshots") | tracked("site/media")
+        committed = tracked("design/screenshots") | tracked("site/media")
         film = {p for p in committed if p.startswith("site/media/feel")}
         # what is committed and in neither set is the film and the photograph taken on the television, nothing else
-        self.assertEqual(committed - auto - manual - film, {"docs/screenshots/navblur-transition.jpg"})
+        self.assertEqual(committed - auto - manual - film, {"design/screenshots/navblur-transition.jpg"})
         self.assertLessEqual(auto | manual, committed)
 
     def test_the_film_and_the_television_photograph_are_never_in_a_set(self):
@@ -48,8 +48,8 @@ class FileSet(unittest.TestCase):
         self.assertEqual(ss.MANUAL_SCENES, {})
         self.assertEqual(ss.output_files(manual=True), [])
         self.assertEqual(set(ss.automated_scenes()), {s["name"] for s in ss.scene_table()})
-        for rel in ("docs/screenshots/player.jpg", "site/media/closeup-player.jpg", "site/media/closeup-player-glow.png",
-                    "site/media/og-card.jpg", "docs/screenshots/ux-home-hero.jpg"):
+        for rel in ("design/screenshots/player.jpg", "site/media/closeup-player.jpg", "site/media/closeup-player-glow.png",
+                    "site/media/og-card.jpg", "design/screenshots/ux-home-hero.jpg"):
             self.assertIn(rel, ss.output_files())
 
     def test_a_manual_scene_would_take_everything_cut_from_it(self):
@@ -144,7 +144,7 @@ class Adopt(unittest.TestCase):
 
     def test_a_manifest_naming_another_file_set_is_refused(self):
         m = json.loads((self.art / ss.MANIFEST_NAME).read_text())
-        m["files"]["docs/screenshots/navblur-transition.jpg"] = {"sha256": "0"}
+        m["files"]["design/screenshots/navblur-transition.jpg"] = {"sha256": "0"}
         (self.art / ss.MANIFEST_NAME).write_text(json.dumps(m))
         with self.assertRaisesRegex(ss.Failure, "file set"):
             self.adopt()

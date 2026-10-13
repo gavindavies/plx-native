@@ -153,7 +153,7 @@ is what keeps stems and bars at their intended weight on a 1080p panel.
 
 ## 4. Home — the main page (checklist #2)
 
-![Home, hero](screenshots/ux-home-hero.jpg)
+![Home, hero](../screenshots/ux-home-hero.jpg)
 
 Home opens on a **hero** — one item, full-bleed backdrop, with its logo or title, a one-line fact
 row (kind · year · rating), a truncated summary and an action row. The hero rotates through a set of
@@ -184,7 +184,7 @@ is why moving to or from them fades the whole screen rather than just the page.
 
 **Below the hero**, the shelves.
 
-![Home, shelves](screenshots/ux-home-shelves.jpg)
+![Home, shelves](../screenshots/ux-home-shelves.jpg)
 
 DOWN from the hero enters the shelves; DOWN again steps between them; LEFT/RIGHT walks the cards.
 The focused card grows, and its title and a status line appear beneath it — here *"8 min
@@ -227,7 +227,7 @@ draws rather than cutting to it. (LG's guidance is explicit that the splash shou
 
 ### 5.2 Sign in
 
-![Sign in](screenshots/ux-signin.jpg)
+![Sign in](../screenshots/ux-signin.jpg)
 
 Reached automatically when there is no usable session, and on demand from the account menu. It shows
 a **QR code** and a **four-character link code**, with the instruction to scan it or go to
@@ -273,7 +273,7 @@ pad back to the roster.
 
 ### 5.4 Library
 
-![Library grid](screenshots/ux-library-grid.jpg)
+![Library grid](../screenshots/ux-library-grid.jpg)
 
 Reached from any library pill in the top strip. A poster grid, four-way navigable, with:
 
@@ -292,7 +292,7 @@ one-press route to the strip and BACK is about the DOCUMENT.)
 
 Sort and Filter open as **popovers over the live grid**, never as full-screen sheets:
 
-![Library sort menu](screenshots/ux-library-sort.jpg)
+![Library sort menu](../screenshots/ux-library-sort.jpg)
 
 The options are the ones the **server** reports for that section, not a hardcoded list; the current
 choice carries a check and a direction chevron, and OK on the current choice reverses the direction.
@@ -300,7 +300,7 @@ BACK closes the popover and returns focus to the pill.
 
 ### 5.5 Search
 
-![Search](screenshots/ux-search.jpg)
+![Search](../screenshots/ux-search.jpg)
 
 The last pill in the top strip. The screen is a vertical stack of zones — the shared top bar (the
 profile chip and the pills), the **field**, and under it either the **recent searches** or the
@@ -326,7 +326,7 @@ results are deliberately out of scope, by decision rather than by omission.
 
 ### 5.6 Card context menu
 
-![Card context menu](screenshots/ux-item-menu.jpg)
+![Card context menu](../screenshots/ux-item-menu.jpg)
 
 Opened by **pressing and holding OK on a focused card** for ≥500 ms — a popover anchored to the
 card, over the live page. UP/DOWN moves, OK activates, BACK closes. The actions are the ones that
@@ -341,7 +341,7 @@ default (it opens the page and plays, as above), with its own "go to" row droppe
 
 ### 5.7 Account menu
 
-![Account menu](screenshots/ux-account-menu.jpg)
+![Account menu](../screenshots/ux-account-menu.jpg)
 
 The **profile chip** at the top left. Focusing it expands the chip to show the current identity;
 OK opens a popover headed *ACCOUNT*. Signed in, it offers switching profile and **signing out**
@@ -363,7 +363,7 @@ everyone gets **Privacy & data**, **Legal notices** and **About PlxNative**.
 
 ### 5.8 Detail
 
-![Detail page](screenshots/ux-detail.jpg)
+![Detail page](../screenshots/ux-detail.jpg)
 
 Opened by OK on a card (or the hero's ⓘ). Full-bleed backdrop, title treatment, a fact row
 (kind · genres · certificate, with **4K** and **CC** badges where they apply), the critic/audience
@@ -412,7 +412,7 @@ app; BACK no longer does, anywhere.
 
 ### 5.10 Failure read-out
 
-![Playback failure](screenshots/ux-failure.jpg)
+![Playback failure](../screenshots/ux-failure.jpg)
 
 When playback cannot start, the app does not fail silently and does not show a spinner forever. It
 draws a full-screen read-out: a warning mark, a headline, **the reason in plain language**, the
@@ -499,7 +499,7 @@ grounds are below, and they are the reason this document exists.
 
 ### 6.3 The HUD
 
-![Player HUD](screenshots/player.jpg)
+![Player HUD](../screenshots/player.jpg)
 
 *Simulator capture — see §9 for how the picture under it was made. The figure shows the **paused**
 state: note the pause mark immediately right of the elapsed clock, and that there is no transport
@@ -762,7 +762,7 @@ Where the four deferring items are answered, and the neighbouring items this doc
 Every figure in this document was taken from the **desktop simulator**, which runs the same
 application core at the authored 1920×1080, against the **mock server's demo library** — openly
 licensed and public-domain films (`tests/demo_library/`, credited in
-`docs/screenshots/CREDITS.md`) — and never against a real Plex account. `make screenshots`
+`design/screenshots/CREDITS.md`) — and never against a real Plex account. `make screenshots`
 regenerates all of them from the scene manifest `tests/screenshots/scenes.json`, which names the
 state each figure shows and the dev triggers that reach it. Layout, focus, navigation and the whole
 data layer are identical to the television's.

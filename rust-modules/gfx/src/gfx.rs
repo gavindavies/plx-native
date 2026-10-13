@@ -4215,7 +4215,7 @@ fn blur_publish(
 /// Two full-size reduction points once suggested a `0.49 ms/pass + 2.7 ns/fragment` sizing model.
 /// The final region measurement (`blur.taps=.74` for two passes) does not satisfy a global
 /// `0.49 ms/pass` floor, so that fit is deliberately not used as an invariant or as proof that no
-/// further pass fusion can help. Use measured regions and end-to-end A/Bs; `docs/liquid-glass.md`
+/// further pass fusion can help. Use measured regions and end-to-end A/Bs; `design/specs/liquid-glass.md`
 /// records the current envelope.
 fn blur_snapshot(reg: [f32; 4]) {
     let taps = blur_taps();

@@ -200,7 +200,7 @@ pub struct DetailScreen {
     /// The `preview_cache_rk()` this hero already autoplayed a trailer to COMPLETION for, this
     /// visit. Single slot, not a history — bouncing between two items and back within one visit can
     /// re-arm each once more per return, which is accepted as reasonable rather than a gap (eng
-    /// review, `docs/trailer-ux-plan.md` §8.2 issue 1B). Reset on `WillLeave`/`Unmount` alongside
+    /// review, `design/specs/trailer-ux-plan.md` §8.2 issue 1B). Reset on `WillLeave`/`Unmount` alongside
     /// `preview_dwell`/`preview_promoted`, so re-entering the same item's page autoplays again.
     preview_played_for: Option<String>,
     /// The `preview_cache_rk()` captured at the MOMENT [`request_preview`](Self::request_preview)
@@ -3027,7 +3027,7 @@ impl DetailScreen {
 }
 
 /// Whether a `view.picture` true→false transition this tick means the trailer finished on its own
-/// (play-once suppression, `docs/trailer-ux-plan.md` §8.2) — pure, so it is unit-testable without
+/// (play-once suppression, `design/specs/trailer-ux-plan.md` §8.2) — pure, so it is unit-testable without
 /// the live `player::preview` singleton. `had_picture`/`has_picture` are `preview_had_picture` and
 /// `view.picture`; `promoted` is `self.preview_promoted`'s value from the END of last tick (read
 /// BEFORE `preview_tick`'s own end-of-function clear); `hero_active` is `hero && !scrolled_off`.
@@ -3667,13 +3667,13 @@ impl DetailScreen {
         let scrolled_off = self.scroll.pos >= plx_media::player::preview::COVER_SCROLL;
         // "Is the viewer still actively engaged with this hero" — shared by the abandon trigger,
         // `can_dwell` and the natural-completion check below, which all used to repeat this same
-        // two-term condition independently (eng review, `docs/trailer-ux-plan.md` §8.2 issue 2A).
+        // two-term condition independently (eng review, `design/specs/trailer-ux-plan.md` §8.2 issue 2A).
         let hero_active = hero && !scrolled_off;
         if plx_media::player::preview::occupies() && !hero_active && !self.preview_promoted {
             self.preview_dwell = 0.0;
             self.content(fx, ContentReq::PreviewStop);
         }
-        // Natural-completion detection for play-once suppression (`docs/trailer-ux-plan.md` §8.2).
+        // Natural-completion detection for play-once suppression (`design/specs/trailer-ux-plan.md` §8.2).
         // `preview_completed_naturally` is a pure function precisely so it is unit-testable
         // without driving the live, process-wide `player::preview` singleton (the original plan's
         // §5 rejected a live-Machine integration test for exactly the fragility that would bring —
@@ -3721,7 +3721,7 @@ impl DetailScreen {
         // scrim the state needs (`player_hud::draw_scrim`, at the bottom, under the playbar).
         let field_target = if full_trailer { 0.0 } else { view.field };
         // The bottom base scrim goes with it, for the same reason
-        // (`docs/trailer-ux-plan.md` §8.3).
+        // (`design/specs/trailer-ux-plan.md` §8.3).
         let base_scrim_target = if full_trailer { 0.0 } else { 1.0 };
         // The scrub gesture's own per-frame stepping: the accelerating hold-ramp advance plus its
         // lost-keyup safety net (`step_scrub_hold`), and the tap-commit debounce

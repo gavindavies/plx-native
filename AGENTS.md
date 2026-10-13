@@ -17,10 +17,12 @@ the macOS simulator are valuable, but they cannot prove every device behavior.
   when a narrower section is enough.
 - Before playback work, read `rust-modules/media/src/player/CLAUDE.md`.
 - Before Plex data-layer work, read `rust-modules/plex/src/plex/CLAUDE.md` and `docs/pms-api.md`.
+- UI design and user-experience material lives in `design/` (start at `design/README.md`): the
+  design-system index, the UI/UX specs, icons, brand art, screenshots and a demo library.
 - Before UI work, read `rust-modules/ui/src/CLAUDE.md` and use the shared theme, layout, and widget
   systems instead of adding screen-local visual primitives. Before touching a screen, also read
   `rust-modules/screens/src/CLAUDE.md`; the restructure's design record is
-  `docs/ui-restructure-spec-v4.md`, which `rust-modules/ui/src/lib.rs` cites by section number.
+  `design/specs/ui-restructure-spec-v4.md`, which `rust-modules/ui/src/lib.rs` cites by section number.
 - Repository skills live in `.agents/skills/`. Use the matching skill whenever its description
   fits the task; the TV, simulator, FFI, release, and verification workflows have non-obvious
   constraints that generic commands miss.

@@ -4,7 +4,7 @@
 //! touches GL. A View is `update -> layout -> draw` each frame; springs live as
 //! fields on the views that own them; the `Painter` folds a cascading alpha (and
 //! optional translate) into every draw op. Single-threaded, main-thread-only.
-//! (Design: docs/ui-framework.md — synthesized from a 3-way design workflow.)
+//! (Design: design/specs/ui-framework.md — synthesized from a 3-way design workflow.)
 // **This blankets the WHOLE `ui` tree, and that is wider than it reads.** An inner-attribute
 // `allow` on this module covers every `mod` beneath it, so no file under `ui/` — not
 // `dispatch.rs`, not `focus.rs`, not `hit.rs`, not a screen — can ever report dead code, and the
@@ -56,7 +56,7 @@ pub mod placeholder; // placeholder accounting: a per-frame count at every place
 pub mod hero_logo; // the ONE clearLogo sizing rule + its fallback-to-title band (both heroes, the compact title)
 pub mod landing_hero; // shared landing hero geometry and scrim curve, also read by route/legibility checks
 pub mod icons;
-pub mod form; // declared, ordered rows with stable keys: Form / FormTable (docs/settings-form.md)
+pub mod form; // declared, ordered rows with stable keys: Form / FormTable (design/specs/settings-form.md)
 #[cfg(test)]
 mod form_tests;
 #[cfg(test)]

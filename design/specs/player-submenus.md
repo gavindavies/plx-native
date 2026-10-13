@@ -106,7 +106,7 @@ re-recorded.
   a push saves the opener's `TrackRow` and the scroll, a pop restores both. To add a page: a
   `TrackPage` variant (with a `title` and a stable `code`), its form in `page_form`, its explicit
   `page_initial`, a Nav row whose `Dest` is the variant, and the `TrackRow`s it needs.
-- **Form extensions**, reusable by Settings PRs 3-5 (`docs/settings-form.md`): a Nav row gets the
+- **Form extensions**, reusable by Settings PRs 3-5 (`design/specs/settings-form.md`): a Nav row gets the
   chevron from its kind; Choice rows derive `checked` from a current-value predicate; an item can be
   disabled (dim, focusable, inert).
 - **Title band** (`TableView::set_title`): "< TITLE" in the section-header caps caption, then a

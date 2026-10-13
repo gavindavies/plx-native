@@ -8,7 +8,7 @@
 > an investigation rather than live guidance — see `CLAUDE.md` for the current names.
 
 Branch `player-ux`. This plan finishes the retained-view-tree migration begun in
-`docs/ui-system-migration.md`. It is **refined against the current working tree** (home.rs is
+`design/specs/ui-system-migration.md`. It is **refined against the current working tree** (home.rs is
 already a `SCENE`-rooted tree; detail.rs is still loose statics; app.rs still flat route bools).
 It supersedes the older steps 5–7 sketch in `ui-system-migration.md` where they disagree.
 
@@ -362,14 +362,14 @@ the `g_fc`-has-no-setter asymmetry (fc written only via move_focus/pointer_focus
 
 > **SUPERSEDED — kept as history only (do not implement).** This section's stopping point was
 > "app has one exclusive `enum Route`" surviving the retui View-tree migration; the UI restructure
-> (spec v4, `docs/ui-system-migration.md` §(D)/(E)/(F), phases 1-12) replaced that premise outright
+> (spec v4, `design/specs/ui-system-migration.md` §(D)/(E)/(F), phases 1-12) replaced that premise outright
 > — `Route` is being RETIRED, not kept exclusive (D1), every screen is its own owned `Screen` over
 > the shared `Focusable`/`FocusSource::Engine` contract rather than a `View` struct threaded
 > through `app.rs`-shared focus state (D2), and step 7b's "shared-focus-state risk" this section
 > was written to avoid is the risk the restructure's `focus.rs`/`hit.rs` engine exists to remove
 > entirely. As of restructure phase 12 every Screen answers `FocusSource::Engine` except for a
 > handful of named, tracked gaps in `ci/check-deps.sh`'s `ladder`/`route` gates — see
-> `docs/ui-system-migration.md` for the current, accurate state. Read the rest of this file as the
+> `design/specs/ui-system-migration.md` for the current, accurate state. Read the rest of this file as the
 > plan that predated that decision, not as a live target.
 
 **Stop after 7a.** At that boundary home (5.1-5.3) and detail (6.1-6.3) are full retained View

@@ -4,7 +4,7 @@ the images the mock server serves, and write the credits.
 
     python3 tools/demo_library.py fetch     # download every pinned asset (sha256 and pixel size checked)
     python3 tools/demo_library.py derive    # fetch, then build posters/backdrops/stills
-    python3 tools/demo_library.py credits   # rewrite docs/screenshots/CREDITS.md and site/credits.html
+    python3 tools/demo_library.py credits   # rewrite design/screenshots/CREDITS.md and site/credits.html
     python3 tools/demo_library.py site-credits  # rewrite site/credits.html only (make screenshots does)
     python3 tools/demo_library.py check     # validate the two manifests; no network
     python3 tools/demo_library.py check --complete  # also: every title and episode complete, bar the
@@ -90,7 +90,7 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "tests" / "demo_library" / "assets.json"
 CATALOG = ROOT / "tests" / "demo_library" / "catalog.json"
-CREDITS = ROOT / "docs" / "screenshots" / "CREDITS.md"
+CREDITS = ROOT / "design" / "screenshots" / "CREDITS.md"
 SITE_CREDITS = ROOT / "site" / "credits.html"
 UA = "PlxNativeDemoLibrary/1.0 (+https://github.com/GLinnik21/plex-native-poc)"
 
@@ -1326,7 +1326,7 @@ def site_credits(assets, catalog, dst=SITE_CREDITS):
           <p class="footer-meta">
             <span>Generated from the <a href="{repo}tests/demo_library/assets.json">demo library manifest</a></span>
             <span class="sep" aria-hidden="true">·</span>
-            <span><a href="{repo}docs/screenshots/CREDITS.md">Documentation screenshot credits</a></span>
+            <span><a href="{repo}design/screenshots/CREDITS.md">Documentation screenshot credits</a></span>
           </p>
         </footer>
       </main>

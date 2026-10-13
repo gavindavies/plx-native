@@ -13,7 +13,7 @@ This directory is a **design system**, not a pile of per-screen draw code. Home,
 player HUD are all *compositions of the same tokens + components*. When you add or change UI,
 **reach for the shared pieces and improve them in place** — do not paste a new `draw_*` function
 with hard-coded colors and hand-tuned text offsets. That is exactly the drift this system exists to
-kill. Full design + migration status: `docs/ui-system-migration.md`.
+kill. Full design + migration status: `design/specs/ui-system-migration.md`.
 
 ## The four rules
 
@@ -203,7 +203,7 @@ The owner's goal, verbatim from the spec: *"the application's behaviour is descr
 linked, DETERMINISTIC state machines — session, navigation, screen instances, playback — each with
 an explicit owner, interacting only through typed events, never by writing another machine's
 state."* Phases 0–12 have landed. The full design record is
-[`docs/ui-restructure-spec-v4.md`](../../../docs/ui-restructure-spec-v4.md); `lib.rs` cites it by
+[`design/specs/ui-restructure-spec-v4.md`](../../../design/specs/ui-restructure-spec-v4.md); `lib.rs` cites it by
 section number on nearly every `mod` line, so `// RESTRUCTURE (spec §6.2)` is a live reference you
 can follow.
 
@@ -413,7 +413,7 @@ module and the build breaks.
 they are the authority on their own module. Read the file's `//!` before changing it.
 
 This guide deliberately does NOT carry a per-file table. One existed, drifted 37 files out of
-date, and duplicated the `//!` docs verbatim down to their typos; `docs/ui-framework.md` already
+date, and duplicated the `//!` docs verbatim down to their typos; `design/specs/ui-framework.md` already
 states the rule — *"do not fix this file into a second map of the directory; one map is the
 point."* If you add a module, write its `//!` doc and its `lib.rs` line. That is the documentation.
 
@@ -565,7 +565,7 @@ Its docstring states what it cannot see.
   never reintroduce a hard-coded per-section Y. `ScrollColumn::draw` culls off-screen sections with
   `on_axis` and pre-translates each child painter to its origin, so each `draw_*` draws from local
   y=0; the same `child_top` feeds `scroll_target` (via `lift_target`), so draws and scroll can't drift.
-- **A few things are deliberately immediate-mode** (documented in `docs/ui-system-migration.md` §D):
+- **A few things are deliberately immediate-mode** (documented in `design/specs/ui-system-migration.md` §D):
   home's `Backdrop` **per-element alphas** (the alphas, not the component — those alphas are springs
   now and it has a real `update`; what must never happen is routing the per-LAYER reveals through
   the cascade `p.alpha()`, which would fade the art and the wash as one object. The cascade still

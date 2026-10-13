@@ -215,13 +215,13 @@ sign-in may legitimately have advanced by the time the app is foregrounded again
 
 ## Documentation screenshots
 
-`make screenshots` regenerates every image under `docs/screenshots/`, and the website's close-up
+`make screenshots` regenerates every image under `design/screenshots/`, and the website's close-up
 stills (the Features "look" panels use `closeup-glass` and `closeup-tiles`) and link-preview card under `site/media/`, from a committed scene manifest, against the
 mock server's demo library — no Plex account, no television, no gitignored file:
 
 ```sh
 make demo-library                     # fetch (sha256-pinned, ~390 MB once) + derive; screenshots runs it too
-make screenshots                      # build the sim, render every scene + CREDITS.md into docs/screenshots/
+make screenshots                      # build the sim, render every scene + CREDITS.md into design/screenshots/
 make screenshots SHOT_SCENES=home,ux-detail.jpg SHOT_OUT=/tmp/shots   # a subset, somewhere else
 make screenshots SHOT_SCENES=home,site-glass,site-glass-narrow,site-tiles,site-up-next   # the site's images
 make screenshots SHOT_CHECK=1         # render each scene twice; fail unless within its bound
@@ -235,7 +235,7 @@ make screenshots SHOT_HERO_VARIANTS=1 # also home-hero-<film>.jpg for each hero 
   replaced by the mock) and `stillclock` itself on every scene, and refuses a run whose log shows
   a `BADTRIGGER`, a trigger that gave up, or a request the mock could not answer.
 - **An output is a file, a crop and a size.** An output's `dest` is `docs` (default,
-  `docs/screenshots/`) or `site` (`site/media/`). A scene may render supersampled
+  `design/screenshots/`) or `site` (`site/media/`). A scene may render supersampled
   (`render_scale` 1..4); an output may `crop` (`[x, y, w, h]` in 1920x1080 canvas pixels,
   fractions allowed, whatever the scale), resample to `size` (refused if it would change the
   crop's shape) and set a JPEG `quality`. The `site-*` scenes cut the site's close-ups at 3x/4x

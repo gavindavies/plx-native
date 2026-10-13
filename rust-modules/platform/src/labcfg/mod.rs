@@ -18,7 +18,7 @@ pub mod config;
 
 /// Is this press the configured lab trigger? Consulted by `ui::consts::is_bound` so that pressing
 /// it does not ALSO wake the player HUD and abort an armed click — the unsupported-key invariant
-/// in `docs/remote-keys.md` §6, seen from the side of a key that is genuinely bound in this build.
+/// in `design/specs/remote-keys.md` §6, seen from the side of a key that is genuinely bound in this build.
 #[inline]
 pub fn is_trigger_key(_sym: u32, _wcode: u32) -> bool {
     #[cfg(feature = "lab-diagnostics")]

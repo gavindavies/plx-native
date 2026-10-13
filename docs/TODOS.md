@@ -10,7 +10,7 @@ trailer content. *(The `landing_hero::PROMOTED_FIELD` half of this item is GONE 
 full-trailer mode draws no page chrome at all, so the wedge eases to 0.0 and the constant was
 deleted.)*
 
-**Why:** `docs/trailer-ux-plan.md` §2.3 keeps the detail hero's synopsis visible during background
+**Why:** `design/specs/trailer-ux-plan.md` §2.3 keeps the detail hero's synopsis visible during background
 trailer autoplay for the first time — previously no prose was ever drawn over playing video, only
 the title. Per this project's own DESIGN.md, "still artwork has a knowable worst case... video does
 not," so this is a real legibility question with no existing answer. It's deferred out of the
@@ -19,13 +19,13 @@ anything — a host test can only check the arithmetic is internally consistent,
 actually legible.
 
 **Context:** Full detail and the exact anchor-table row to add are already written out in
-`docs/trailer-ux-plan.md` §2.3. Land this as its own
+`design/specs/trailer-ux-plan.md` §2.3. Land this as its own
 device pass immediately after the trailer-UX PR ships, using `tools/capture-screen.sh` on real
 trailer content per §5's "Fast-follow" list.
 
 **Effort:** S
 **Priority:** P1
-**Depends on:** The trailer-UX plan (`docs/trailer-ux-plan.md`) shipping first.
+**Depends on:** The trailer-UX plan (`design/specs/trailer-ux-plan.md`) shipping first.
 
 ### Re-measure RSS headroom to see if `CYCLE_BUDGET` (14 Loads/process) can go higher
 
@@ -41,7 +41,7 @@ revisited since it was first measured.
 
 **Context:** This is real device memory profiling, not a quick constant bump — inflating the number
 without re-measuring would be exactly the kind of unverified platform claim this project's AGENTS.md
-warns against. See `docs/trailer-ux-plan.md` §2.1 for the current arithmetic and why this is called
+warns against. See `design/specs/trailer-ux-plan.md` §2.1 for the current arithmetic and why this is called
 out as a follow-up rather than folded into that plan.
 
 **Effort:** M
@@ -51,7 +51,7 @@ outcome.
 
 ### Device verification pass for the trailer UX feature (fps scene, real dwell pass, basic capture)
 
-**What:** Everything in `docs/trailer-ux-plan.md` §5's "Device (blocking)" list that a host test
+**What:** Everything in `design/specs/trailer-ux-plan.md` §5's "Device (blocking)" list that a host test
 cannot answer: an `fps:`-style scene exercising the logo's move+shrink transform (floor + worst/
 coldopen ceiling checks), a real-device browsing pass at the shipped 2.0s dwell to sanity-check
 false-trigger/budget-consumption behavior empirically, and a basic `tools/capture-screen.sh` still
@@ -64,7 +64,7 @@ video, so none of this can be confirmed from a desk. This is the ordinary "does 
 and feel right" pass every UI change needs before it's trusted, independent of the deeper
 legibility grading in the anchor-table TODO above.
 
-**Context:** `docs/trailer-ux-plan.md` §5 has the exact scene design (reuse `plxnative-navosc`'s
+**Context:** `design/specs/trailer-ux-plan.md` §5 has the exact scene design (reuse `plxnative-navosc`'s
 headless-trigger pattern, per `K_DISC_UNFURL`'s own disc-unfurl scene as the nearest analogue).
 
 **Effort:** M
@@ -88,7 +88,7 @@ already admitted and budget-spent)?
 
 **Context:** Full mechanism sketch, the exact risk, and the fallback-replacement contract (nothing
 else in the trailer UI depends on which mechanism sets `view.picture`) are in
-`docs/trailer-ux-plan.md` §2.1 and the `DWELL_S` doc comment in `player/preview.rs`.
+`design/specs/trailer-ux-plan.md` §2.1 and the `DWELL_S` doc comment in `player/preview.rs`.
 
 **Effort:** L (real investigation + a device pass to validate whichever answer it finds)
 **Priority:** P3
@@ -101,7 +101,7 @@ further — the two compound.
 `Machine::eos` transition (`preview.rs`, `after_pump`'s `Settle::Ended` arm) before `Machine::stopped` wipes the
 session's `key`, consumed and cleared by `DetailScreen` each tick.
 
-**Why:** `docs/trailer-ux-plan.md` §8.2's play-once suppression (shipped) reconstructs "did the
+**Why:** `design/specs/trailer-ux-plan.md` §8.2's play-once suppression (shipped) reconstructs "did the
 trailer finish naturally, vs. was it interrupted by the viewer scrolling/leaving" at the SCREEN
 layer, via a `hero`/`scrolled_off`/`preview_promoted` heuristic (`preview_tick`'s `hero_active`
 combined with `preview_promoted`). This is the shape an outside-voice review pass caught a real
@@ -125,5 +125,5 @@ its own merits — this is a "do it when it starts hurting twice" deferral, not 
 
 **Effort:** M
 **Priority:** P3
-**Depends on:** `docs/trailer-ux-plan.md` §8 shipping first (the screen-local fix this would
+**Depends on:** `design/specs/trailer-ux-plan.md` §8 shipping first (the screen-local fix this would
 replace).

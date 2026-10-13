@@ -16,7 +16,7 @@
 //! # Why the trigger codes are configuration
 //!
 //! **The codes ARE known now** — BLUE is `wcode` **489** (486 RED / 487 GREEN / 488 YELLOW,
-//! `sym` 0), measured on the dev set 2026-08-26 and recorded in `docs/remote-keys.md` §9. The
+//! `sym` 0), measured on the dev set 2026-08-26 and recorded in `design/specs/remote-keys.md` §9. The
 //! trigger is a LIST in this file anyway, for two reasons that outlived the measurement.
 //!
 //! **One: the offline answer was WRONG, not merely missing.** The fork's evdev→scancode table maps
@@ -62,7 +62,7 @@ pub struct Config {
     /// unmapped key arrives as, and a zero in this list would make every such press upload.
     #[serde(default)]
     pub trigger_wcodes: Vec<u32>,
-    /// …and which `sym`s, for a key that arrives in the other field (§1 of `docs/remote-keys.md`
+    /// …and which `sym`s, for a key that arrives in the other field (§1 of `design/specs/remote-keys.md`
     /// — which of the two a code lands in is not predictable from the code).
     #[serde(default)]
     pub trigger_syms: Vec<u32>,
@@ -204,7 +204,7 @@ mod tests {
     }
 
     /// A press matches in EITHER field, because which of the two a remote code lands in is not
-    /// predictable from the code (`docs/remote-keys.md` §1).
+    /// predictable from the code (`design/specs/remote-keys.md` §1).
     #[test]
     fn either_field_can_carry_the_trigger() {
         let c = parse(

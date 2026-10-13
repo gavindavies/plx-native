@@ -398,7 +398,7 @@ class HeroGeometry(unittest.TestCase):
         self.assets, self.catalog = tool.load()
 
     def test_the_pinned_hero_declares_a_box_without_changing_a_pixel_of_its_backdrop(self):
-        # Sintel's derived backdrop is in docs/screenshots/home.jpg and the site close-ups: declaring
+        # Sintel's derived backdrop is in design/screenshots/home.jpg and the site close-ups: declaring
         # its subject must leave the recipe stamp (what decides the pixels) as it was.
         films = {m["id"]: m for m in self.catalog["movies"]}
         art = films["sintel"]["art"]
@@ -1141,7 +1141,7 @@ class Credits(unittest.TestCase):
             dst = pathlib.Path(d) / "CREDITS.md"
             tool.credits(assets, catalog, dst)
             self.assertEqual(dst.read_text(), tool.CREDITS.read_text(),
-                             "docs/screenshots/CREDITS.md is stale: run `make screenshots`")
+                             "design/screenshots/CREDITS.md is stale: run `make screenshots`")
 
     def test_the_committed_site_credits_page_is_what_the_manifests_say(self):
         assets, catalog = tool.load()

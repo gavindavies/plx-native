@@ -24,7 +24,7 @@ to match) and the capture comes out that many times larger. An output may take a
 ([x, y, w, h] in CANVAS coordinates, so a crop means the same UI whatever the scale) and a JPEG
 `quality` (ffmpeg's -q:v, default 2); its `size` defaults to the crop times the scale, and any
 other size is a Lanczos resample. `dest` picks where it lands: `docs` (the default,
-`docs/screenshots/`) or `site` (`site/media/`, the website's close-up stills); `--out` sends
+`design/screenshots/`) or `site` (`site/media/`, the website's close-up stills); `--out` sends
 every output to one directory instead. A `card` output is not cut from the capture at all: it is
 the website's link-preview card (`site/og/card.html`), composed by `tools/render-og-card.sh`
 around another output of the same scene once that one is staged, so it needs a headless Chromium
@@ -76,7 +76,7 @@ CATALOG = ROOT / "tests" / "demo_library" / "catalog.json"
 # What the `token` trigger holds. The mock accepts any token; this one only has to be non-empty.
 PLACEHOLDER_TOKEN = "demo-library-token"
 # Where an output's `dest` puts it when there is no --out.
-DESTS = {"docs": ROOT / "docs" / "screenshots", "site": ROOT / "site" / "media"}
+DESTS = {"docs": ROOT / "design" / "screenshots", "site": ROOT / "site" / "media"}
 # What composes a `card` output (the site's link-preview card) around a staged figure.
 CARD_SCRIPT = ROOT / "tools" / "render-og-card.sh"
 # The supersampling factors the simulator accepts (`surface::render_scale`).
@@ -359,7 +359,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--bin", required=True, type=pathlib.Path, help="the simulator (make screenshots-sim)")
     ap.add_argument("--out", type=pathlib.Path,
-                    help="write every output here instead of docs/screenshots/ and site/media/")
+                    help="write every output here instead of design/screenshots/ and site/media/")
     ap.add_argument("--only", help="comma-separated scene names or output files (home, ux-detail.jpg, …)")
     ap.add_argument("--check-determinism", action="store_true",
                     help="capture every scene twice and require the documented tolerance")

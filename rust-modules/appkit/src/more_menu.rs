@@ -92,7 +92,7 @@ pub enum Action {
 }
 
 /// **A drill-in page of the More menu** — the form's `Dest`. The root is the empty page stack, not
-/// a value of this type (`docs/player-submenus.md`).
+/// a value of this type (`design/specs/player-submenus.md`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MorePage {
     /// The playback-quality ladder: one checked-rung row per rung ([`MoreRow::Act`] of a

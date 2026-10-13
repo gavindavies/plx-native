@@ -9,8 +9,8 @@ is stated in `LICENSING.md`; this trademark guidance remains separate.
 
 ## Trademarks and brand assets
 
-The name **PlxNative** and the PLX logo and splash artwork — `assets/logo-master.png`,
-`assets/splash-master.png`, and the `pkg/icon*.png` / `pkg/largeIcon.png` / `pkg/splash.png` cut
+The name **PlxNative** and the PLX logo and splash artwork — `design/brand/logo-master.png`,
+`design/brand/splash-master.png`, and the `pkg/icon*.png` / `pkg/largeIcon.png` / `pkg/splash.png` cut
 from them — identify this project. They are **not** licensed for use as the identity of a derived
 or redistributed work.
 

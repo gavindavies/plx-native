@@ -20,7 +20,7 @@
 //! current subtitle's own language, in that order (`route::cur_sub_pref_lang`, carried in by
 //! `screens::player::overlay`).
 //!
-//! **Both tabs are keyed declarative forms** (`ui::form`, `docs/player-submenus.md`): each row is
+//! **Both tabs are keyed declarative forms** (`ui::form`, `design/specs/player-submenus.md`): each row is
 //! declared once with its semantic [`TrackRow`] identity, a stable [`RowKey`] (a family base plus
 //! the track's index in the playing item's list, which is fixed for the item's lifetime, never the
 //! list position), its kind and its [`Row`]. The focus layer's element is the row's key, so a row
@@ -41,7 +41,7 @@
 //! why the server is drawing it — rather than being found simply gone. An external sidecar over a
 //! remux is drawn by the app (`ClientOverRemux`), so there both rows are live with no reason.
 //!
-//! **Style is a drill-in, and the Subtitles tab is a page stack** (`docs/player-submenus.md`). The
+//! **Style is a drill-in, and the Subtitles tab is a page stack** (`design/specs/player-submenus.md`). The
 //! Style row is a [`RowKind::Nav`] onto [`TrackPage::Style`], whose Size, Position and Color rows
 //! each read out their current value and push a picker page ([`TrackPage::Picker`]) of
 //! [`RowKind::Choice`] rows with the current rung checked. A push remembers the opener's id and the
@@ -209,7 +209,7 @@ impl StyleField {
 }
 
 /// **A drill-in page of the Subtitles tab** — the form's `Dest`. The Subtitles root is the empty
-/// page stack, not a value of this type (`docs/player-submenus.md`).
+/// page stack, not a value of this type (`design/specs/player-submenus.md`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrackPage {
     /// Size, Position and Color, each a drill-in showing its current value.
@@ -5024,7 +5024,7 @@ mod style_page_tests {
     }
 }
 
-/// **The Other languages page and the language pages** (`docs/player-submenus.md`, PR 3).
+/// **The Other languages page and the language pages** (`design/specs/player-submenus.md`, PR 3).
 #[cfg(test)]
 mod language_page_tests {
     use super::tests::{store_with, stream};
@@ -5535,7 +5535,7 @@ mod language_page_tests {
     }
 }
 
-/// **The panel's resize and page slide** (`ui::panel_motion`, `docs/player-submenus.md`,
+/// **The panel's resize and page slide** (`ui::panel_motion`, `design/specs/player-submenus.md`,
 /// "Animation"): running vs resting, an interrupted transition, the layout the card lands on, and
 /// the Audio/Subtitles tab switch.
 #[cfg(test)]

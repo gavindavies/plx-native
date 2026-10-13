@@ -54,7 +54,7 @@ And two constraints that shape everything below:
   Test Lab the *only* channel into the device is **the .ipk we upload**. So per-session
   configuration has to ride in the package.
 * **The colour buttons are UNBOUND, and until this feature nobody had measured them.**
-  `docs/remote-keys.md` §2 is the full map and no colour key was in it; §6 lists them among the
+  `design/specs/remote-keys.md` §2 is the full map and no colour key was in it; §6 lists them among the
   *unsupported* keys the app deliberately ignores. They are measured now — BLUE is `wcode` **489**
   (486 RED / 487 GREEN / 488 YELLOW, `sym` 0, dev set 2026-08-26) — and the trigger stayed
   configuration anyway, for the reason §7 gives: that is ONE remote on ONE firmware.
@@ -210,7 +210,7 @@ budget is declared in `appinfo.json`, which is why both caps exist rather than a
   reachable by ordinary navigation on Home, and a `TableView` row is the idiom that module already
   is. The player-side twin is a row in `appkit::more_menu`, beside Stats for nerds.
 * `ui::consts::is_bound` must answer `true` for the lab key in a lab build, or pressing it also
-  wakes the player HUD and aborts an armed click (`docs/remote-keys.md` §6 is that whole story).
+  wakes the player HUD and aborts an armed click (`design/specs/remote-keys.md` §6 is that whole story).
 
 **The overlay**: `Uploading diagnostics…` → `Diagnostics uploaded (142 KB)` / `Upload failed: <reason>`,
 auto-dismissing after ~4 s, drawn from `theme` tokens through the existing `Label`/card widgets, and
@@ -280,7 +280,7 @@ envelope covers both eviction and refusal, split into two counters.
 ## 7. The BLUE button: what is now measured, and what is still open
 
 **Measured offline, 2026-08-26**, out of LG's own evdev→scancode table at file offset `0x92840` of
-the harvested `libSDL2-2.0.so.0.4.1` (the authority `docs/remote-keys.md` §1 describes; 624 `u32`
+the harvested `libSDL2-2.0.so.0.4.1` (the authority `design/specs/remote-keys.md` §1 describes; 624 `u32`
 entries, index = evdev code, value = the scancode delivered in `wcode`):
 
 | evdev | key | fork's scancode |
@@ -313,7 +313,7 @@ upload of that session came from the menu row (`reason=menu`), so both routes be
 device-proven on rented hardware rather than only on the dev set. **486, 487 and 488 were never
 pressed there**, so nothing says whether that remote sends RED, GREEN or YELLOW — which is why the
 trigger stays a list. Full account: `docs/webos10-lab-report.md` §5. That session also delivered
-`wcode` 484 (`PointerHidden`, already swallowed — `docs/remote-keys.md` §2) and `wcode` **485**,
+`wcode` 484 (`PointerHidden`, already swallowed — `design/specs/remote-keys.md` §2) and `wcode` **485**,
 which appears nowhere in this tree and is unbound.
 
 **The design absorbs every outcome**, which is why none of this blocked the build:
@@ -326,7 +326,7 @@ which appears nowhere in this tree and is unbound.
   is the path that always works;
 * the app logs every press's raw 48 bytes unconditionally, and those lines are in the ring — so
   **the first successful upload by any route carries the answer**, and the feature bootstraps its
-  own key binding. The recipe is `docs/remote-keys.md` §7, run through this bridge instead of over
+  own key binding. The recipe is `design/specs/remote-keys.md` §7, run through this bridge instead of over
   ssh.
 
 The default in `plxnative-lab start` is **489**, the measured BLUE. `406` survives only as a unit

@@ -10,10 +10,10 @@
 
 WHICH IMAGES. Exactly the ones a simulator makes, read from the tools that make them and not listed by hand
 (`output_files`): every output of every scene in `tests/screenshots/scenes.json` (`tools/screenshots.py`: the
-documentation figures under `docs/screenshots/`, the site's close-ups `site/media/closeup-*.jpg` and the link
+documentation figures under `design/screenshots/`, the site's close-ups `site/media/closeup-*.jpg` and the link
 card `site/media/og-card.jpg`) with the `CREDITS.md` that goes with the figures, the WebP and phone copies
 `tools/render-site-variants.py` cuts from the close-ups, and the glows `tools/render-site-glows.py` bakes from
-them. Not these: a photograph taken on the television (`docs/screenshots/navblur-transition.jpg`, which no tool
+them. Not these: a photograph taken on the television (`design/screenshots/navblur-transition.jpg`, which no tool
 renders), the brand art under `assets/` and `site/icons/`, and the film's own posters and glows
 (`tools/site_video.py` owns `site/media/feel-*`).
 
@@ -92,7 +92,7 @@ def _site_video():
 # `render-site-glows.py`), each with the reason it cannot be made on the runner. NONE today. A scene put here takes
 # everything derived from its JPEG with it.
 MANUAL_SCENES = {}
-DESTS = {"docs": "docs/screenshots", "site": "site/media"}
+DESTS = {"docs": "design/screenshots", "site": "site/media"}
 
 
 def scene_table(root=ROOT):
@@ -108,7 +108,7 @@ def output_files(root=ROOT, manual=False):
     lists instead the stills a Mac maintainer still makes by hand (`MANUAL_SCENES` and their derived copies)."""
     scenes = scene_table(root)
     gone = {o["file"] for s in scenes if s["name"] in MANUAL_SCENES for o in s["outputs"]}
-    source = {"docs/screenshots/CREDITS.md": None}  # path -> the scene output it is cut from
+    source = {"design/screenshots/CREDITS.md": None}  # path -> the scene output it is cut from
     for scene in scenes:
         for out in scene["outputs"]:
             source[f"{DESTS[out.get('dest', 'docs')]}/{out['file']}"] = out.get("card", out["file"])

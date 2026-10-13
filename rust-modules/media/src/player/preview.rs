@@ -55,7 +55,7 @@ pub const CYCLE_BUDGET: u32 = 14;
 /// rather than a long, deliberate stop.
 ///
 /// **This is the documented fallback of a two-option design, not the option that was fully
-/// investigated.** `docs/trailer-ux-plan.md` §2.1 asks whether the felt latency (`dwell + Load
+/// investigated.** `design/specs/trailer-ux-plan.md` §2.1 asks whether the felt latency (`dwell + Load
 /// time`) can be cut further by decoupling when the fetch STARTS from when the frame is REVEALED —
 /// i.e. start `request_preview` on a short fetch-commit threshold while holding the screen's Idle
 /// presentation for a separate, longer minimum reveal delay. That mechanism was not implemented:

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Cut the shipped app icons from a single square logo master.
 
-    python3 tools/mkicons.py assets/logo-master.png [--band=N] [--splash=assets/splash-master.png]
-    python3 tools/mkicons.py assets/logo-master.png --out-dir=pkg/dev --sizes=80,130 --badge=DEV
-    python3 tools/mkicons.py assets/logo-master.png --out-dir=pkg/nightly --sizes=80,130 \
+    python3 tools/mkicons.py design/brand/logo-master.png [--band=N] [--splash=design/brand/splash-master.png]
+    python3 tools/mkicons.py design/brand/logo-master.png --out-dir=pkg/dev --sizes=80,130 --badge=DEV
+    python3 tools/mkicons.py design/brand/logo-master.png --out-dir=pkg/nightly --sizes=80,130 \
         --badge=NIGHTLY --badge-fill=#cdd3dd
 
 Emits `pkg/icon.png` (80), `pkg/largeIcon.png` (130) and, for the webosbrew channel listing,

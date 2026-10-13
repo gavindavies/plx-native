@@ -47,7 +47,7 @@ Cancel/Exit confirmation at Home root, where the webOS 23–25 submission expect
 BACK must show the television Home screen. The confirmation is gone. BACK at each of the THREE
 roots implemented 2026-09-03 — Home, the who's-watching picker, the QR sign-in — calls
 `webos::go_home`, which asks SAM to launch the Home launcher and leaves the process running
-(`docs/remote-keys.md` §8). **The first-run consent question was the fourth root and was NOT
+(`design/specs/remote-keys.md` §8). **The first-run consent question was the fourth root and was NOT
 covered as of that date; it was closed 2026-09-07 in the phase 5b restructure**, when the question
 stopped being a `Popover` (`ui/consent.rs`, whose `on_back` returned a bare `bool` that could not
 tell "stepped back a stage" from "the platform took the screen" — which is exactly the ambiguity
@@ -148,11 +148,11 @@ skips; a partial green count is not equivalent to 21/21.
 with changes applied at the next app launch. Localized launcher metadata still follows webOS.
 The native Settings Service supplies UI and formatting locales, and the resolved app language
 becomes `X-Plex-Language` for PMS. Native device checks on 2026-09-27 verified detection, persistence across restarts, Cyrillic
-text, consent scrolling and the contribution QR. See `docs/localization.md` for the scope.
+text, consent scrolling and the contribution QR. See `design/specs/localization.md` for the scope.
 
 **#45 — on-screen transport controls.** The product deliberately uses a remote-driven, state-only
 transport HUD rather than a focusable Play/Pause/Stop/FF/RW row. The compliance description belongs
-in `docs/ux-scenario.md`, which is what the checklist tells QA to consult for movement details.
+in `design/specs/ux-scenario.md`, which is what the checklist tells QA to consult for movement details.
 
 Genuinely N/A: #4 advertisement · #11 BACK UI button · #12 EXIT UI button · #18 terms · #19 sign-up
 (account creation happens on plex.tv) · #23 adult authentication · #24 / #25 payment · #32 colour

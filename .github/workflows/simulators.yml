@@ -15,7 +15,7 @@ on:
       - 'src/ass.c'
       - 'src/ass_composite.h'
       - 'include/ass.h'
-      - 'assets/icons/**'
+      - 'design/icons/**'
       - 'vendor/nanosvg/**'
       - 'pkg/appfont*.ttf'
       - 'pkg/OFL.txt'

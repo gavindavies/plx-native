@@ -3109,7 +3109,7 @@ fn extras_sit_after_cast_and_crew_and_do_not_move_the_compact_title() {
     clear();
 }
 
-/// Pins the exact hazard `docs/trailer-ux-plan.md` §8's eng review verified was already retired
+/// Pins the exact hazard `design/specs/trailer-ux-plan.md` §8's eng review verified was already retired
 /// (the `detail-sections-array-position-traps` prior learning) with a test rather than only a
 /// source read: `LayoutCache.top`/`.seen` must be indexed by `SectionId as usize` (identity), not
 /// by the section's ARRAY-WALK position. This movie fixture puts `Cast` at array position 1 —

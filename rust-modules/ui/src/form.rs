@@ -27,10 +27,10 @@
 //! carries its own guard. A table is (re)installed by one of FOUR operations — [`FormTable::set`]
 //! (Settings' snap), [`FormTable::open`], [`FormTable::refresh`], [`FormTable::restore`] — because
 //! "the page changed", "the same page's data changed" and "a page came back" want different scroll
-//! and pill behaviour. Design record: `docs/player-submenus.md`.
+//! and pill behaviour. Design record: `design/specs/player-submenus.md`.
 //!
 //! Rendering is byte-identical to a hand-built `Vec<Section>`: [`Form`] produces exactly that list
-//! and hands it to the existing [`TableView`] path. Design record: `docs/settings-form.md`.
+//! and hands it to the existing [`TableView`] path. Design record: `design/specs/settings-form.md`.
 
 use crate::table::{Row, Section, TableView};
 

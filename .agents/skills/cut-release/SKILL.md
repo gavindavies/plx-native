@@ -202,14 +202,14 @@ loader check become a playback claim — it grades whether the process starts an
 plane. The note carries one line per tier; the matrix belongs to the audit.
 
 **Look at the screenshots; the release's own run commits them.** The README,
-`docs/ux-scenario.md` and the website's screenshots (`docs/screenshots/`, staged by `pages.yml`) and link-preview card (`site/media/`) show
+`design/specs/ux-scenario.md` and the website's screenshots (`design/screenshots/`, staged by `pages.yml`) and link-preview card (`site/media/`) show
 the release's own UI, so a release whose figures predate its changes advertises a different app. The `stills` job
 of `site-video.yml` regenerates them after the release (see "Site video" below); this Mac render is a PREVIEW, to
 open the figures and fix any caption they falsify in this release's commit, not to commit the images:
 
 ```sh
 make screenshots SHOT_CHECK=1     # every figure and site still, rendered twice; fails unless within its bound
-git status --short docs/screenshots site/media
+git status --short design/screenshots site/media
 ```
 
 Open every changed image — a scene whose state drifted (a menu that opened on

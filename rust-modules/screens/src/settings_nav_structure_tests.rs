@@ -1,4 +1,4 @@
-//! **One navigation architecture, enforced structurally** (docs/settings-form.md, "Navigation").
+//! **One navigation architecture, enforced structurally** (design/specs/settings-form.md, "Navigation").
 //!
 //! For every form page the Settings family mounts — the root (signed out, and signed in to a
 //! multi-user account), Playback, and Audio & Subtitles with a loaded snapshot — and for every

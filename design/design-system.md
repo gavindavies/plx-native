@@ -4,9 +4,9 @@ This is an index, not a specification. Every claim below points at the file that
 it, because those files are checked by the compiler, by the lint gate, or by a test, and prose is
 not. If this file and a pointer disagree, the pointer wins and this file is stale.
 
-The full design and migration status lives in [docs/ui-system-migration.md](docs/ui-system-migration.md).
+The full design and migration status lives in [design/specs/ui-system-migration.md](specs/ui-system-migration.md).
 The rules you must follow when writing UI code live in
-[rust-modules/ui/src/CLAUDE.md](rust-modules/ui/src/CLAUDE.md). Read that before touching a screen.
+[rust-modules/ui/src/CLAUDE.md](../rust-modules/ui/src/CLAUDE.md). Read that before touching a screen.
 
 ## The surface
 
@@ -74,7 +74,7 @@ can grade it. `widgets.rs`'s `hero_scrim_a` doc says it plainly: the contract "i
 is the arithmetic the anchor table in this module's tests reads, so the promise and the paint cannot
 come from two different curves."
 
-- Vertical ramp, [rust-modules/ui/src/landing_hero.rs](rust-modules/ui/src/landing_hero.rs):
+- Vertical ramp, [rust-modules/ui/src/landing_hero.rs](../rust-modules/ui/src/landing_hero.rs):
   zero above `HERO_BASE_SCRIM_Y0` (0.34 of the screen, 367), `foot * MID_WEIGHT` at `KNEE_Y` (0.65
   of the screen, 702), and `foot = 0.30 + 0.64 * hero_a` at the bottom. The text stack builds upward
   from `TEXT_BOTTOM` 692 in a column of `COL_W` 660.
@@ -125,7 +125,7 @@ Surfaces over a page stand on the page's own latched light: `widgets::panel_grou
 underlay field the modal dim latched, windowed to the panel's rect and graded toward the panel
 material under its frost. Backdrop-blur glass (`Glass::DYNAMIC_BACKDROP`) is chrome-only — the top
 bar's track and the profile chip — plus the one non-interactive standing note, the "Hold OK for options"
-capsule (`ui::hold_hint`: standing on Home, and once per screen kind per run on the other card screens). See `docs/liquid-glass.md`.
+capsule (`ui::hold_hint`: standing on Home, and once per screen kind per run on the other card screens). See `design/specs/liquid-glass.md`.
 
 ## Navigation says where BACK goes, once
 
@@ -146,8 +146,8 @@ Its contextual answer verbs share one horizontal row, separated from BODY-sized 
 
 | Changing | Read first |
 |---|---|
-| any screen | `rust-modules/ui/src/CLAUDE.md`, then `docs/ui-system-migration.md` |
-| adding a screen | `docs/ui-system-migration.md` section (E) |
+| any screen | `rust-modules/ui/src/CLAUDE.md`, then `design/specs/ui-system-migration.md` |
+| adding a screen | `design/specs/ui-system-migration.md` section (E) |
 | a colour | `rust-modules/ui/src/theme.rs` |
 | a size | `rust-modules/gfx/src/gfx/tokens.rs` (`mod size`, re-exported as `theme::size`) |
 | anything behind hero text | `rust-modules/ui/src/landing_hero.rs` and `widgets.rs`'s scrim section, then re-grade the anchor table |

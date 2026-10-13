@@ -196,7 +196,7 @@ playback on the letter `p`; on the Search screen, where printable characters arr
 screen for the player.
 
 Left alone deliberately. It is a real finding of the same class as 4.1, but the alternate sets are
-carried as an invariant in `docs/ui-viewtree-plan.md` §C, changing them is a documented behaviour
+carried as an invariant in `design/specs/ui-viewtree-plan.md` §C, changing them is a documented behaviour
 change rather than a tidy-up, and the sibling codes (`402`, `415`, `413`) come from evdev entries
 `linux/input.h` does not name — so unlike `33`/`34` there is no positive evidence about them in
 either direction. **Settle all four together, with the §7 capture plus a USB keyboard, in one pass.**
@@ -343,7 +343,7 @@ whether **461** and **412 / 417 / 413 / 415 / 402** ever fire (§2, §4.2), and 
 **This section recorded a known QA blocker; three of its four roots were closed 2026-09-03 and the
 fourth — the first-run consent question's first stage — closed 2026-09-07, when phase 5b turned it
 into an owned `ConsentPage` that can tell its own first stage apart from an ordinary step-back (see
-below and `docs/ux-scenario.md` §5.9).** LG's submission UX rules include, as quoted in
+below and `design/specs/ux-scenario.md` §5.9).** LG's submission UX rules include, as quoted in
 `docs/distribution.md` §2, that
 
 > every selectable element must respond to 4-way + OK + Back, and on webOS 23–25 Back on the entry

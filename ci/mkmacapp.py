@@ -135,7 +135,7 @@ def write_icon(res: Path):
     """`.icns` from the 1254px master — macOS wants a 512@2x rung, and upscaling `pkg/icon320.png`
     into it is visible in the Dock."""
     print("==> icon")
-    master = REPO / "assets/logo-master.png"
+    master = REPO / "design/brand/logo-master.png"
     with tempfile.TemporaryDirectory() as tmp:
         iconset = Path(tmp) / "AppIcon.iconset"
         iconset.mkdir()

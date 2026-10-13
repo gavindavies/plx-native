@@ -27,24 +27,24 @@ day to watch things off my server in the next room.
 
 Real captures of the app, not mockups: the same code that runs on the television, on the desktop
 simulator, browsing a demo library of openly licensed films
-([credits](docs/screenshots/CREDITS.md)). `make screenshots` regenerates them.
+([credits](design/screenshots/CREDITS.md)). `make screenshots` regenerates them.
 
-![Home](docs/screenshots/home.jpg)
+![Home](design/screenshots/home.jpg)
 
 **Home** — a rotating hero from what you're partway through and what's just landed, shelves under it.
 
-![Library](docs/screenshots/library.jpg)
+![Library](design/screenshots/library.jpg)
 
 **Library** — a library opens on its own shelves: what you're partway through, with the time
 left under the focused card, and what just landed. Further down is the full grid, with sort,
 filter (including unwatched-only) and an A–Z rail down the side
-([pictured here](docs/screenshots/ux-library-grid.jpg)).
+([pictured here](design/screenshots/ux-library-grid.jpg)).
 
-![Search](docs/screenshots/search.jpg)
+![Search](design/screenshots/search.jpg)
 
 **Search** — one query across every server you can reach, results grouped by kind.
 
-![Player](docs/screenshots/player.jpg)
+![Player](design/screenshots/player.jpg)
 
 **Player** — the transport with chapters and track menus, drawn over video the television decodes
 itself. (In this capture the frame under it was decoded by the simulator.)
@@ -175,7 +175,9 @@ If that fits, it's genuinely nice to use. If it doesn't, the official app will s
 
 Issues and pull requests are welcome, especially from anyone whose television or library differs
 from mine — [**docs/building.md**](docs/building.md) is the build and the test loop, and says what
-hardware I most need help with. Feature ideas go to [Discussions >
+hardware I most need help with. Design and user-experience work starts at
+[**design/README.md**](design/README.md): the design system, the specs, icons and screenshots.
+Feature ideas go to [Discussions >
 Ideas](https://github.com/GLinnik21/plx-native/discussions/categories/ideas). Security issues go
 through [`SECURITY.md`](SECURITY.md) rather than a public issue.
 

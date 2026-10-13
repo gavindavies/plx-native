@@ -203,7 +203,7 @@ the native-app fields — **Native SDK version, chipset, resolution** and the pa
 out of the archive we uploaded. A portal that classifies a package as native, names the SDK it was
 built against and asks for the chipset is not a portal that has no native app model. Native
 submission is therefore an **established premise** of everything downstream in this repo —
-`docs/lg-self-checklist.md`, `docs/ux-scenario.md`, and the QA questions in §9 — rather than a
+`docs/lg-self-checklist.md`, `design/specs/ux-scenario.md`, and the QA questions in §9 — rather than a
 caveat those documents have to open by hedging.
 
 **What the old argument actually rested on, and why it never supported the conclusion.** The quoted
@@ -243,7 +243,7 @@ Lounge account (individual or corporate), an ipk ≤ 2 GB, a mandatory **UX-scen
 to 4-way + OK + Back, and on webOS 23–25 Back on the entry page must show the Home screen. What this
 app would be graded on is recorded item by item in `docs/lg-self-checklist.md` — four genuine
 failures and a column of untested items — and the transport-control question is answered by
-**`docs/ux-scenario.md`**, which is the document LG's checklist item 45 defers to by name.
+**`design/specs/ux-scenario.md`**, which is the document LG's checklist item 45 defers to by name.
 
 **Content policy is not an obstacle either** — Jellyfin and Emby both ship on the LG Content Store,
 so "client for a self-hosted media server" is an accepted category, and Plex ships an official webOS
@@ -697,7 +697,7 @@ preview before either answer: the first choice remains a draft, the second recor
 records nothing either way — it steps back from the product question to the crash one, and on the
 crash question (which is asked once per sign-in, immediately after it and before the
 profile picker) there is nothing behind it *inside the app* — sign-in is the step behind it, and
-that cannot be undone — so BACK there is the platform's own root press (`docs/remote-keys.md` §8)
+that cannot be undone — so BACK there is the platform's own root press (`design/specs/remote-keys.md` §8)
 rather than closing the ceremony: it neither answers nor dismisses the question, and returning to
 the app finds it still there.
 `PRIVACY.md` carries the schemas: usage is generated from
@@ -902,7 +902,7 @@ identity, so re-run the player suite after renaming.)*
 > Tomatoes icons and `tmdb.svg` were deleted, and the rating row names each provider in text with
 > a verdict-only glyph beside the score. See **§11**. Kept because the reasoning — why redrawing a
 > mark does not avoid the trademark, and why referential use in words does — is the useful part and
-> is what any future brand asset should be measured against. Verify against `assets/icons/` before
+> is what any future brand asset should be measured against. Verify against `design/icons/` before
 > quoting anything here as current.
 
 **BLOCKING — Rotten Tomatoes.** There is **no licensing route that exists**. The RT Developer Network
@@ -930,7 +930,7 @@ and there is no attribution anywhere. Nuance: we don't call the TMDB API (we tak
 `themoviedb://image.rating` hints from PMS, `metadata.rs:322`), so we're likely not a licensee at all
 and have no licence to the logo. Ship the official unmodified logo **with** the notice, or drop it.
 
-Two more, minor: `assets/icons/user.svg` is character-for-character Google Material Icons `person`
+Two more, minor: `design/icons/user.svg` is character-for-character Google Material Icons `person`
 (Apache-2.0, needs attribution) and `backspace.svg` is Feather Icons `delete` (MIT, needs the
 notice). The other 29 are genuinely hand-authored. And `theme.rs` tints these marks in the brands'
 **exact** hex — `#01B4E4` (TMDB), `#F5C518` (IMDb), RT red — which is what turns generic geometry
@@ -1098,7 +1098,7 @@ Listed because each could change a decision above.
     rebuilds, re-verified after the strip landed).
 16. ~~Draw real icons (they're solid gold squares today).~~ **DONE 2026-08-02** — `tools/mkicons.py`
     cuts all four sizes (80/130 for LG, 160/320 for the channel listing) from
-    `assets/logo-master.png`, measuring the master's ink and refitting it to LG's panel geometry
+    `design/brand/logo-master.png`, measuring the master's ink and refitting it to LG's panel geometry
     rather than scaling the master's own canvas. Verified in the real launcher; see §10.
 17. ~~Write a root README with build instructions that work from a clean clone.~~ **DONE 2026-08-02.**
 18. `webosbrew-gen-manifest`, attach both assets to a GitHub Release, submit the PR, tick the AI-use
@@ -1503,7 +1503,7 @@ the app to write one anyway).
 ## 10. App icons (built 2026-08-02, verified in the launcher)
 
 `tools/mkicons.py` cuts `pkg/icon.png` (80), `pkg/largeIcon.png` (130) and the channel listing's
-`icon160.png` / `icon320.png` from one square master (`assets/logo-master.png`). It measures the
+`icon160.png` / `icon320.png` from one square master (`design/brand/logo-master.png`). It measures the
 master's **ink** and scales until that ink lands where LG wants it, because the geometry is not
 "the logo, scaled": the guide specifies a **126×126 background panel** with the logo inside
 **115×115 plus ≥5 px padding**, so a master's own canvas margins may be off by any amount and a
@@ -1602,7 +1602,7 @@ the two tiles sit side by side in the launcher. `pkg/dev/icon.png` and `pkg/dev/
 tracked, cut from the SAME master by the same script:
 
 ```sh
-python3 tools/mkicons.py assets/logo-master.png --out-dir=pkg/dev --sizes=80,130 --badge=DEV
+python3 tools/mkicons.py design/brand/logo-master.png --out-dir=pkg/dev --sizes=80,130 --badge=DEV
 ```
 
 The nightly install (`com.beb.plxnative.nightly`) is a third tile beside both, so it wears its own
@@ -1610,7 +1610,7 @@ set, `pkg/nightly/`, in the palette's cool grey (`COOL_200`, `#cdd3dd`) with the
 cut the same way:
 
 ```sh
-python3 tools/mkicons.py assets/logo-master.png --out-dir=pkg/nightly --sizes=80,130 \
+python3 tools/mkicons.py design/brand/logo-master.png --out-dir=pkg/nightly --sizes=80,130 \
   --badge=NIGHTLY --badge-fill=#cdd3dd
 ```
 
@@ -1877,9 +1877,9 @@ Both are gone. The app's own text comes from bundled catalogs (English, Spanish,
 UI language resolves from a saved Settings → Language override, then the TV UI language reported
 by the native Settings Service, then the process locale, then English, and
 `plex::identity::language` now sends that resolved language as `X-Plex-Language`.
-[`docs/localization.md`](localization.md) is the current account of runtime behaviour and of its
+[`design/specs/localization.md`](../design/specs/localization.md) is the current account of runtime behaviour and of its
 verification on the television.
 
 **So the mark for #41** is: the metadata half is implemented and gated as above; the UI half is
-implemented by the localization work and verified on the webOS 4.5 set as `docs/localization.md`
+implemented by the localization work and verified on the webOS 4.5 set as `design/specs/localization.md`
 records; the launcher-metadata acceptance questions in §12.4 are still separate device checks.

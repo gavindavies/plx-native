@@ -725,7 +725,7 @@ impl TableView {
     /// section caption glued to the first row. `None` (the default) draws nothing. The band is
     /// part of [`Self::measured_height`], [`Self::measured_width`] and [`Self::fit_report`]; it is
     /// not a hit target here (the owner that pops on it registers its own stop). Design record:
-    /// `docs/player-submenus.md`.
+    /// `design/specs/player-submenus.md`.
     ///
     /// The band moves every row down (or up) by [`HDR_H`] + [`TITLE_GAP`] + [`DIV_H`], so when it appears or goes
     /// the pill springs are re-jumped to the selected row's new place: installing the title after

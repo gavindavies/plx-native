@@ -153,7 +153,7 @@ The nonblocking-connect fix is ~15 lines of `libc` and no new dependency. `fd` �
   driver: `tools/stream-screen.py`'s `ck:X,Y` clicks are inert on the one screen that starts playback.
 
 Note: the sweeping *"introduce a `Screen` trait, collapse all eight dispatch chains"* proposal was
-**refuted** by two independent verifiers — `docs/ui-viewtree-plan.md` records deliberate carve-outs
+**refuted** by two independent verifiers — `design/specs/ui-viewtree-plan.md` records deliberate carve-outs
 (focused-last z-order, `player_hud`'s `SCR_H`-offset geometry shared with `app.rs` hit-tests) that a
 uniform trait would break. Do the three narrow extractions instead: `HudState`+`ScrubMachine` into
 `ui/player_hud.rs`, a `triggers.rs` with one table (so `DIAG` cannot drift from the catalog), and a
@@ -167,7 +167,7 @@ All three verified empirically against this checkout:
   `RUSTFLAGS_TV`, `CFLAGS`, or a stub SONAME and `make` rebuilds nothing.
 - **`$(RUST_LIB)`'s dependency list omits every embedded asset** (`Makefile:88`): the 9
   `rust-modules/src/shaders/*.{vert,frag}` pulled in by `include_str!` at `gfx.rs:35` and the 13
-  `assets/icons/*.svg` at `ui/icons.rs:35-47`, plus `Cargo.lock`. Edit a shader or an icon, `make
+  `design/icons/*.svg` at `ui/icons.rs:35-47`, plus `Cargo.lock`. Edit a shader or an icon, `make
   deploy`, and the TV runs the old one — a UI change that looks like it had no effect.
 - **The SIGILL-preventing codegen flags exist only as an env var inside one recipe** (`Makefile:87`).
   There is no `.cargo/config.toml`, so a plain `cargo build --target arm-unknown-linux-gnueabi`
@@ -241,7 +241,7 @@ Severities reflect the adversarial panel's corrections, not the original auditor
 | medium | `ui/mod.rs:174`, `gfx.rs:313` | The `focus: f32` parameter is dead at all 34 call sites but still threaded through `Painter::rect` → `gfx::draw_rect` → a shader branch, and still described as live by `ui/CLAUDE.md:65` and nine doc comments. Deleting it is compile-enforced. |
 | medium | `ui/chapters_panel.rs:58` | Forks the episode strip with a slot-pinning scroll rule the shared component **explicitly refuses** (`card_row.rs:112-115`: *"no slot pinning, so entering a row doesn't jump it"*) and cites a parity with the episode picker that no longer exists (`detail.rs:461-468` uses `card_row::scroll_into_view`). Two different feels for the same LEFT/RIGHT gesture in one session. |
 | low | `ui/widgets.rs:337` | `TabPill::width(chars, sz)` estimates from a codepoint count × a Latin advance ratio. There are **three** tab rows and they disagree: `draw_tab_row` (`widgets.rs:424`) and the detail season tabs (`detail.rs:419`) both measure with `text_width`, while the **player HUD's row uses the estimator** (`player_hud.rs:327`) — corrected by §8.c-C14; the first pass wrongly implied the estimator was vestigial. So the component that exists to unify the tab rows lays them out by two different rules, and the row still on the estimator is the one most likely to carry a non-Latin label (`chars().count()` counts codepoints, not advances). |
-| low-med | `ui/mod.rs:131` | The retained-mode `View`/`Env` core is thinner than `mod.rs:1-7` advertises: `layout` and `update` have one implementor each (both `home.rs`), six of ten `impl View` ignore `Env`, and the components with a real lifecycle (`TableView`, `CardRow`, `Popover`) deliberately don't implement it. Shrink the documented contract to what is true rather than "finishing" the tree — the verifiers showed a recursive traversal would break two named invariants in `docs/ui-viewtree-plan.md`. |
+| low-med | `ui/mod.rs:131` | The retained-mode `View`/`Env` core is thinner than `mod.rs:1-7` advertises: `layout` and `update` have one implementor each (both `home.rs`), six of ten `impl View` ignore `Env`, and the components with a real lifecycle (`TableView`, `CardRow`, `Popover`) deliberately don't implement it. Shrink the documented contract to what is true rather than "finishing" the tree — the verifiers showed a recursive traversal would break two named invariants in `design/specs/ui-viewtree-plan.md`. |
 
 ### Data layer
 
@@ -342,7 +342,7 @@ so they are recorded with the reason.
   uniform locations. A blanket conversion is churn with no bug class eliminated. Fix the three that
   are actually reachable from a worker and leave the rest.
 - **Do not introduce a uniform `Screen` trait to collapse app.rs's eight dispatch chains.**
-  `docs/ui-viewtree-plan.md` records deliberate carve-outs — focused-last cross-row z-order,
+  `design/specs/ui-viewtree-plan.md` records deliberate carve-outs — focused-last cross-row z-order,
   `player_hud`'s `SCR_H`-offset geometry shared with `app.rs`'s pointer hit-tests — that a uniform
   trait breaks. Extract the specific state machines instead.
 - **Do not "finish" the retained view tree by driving it recursively.** Same invariants. Shrink the
@@ -492,7 +492,7 @@ Stop (`:1224`), BACK (`:1294`) and the background suspend (`:787-800`) all leak.
 `hud_focus == 1` carried in, the first OK of the new movie opens the track menu (`app.rs:1124`)
 instead of pausing, and LEFT/RIGHT walk buttons instead of seeking (`app.rs:1242`). *Fix
 (minimum, 4 lines):* reset the three in `start_playback`. → **Wave 2** (the full `HudFocus`
-module belongs to item 19; `docs/ui-system-migration.md` §D.3 defers the transport machine
+module belongs to item 19; `design/specs/ui-system-migration.md` §D.3 defers the transport machine
 deliberately, and `hud_focus` is coupled to the scrub locals at `app.rs:872`, `:1076-1082`)
 
 Two findings landed on rows §2.7/§3 already carry, and both are **confirmed as written**, each

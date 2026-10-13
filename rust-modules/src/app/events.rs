@@ -40,7 +40,7 @@ pub(crate) fn rd_u32(ev: &[u8], off: usize) -> u32 {
 /// backspace 42, Clear 156, ◀/▶ 80/79, OK 40 — so the fork's shift puts an ordinary
 /// `SDL_Keysym { scancode, sym }` at +20/+24 rather than inventing a webOS keycode namespace. That
 /// is why the codes above SDL's own range (450 play, 482 back, 505 exit) carry no sym at all: they
-/// are LG-private scancodes the keymap has no keycode for. `docs/remote-keys.md` has the account.
+/// are LG-private scancodes the keymap has no keycode for. `design/specs/remote-keys.md` has the account.
 ///
 /// # The simulator's carrier moved, because the old one was silently DEAD
 ///

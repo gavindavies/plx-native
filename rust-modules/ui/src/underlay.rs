@@ -19,7 +19,7 @@
 //! texture fetch a fragment, because the expensive part happened once, at the latch.
 //!
 //! **There is no blur pass and there must not be one.** A blur of the page is a different object:
-//! `docs/liquid-glass.md` sizes what it costs, and the thing it buys — letter-scale structure
+//! `design/specs/liquid-glass.md` sizes what it costs, and the thing it buys — letter-scale structure
 //! softened rather than destroyed — is exactly what a GROUND must not have. Reducing to 15x8 is a
 //! box filter with a support 128 screen pixels wide; titles, faces and poster edges cannot survive
 //! it, which is the property a four-corner wash always had and which this keeps while adding the

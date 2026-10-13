@@ -27,7 +27,7 @@ use plx_appkit::player_hud::{LINGER_MS, PLAY_MARK_MS};
 
 /// Which title the transport shows under the `Trailer` kicker: the FILM/SHOW title by default, so
 /// a trailer whose own PMS-scanned title is the boilerplate "Trailer" does not repeat the kicker
-/// word right underneath it — the case docs/trailer-ux-plan.md calls out as true "on most
+/// word right underneath it — the case design/specs/trailer-ux-plan.md calls out as true "on most
 /// servers". The extra's own title wins only when it says something the kicker doesn't already,
 /// compared trimmed and case-insensitively so "trailer"/"Trailer "/"TRAILER" all count as the same
 /// non-information while "Official Trailer" or "Teaser 2" do not.

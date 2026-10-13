@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::OnceLock;
 
 pub const CONTRIBUTE_URL: &str =
-    "https://github.com/GLinnik21/plx-native/blob/main/docs/localization.md";
+    "https://github.com/GLinnik21/plx-native/blob/main/design/specs/localization.md";
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]

@@ -4,20 +4,22 @@
 # show, made from nothing but ffmpeg and the app's own fonts (no third-party media, nothing to
 # license). Every title is invented.
 #
-#   tools/linux/make-demo-library.sh [DIR]      (default: ./demo-library)
-#   PLXNATIVE_MEDIA_DIRS=DIR dist/linux/plxnative/plxnative
+#   design/demo-library/generate.sh [DIR]      (default: design/demo-library/library, the copy
+#                                              kept in the repository)
+#   PLXNATIVE_MEDIA_DIRS=design/demo-library/library dist/linux/plxnative/plxnative
 #
-# Takes a few minutes and about 90 MB. Re-running skips files that already exist.
+# Takes a few minutes and about 40 MB at the defaults (VIDEO_SIZE=1280x720 CRF=26 gives a sharper
+# ~90 MB copy). Re-running skips files that already exist; delete a file to remake it.
 set -euo pipefail
 
-OUT=${1:-demo-library}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+OUT=${1:-$ROOT/design/demo-library/library}
 FONT="$ROOT/pkg/appfont.ttf"
 BOLD="$ROOT/pkg/appfont-bold.ttf"
 FILM_SECONDS=${FILM_SECONDS:-180}
 EPISODE_SECONDS=${EPISODE_SECONDS:-90}
-VIDEO_SIZE=${VIDEO_SIZE:-1280x720}   # 960x540 and CRF=30 make a copy small enough to keep in git
-CRF=${CRF:-26}
+VIDEO_SIZE=${VIDEO_SIZE:-960x540}   # what the repository keeps; 1280x720 and CRF=26 look sharper
+CRF=${CRF:-30}
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 

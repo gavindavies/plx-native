@@ -2,7 +2,7 @@
 # Render site/og/card.html to site/media/og-card.jpg, the 1200x630 link-preview image that
 # plxnative.com advertises through its og:image / twitter:image tags.
 #
-#   tools/render-og-card.sh                           # the card as committed (docs/screenshots/home.jpg)
+#   tools/render-og-card.sh                           # the card as committed (design/screenshots/home.jpg)
 #   tools/render-og-card.sh --shot IMG --out FILE     # another screenshot, somewhere else
 #
 # `make screenshots` runs the second form with the home figure it has just rendered, so the card

@@ -12,7 +12,7 @@
 >
 > **For anything you intend to act on, read `rust-modules/src/ui/CLAUDE.md`** — it is the
 > contribution guide and carries the current, audited module map, the token rules, and the gotchas.
-> `docs/ui-system-migration.md` has the design-system status. Do not "fix" this file into a second
+> `design/specs/ui-system-migration.md` has the design-system status. Do not "fix" this file into a second
 > map of the directory; one map is the point.
 
 `rust-modules/src/ui/` is a small **retained-mode, UIKit-style view tree** in Rust.
@@ -82,6 +82,6 @@ Where `ui_home.c` used hand-tuned absolute offsets (`titleY+92/+128/+158/+200`,
 
 Everything in that "Next" list landed, and then some — the router, the player HUD, detail, library,
 login, the profile picker, and a full token-based design system (`theme.rs`) this note never
-anticipated. The executed record lives in `docs/ui-system-migration.md` §G and
-`docs/ui-viewtree-plan.md`; the current rules live in `rust-modules/src/ui/CLAUDE.md`. Treat this
+anticipated. The executed record lives in `design/specs/ui-system-migration.md` §G and
+`design/specs/ui-viewtree-plan.md`; the current rules live in `rust-modules/src/ui/CLAUDE.md`. Treat this
 section as archaeology.

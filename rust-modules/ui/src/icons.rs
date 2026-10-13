@@ -1,6 +1,6 @@
 //! Vector icon assets (SVG) rasterized at runtime into tinted GL textures — the iOS-style
 //! "ship the vector, render at runtime" approach. Each icon lives as an SVG file under
-//! assets/icons/ (authored as a white #ffffff mask), embedded via include_str!. On first use
+//! design/icons/ (authored as a white #ffffff mask), embedded via include_str!. On first use
 //! at a given pixel size we rasterize it (plx_gfx::svg → nanosvg), upload it once as a GL texture
 //! (cached), and draw it through the Painter with a per-state tint. Main/GL-thread only.
 //!
@@ -235,7 +235,7 @@ pub enum Icon {
 /// transcribed it independently and in two different shapes — `player_hud`'s transport slot carried
 /// an `(l, r)` tuple per glyph so the gap after the elapsed clock is measured to ink rather than to
 /// box, and `home`'s hero pager carried a single leading bearing for `chevron.svg` — with nothing in
-/// either file pointing back at the `.svg` whose numbers they are. `assets/icons/*.svg` is exactly
+/// either file pointing back at the `.svg` whose numbers they are. `design/icons/*.svg` is exactly
 /// the kind of file that gets re-drawn (this module's own doc invites it), and a re-draw moved both
 /// of those silently: no compile error, no test.
 ///
@@ -268,50 +268,50 @@ pub const fn band(id: Icon) -> f32 {
 
 fn src(id: Icon) -> &'static str {
     match id {
-        Icon::Agreement => include_str!("../../../assets/icons/agreement.svg"),
-        Icon::Cc => include_str!("../../../assets/icons/cc.svg"),
-        Icon::Audio => include_str!("../../../assets/icons/audio.svg"),
-        Icon::Check => include_str!("../../../assets/icons/check.svg"),
-        Icon::Chevron => include_str!("../../../assets/icons/chevron.svg"),
-        Icon::ChevronLeft => include_str!("../../../assets/icons/chevron-left.svg"),
-        Icon::ChevronDown => include_str!("../../../assets/icons/chevron-down.svg"),
-        Icon::ChevronUp => include_str!("../../../assets/icons/chevron-up.svg"),
-        Icon::CheckCircleFill => include_str!("../../../assets/icons/check-circle-fill.svg"),
-        Icon::MinusCircleFill => include_str!("../../../assets/icons/minus-circle-fill.svg"),
-        Icon::Minus => include_str!("../../../assets/icons/minus.svg"),
-        Icon::Play => include_str!("../../../assets/icons/play.svg"),
-        Icon::Pause => include_str!("../../../assets/icons/pause.svg"),
-        Icon::Rewind => include_str!("../../../assets/icons/rewind.svg"),
-        Icon::FastForward => include_str!("../../../assets/icons/fast-forward.svg"),
-        Icon::Restart => include_str!("../../../assets/icons/restart.svg"),
-        Icon::Trailer => include_str!("../../../assets/icons/trailer.svg"),
-        Icon::Info => include_str!("../../../assets/icons/info.svg"),
-        Icon::Alert => include_str!("../../../assets/icons/alert.svg"),
-        Icon::User => include_str!("../../../assets/icons/user.svg"),
-        Icon::Backspace => include_str!("../../../assets/icons/backspace.svg"),
-        Icon::Episode => include_str!("../../../assets/icons/episode.svg"),
-        Icon::Show => include_str!("../../../assets/icons/show.svg"),
-        Icon::Collection => include_str!("../../../assets/icons/collection.svg"),
-        Icon::PlayStart => include_str!("../../../assets/icons/play-start.svg"),
-        Icon::Close => include_str!("../../../assets/icons/close.svg"),
-        Icon::More => include_str!("../../../assets/icons/more.svg"),
-        Icon::Search => include_str!("../../../assets/icons/search.svg"),
-        Icon::Tomato => include_str!("../../../assets/icons/tomato.svg"),
-        Icon::TomatoCalyx => include_str!("../../../assets/icons/tomato-calyx.svg"),
-        Icon::TomatoHollow => include_str!("../../../assets/icons/tomato-hollow.svg"),
-        Icon::Crowd => include_str!("../../../assets/icons/crowd.svg"),
-        Icon::ClockBadgeAlert => include_str!("../../../assets/icons/clock-badge-alert.svg"),
-        Icon::CloudBadgeAlert => include_str!("../../../assets/icons/cloud-badge-alert.svg"),
-        Icon::GlobeBadgeMinus => include_str!("../../../assets/icons/globe-badge-minus.svg"),
-        Icon::GlobeBadgeQuestion => include_str!("../../../assets/icons/globe-badge-question.svg"),
-        Icon::KeyBadgeAlert => include_str!("../../../assets/icons/key-badge-alert.svg"),
-        Icon::LockBadgeAlert => include_str!("../../../assets/icons/lock-badge-alert.svg"),
-        Icon::PeopleBadgeAlert => include_str!("../../../assets/icons/people-badge-alert.svg"),
-        Icon::PersonBadgeXmark => include_str!("../../../assets/icons/person-badge-xmark.svg"),
-        Icon::ServerBadgeMinus => include_str!("../../../assets/icons/server-badge-minus.svg"),
-        Icon::ServerBadgePlus => include_str!("../../../assets/icons/server-badge-plus.svg"),
-        Icon::ServerBadgeXmark => include_str!("../../../assets/icons/server-badge-xmark.svg"),
-        Icon::WifiSlash => include_str!("../../../assets/icons/wifi-slash.svg"),
+        Icon::Agreement => include_str!("../../../design/icons/agreement.svg"),
+        Icon::Cc => include_str!("../../../design/icons/cc.svg"),
+        Icon::Audio => include_str!("../../../design/icons/audio.svg"),
+        Icon::Check => include_str!("../../../design/icons/check.svg"),
+        Icon::Chevron => include_str!("../../../design/icons/chevron.svg"),
+        Icon::ChevronLeft => include_str!("../../../design/icons/chevron-left.svg"),
+        Icon::ChevronDown => include_str!("../../../design/icons/chevron-down.svg"),
+        Icon::ChevronUp => include_str!("../../../design/icons/chevron-up.svg"),
+        Icon::CheckCircleFill => include_str!("../../../design/icons/check-circle-fill.svg"),
+        Icon::MinusCircleFill => include_str!("../../../design/icons/minus-circle-fill.svg"),
+        Icon::Minus => include_str!("../../../design/icons/minus.svg"),
+        Icon::Play => include_str!("../../../design/icons/play.svg"),
+        Icon::Pause => include_str!("../../../design/icons/pause.svg"),
+        Icon::Rewind => include_str!("../../../design/icons/rewind.svg"),
+        Icon::FastForward => include_str!("../../../design/icons/fast-forward.svg"),
+        Icon::Restart => include_str!("../../../design/icons/restart.svg"),
+        Icon::Trailer => include_str!("../../../design/icons/trailer.svg"),
+        Icon::Info => include_str!("../../../design/icons/info.svg"),
+        Icon::Alert => include_str!("../../../design/icons/alert.svg"),
+        Icon::User => include_str!("../../../design/icons/user.svg"),
+        Icon::Backspace => include_str!("../../../design/icons/backspace.svg"),
+        Icon::Episode => include_str!("../../../design/icons/episode.svg"),
+        Icon::Show => include_str!("../../../design/icons/show.svg"),
+        Icon::Collection => include_str!("../../../design/icons/collection.svg"),
+        Icon::PlayStart => include_str!("../../../design/icons/play-start.svg"),
+        Icon::Close => include_str!("../../../design/icons/close.svg"),
+        Icon::More => include_str!("../../../design/icons/more.svg"),
+        Icon::Search => include_str!("../../../design/icons/search.svg"),
+        Icon::Tomato => include_str!("../../../design/icons/tomato.svg"),
+        Icon::TomatoCalyx => include_str!("../../../design/icons/tomato-calyx.svg"),
+        Icon::TomatoHollow => include_str!("../../../design/icons/tomato-hollow.svg"),
+        Icon::Crowd => include_str!("../../../design/icons/crowd.svg"),
+        Icon::ClockBadgeAlert => include_str!("../../../design/icons/clock-badge-alert.svg"),
+        Icon::CloudBadgeAlert => include_str!("../../../design/icons/cloud-badge-alert.svg"),
+        Icon::GlobeBadgeMinus => include_str!("../../../design/icons/globe-badge-minus.svg"),
+        Icon::GlobeBadgeQuestion => include_str!("../../../design/icons/globe-badge-question.svg"),
+        Icon::KeyBadgeAlert => include_str!("../../../design/icons/key-badge-alert.svg"),
+        Icon::LockBadgeAlert => include_str!("../../../design/icons/lock-badge-alert.svg"),
+        Icon::PeopleBadgeAlert => include_str!("../../../design/icons/people-badge-alert.svg"),
+        Icon::PersonBadgeXmark => include_str!("../../../design/icons/person-badge-xmark.svg"),
+        Icon::ServerBadgeMinus => include_str!("../../../design/icons/server-badge-minus.svg"),
+        Icon::ServerBadgePlus => include_str!("../../../design/icons/server-badge-plus.svg"),
+        Icon::ServerBadgeXmark => include_str!("../../../design/icons/server-badge-xmark.svg"),
+        Icon::WifiSlash => include_str!("../../../design/icons/wifi-slash.svg"),
     }
 }
 

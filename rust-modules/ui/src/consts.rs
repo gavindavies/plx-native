@@ -137,7 +137,7 @@ pub const SDLK_KP_ENTER: c_uint = 88 | (1 << 30);
 /// produces 77. So [`is_ok`] accepts a keyboard's **End** key and would NOT accept a remote's real
 /// SELECT. Renaming it is the honest fix and is not this change's to make: the name is read from
 /// `ui/profiles.rs`'s test, and repointing the value would make `is_ok` answer a different key on
-/// no evidence that any remote sends 119 either. Recorded in `docs/remote-keys.md` §9, to be
+/// no evidence that any remote sends 119 either. Recorded in `design/specs/remote-keys.md` §9, to be
 /// settled by the capture in §7 — with everything else of its kind, in one pass.
 pub const SDLK_SELECT: c_uint = 77 | (1 << 30);
 pub const SDLK_ESCAPE: c_uint = 27;
@@ -180,7 +180,7 @@ pub const WCODE_STOP: c_uint = 413;
 /// The other codes the PAUSE and PLAY arms accept beside [`WCODE_PAUSE`]/[`WCODE_PLAY`], each in
 /// EITHER field. Named here because [`classify`] is where they are matched now; they came over as
 /// bare literals from the two `app.rs` arms that spelled them. The sets are the ones
-/// `docs/ui-viewtree-plan.md` §C carries as an invariant — PAUSE 72/415, PLAY 450/19/402.
+/// `design/specs/ui-viewtree-plan.md` §C carries as an invariant — PAUSE 72/415, PLAY 450/19/402.
 pub const WCODE_PAUSE_ALT: c_uint = 415;
 pub const WCODE_PLAY_ALT_A: c_uint = 19;
 pub const WCODE_PLAY_ALT_B: c_uint = 402;
@@ -466,7 +466,7 @@ pub fn page_dir(sym: c_uint, wcode: c_uint) -> Option<c_int> {
 /// arrives with its ASCII keycode in `sym` (evdev 5 -> scancode 33 -> `SDLK_4` = 52). The cost is
 /// that `is_bound` is no longer a strict superset of `digit_of` for a wcode-only punctuation press
 /// — which reaches no HUD and no armed click, because the PIN pad has neither. `profiles` is not
-/// this module's to edit; `docs/remote-keys.md` §9 carries it as an open finding for the capture
+/// this module's to edit; `design/specs/remote-keys.md` §9 carries it as an open finding for the capture
 /// that settles both.
 ///
 /// **It still OVER-approximates in one place** and the alternative is worse. A digit is bound only

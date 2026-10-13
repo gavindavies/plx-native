@@ -824,7 +824,7 @@ src/%.o: src/%.c $(wildcard src/*.h) Makefile $(CONFIG_LOCAL_STAMP)
 #
 # The prerequisite list is a `find`, not a hand-kept wildcard: the crate embeds shaders
 # (gfx/src/gfx.rs include_str! of gfx/src/shaders/*.vert|*.frag) and icons (ui/src/icons.rs include_str! of
-# assets/icons/*.svg) at COMPILE time. Those were in no dependency list, so editing a shader
+# design/icons/*.svg) at COMPILE time. Those were in no dependency list, so editing a shader
 # or an icon produced no rebuild and the TV silently kept running the old one — the worst
 # failure mode on a project whose only verification is observing the device.
 # ---- The bundled FFmpeg ------------------------------------------------------
@@ -2122,7 +2122,7 @@ check-replay: sim-macos
 # **`make screenshots` — the documentation screenshots, regenerated.** Boots the simulator once per
 # scene in `tests/screenshots/scenes.json` against the mock server's DEMO LIBRARY (openly licensed
 # films, `tests/demo_library/`), waits for each scene's settled frame, and writes the JPEGs, and
-# the CREDITS.md that goes with them, into `docs/screenshots/` (or `SHOT_OUT=dir`), then the website's
+# the CREDITS.md that goes with them, into `design/screenshots/` (or `SHOT_OUT=dir`), then the website's
 # `site/credits.html` from the same manifests. No Plex account, no
 # television, no gitignored file.
 #   make screenshots                         # every scene

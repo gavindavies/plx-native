@@ -289,7 +289,7 @@ pub const TABLE_GROUP: GroupId = GroupId(0);
 pub const BAND_GROUP: GroupId = GroupId(1);
 pub const ALERT_GROUP: GroupId = GroupId(2);
 
-/// **The ONE activation path of every form page in the family** (docs/settings-form.md,
+/// **The ONE activation path of every form page in the family** (design/specs/settings-form.md,
 /// "Navigation"): resolve the focus key to its row and either push the row's destination — a
 /// `Nav` item emits `Fx::Nav(NavOp::Push(dest))` itself and answers `None` — or hand back the
 /// row's action for the page's own `match`. No page pushes through a private path, and no page

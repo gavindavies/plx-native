@@ -9,7 +9,7 @@ on:
     branches: [main]
     paths:
       - "site/**"
-      - "docs/screenshots/**"
+      - "design/screenshots/**"
       - "docs/install-and-verify.md"
       - "docs/troubleshooting.md"
       - "docs/nightly-builds.md"
@@ -55,7 +55,7 @@ jobs:
 
           mkdir -p _site/media
           mkdir -p _site/icons
-          mkdir -p _site/docs/screenshots
+          mkdir -p _site/design/screenshots
           mkdir -p _site/fonts
           mkdir -p _site/nightly
           mkdir -p _site/ci
@@ -110,11 +110,11 @@ jobs:
           cp site/icons/brand-mark.png _site/icons/brand-mark.png
           cp site/icons/support_me_on_kofi_dark.png _site/icons/support_me_on_kofi_dark.png
 
-          cp docs/screenshots/home.jpg _site/docs/screenshots/home.jpg
-          cp docs/screenshots/library.jpg _site/docs/screenshots/library.jpg
-          cp docs/screenshots/search.jpg _site/docs/screenshots/search.jpg
-          cp docs/screenshots/ux-library-sort.jpg _site/docs/screenshots/ux-library-sort.jpg
-          cp docs/screenshots/player.jpg _site/docs/screenshots/player.jpg
+          cp design/screenshots/home.jpg _site/design/screenshots/home.jpg
+          cp design/screenshots/library.jpg _site/design/screenshots/library.jpg
+          cp design/screenshots/search.jpg _site/design/screenshots/search.jpg
+          cp design/screenshots/ux-library-sort.jpg _site/design/screenshots/ux-library-sort.jpg
+          cp design/screenshots/player.jpg _site/design/screenshots/player.jpg
 
           # Subsets pkg/appfont.ttf / pkg/appfont-bold.ttf (the APP's fonts, untouched) down to
           # the characters the site actually renders and writes WOFF2 into _site/fonts/ — see

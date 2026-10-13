@@ -219,8 +219,8 @@ Confirmed present in the tree, 2026-08-23:
 
 1. **Docs carrying the heartbeat mapping banner.** Five notes —
    `docs/perf-view-buffers-and-thermal.md`, `docs/perf-damage-tracking-verdict.md`,
-   `docs/retui-invalidation-design.md`, `docs/ui-framework-improvements.md`,
-   `docs/ui-viewtree-plan.md` — open with "**Field names in this document predate 2026-08-01 and
+   `docs/retui-invalidation-design.md`, `design/specs/ui-framework-improvements.md`,
+   `design/specs/ui-viewtree-plan.md` — open with "**Field names in this document predate 2026-08-01 and
    the old name was REUSED**", map `FPS=`→`loop=` and `pres=`→`fps=`, and say the text is "left as
    written, with the line numbers of its day, because it is a dated record of an investigation
    rather than live guidance." docs/agent-reference.md ratifies this: those docs "carry a mapping banner instead

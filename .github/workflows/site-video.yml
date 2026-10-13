@@ -638,7 +638,7 @@ jobs:
           git status --porcelain > "$RUNNER_TEMP/status.txt"
           cat "$RUNNER_TEMP/status.txt"
           film='^site/media/(feel-(720p60|1080p60)\.(av1|h264)\.mp4|feel-poster(-narrow)?\.jpg|feel-glow(-narrow)?\.png|feel\.manifest\.json)$|^site/(credits|index)\.html$'
-          stills='^docs/screenshots/(CREDITS\.md|(home|library|player|search)\.jpg|ux-[a-z-]+\.jpg)$|^site/media/(closeup-[a-z-]+\.(jpg|webp|png)|og-card\.jpg|stills\.manifest\.json)$'
+          stills='^design/screenshots/(CREDITS\.md|(home|library|player|search)\.jpg|ux-[a-z-]+\.jpg)$|^site/media/(closeup-[a-z-]+\.(jpg|webp|png)|og-card\.jpg|stills\.manifest\.json)$'
           allowed="$film|$stills"
           bad=$(sed -e 's/^...//' "$RUNNER_TEMP/status.txt" | grep -Ev "$allowed" || true)
           [ -z "$bad" ] || { echo "::error::the adoption touched files that are not the film's or the stills': $bad"; exit 1; }
@@ -653,7 +653,7 @@ jobs:
             echo "The film and the stills are byte-identical to the committed ones: nothing to commit." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          git add -- site/media site/credits.html site/index.html docs/screenshots
+          git add -- site/media site/credits.html site/index.html design/screenshots
           if [ "$PUBLISH" != true ]; then
             {
               echo "### Dry run: this is what would be committed"

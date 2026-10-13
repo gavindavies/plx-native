@@ -1,4 +1,4 @@
-//! **The resize and page-slide motion of an in-player table popover** (`docs/player-submenus.md`,
+//! **The resize and page-slide motion of an in-player table popover** (`design/specs/player-submenus.md`,
 //! "Animation"): the Tracks panel's drill-in pages and tab switches, and the `…` popover's row set.
 //!
 //! The panel is a bottom/right-anchored card whose natural size is its table's measured size. When
