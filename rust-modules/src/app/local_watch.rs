@@ -101,17 +101,17 @@ fn choices_now(w: &Watch, audio_sid: i64, sub_sid: i64, offset_ms: i64) -> local
 /// decodes, else the file's first decodable track. Staged BEFORE the play starts, because the
 /// start builds the Load from it (`player::stage_native_audio`: its codec and the demuxer's index).
 fn stage_audio(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     item: &plx_data::metadata::PlayingItem,
     probe: &plx_media::ff::LocalProbe,
     saved: Option<&local_progress::Choices>,
-) -> Option<plx_media::route::CarriedAudio> {
+) -> Option<plx_media::playback::CarriedAudio> {
     let start = plx_media::localplay::starting_audio(item, probe);
     let audio = saved
         .and_then(|c| c.audio)
         .map(|i| i as usize)
         .filter(|&i| item.audio.get(i).is_some_and(|s| plx_media::player::engine::audio_payload_codec(&s.codec).is_some()))
-        .map(|i| plx_media::route::CarriedAudio::from_stream(&item.audio[i], plx_data::metadata::audio_ordinal(&item.audio, i)))
+        .map(|i| plx_media::playback::CarriedAudio::from_stream(&item.audio[i], plx_data::metadata::audio_ordinal(&item.audio, i)))
         .or(start);
     if let Some(audio) = &audio {
         plx_media::player::stage_native_audio(ps, audio.ordinal, &audio.codec);
@@ -123,7 +123,7 @@ fn stage_audio(
 /// which also clears whatever the PREVIOUS local file had on (a new Plex item is reset by its
 /// resolve; a local one has none). After the start, which leaves the subtitle alone.
 fn apply_subtitle(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     item: &plx_data::metadata::PlayingItem,
     saved: Option<&local_progress::Choices>,
 ) {
@@ -164,7 +164,7 @@ fn settle(w: &Watch) {
 /// file that cannot play is refused on screen and nothing else happens. `ret` is where BACK out of
 /// the player returns to.
 pub(crate) fn play(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     path: &Path,
     from_start: bool,
@@ -173,7 +173,7 @@ pub(crate) fn play(
     bridge: &mut super::bridge::Bridge,
 ) {
     retire_orphan(ps, pa, super::bridge::player(pages).is_some());
-    plx_media::route::clear_url(ps);
+    plx_media::playback::clear_url(ps);
     let probe = match plx_media::localplay::prepare(ps, path) {
         Ok(probe) => probe,
         Err(e) => {
@@ -194,7 +194,7 @@ pub(crate) fn play(
         super::playback::Origin::Here, plx_appkit::player_hud::LINGER_MS, ret, pages, bridge);
     // After the start, which retires the previous item's store as it begins.
     if let Some(audio) = audio {
-        plx_media::route::set_cur_audio(ps, audio);
+        plx_media::playback::set_cur_audio(ps, audio);
     }
     apply_subtitle(ps, &item, saved.as_ref());
     bridge.metadata_mut().run(plx_data::stores::metadata::MetadataCmd::InstallPlaying(Some(item)));
@@ -204,7 +204,7 @@ pub(crate) fn play(
 /// on the player page, so nothing would ever stop it, and the next Load would meet it as "a live
 /// engine that belongs to another Load attempt" and fail. Stop it before the new Load.
 fn retire_orphan(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     player_mounted: bool,
 ) {
@@ -216,7 +216,7 @@ fn retire_orphan(
 
 /// The item menu's rows: play the file from its start, or write its watch record.
 pub(crate) fn apply_menu_action(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     act: plx_screens::item_menu::Action,
     pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
@@ -246,7 +246,7 @@ pub(crate) fn tick(app: &super::App, now: u32) {
     let Some(w) = guard.as_mut() else { return };
     // The viewer's choices: three integers a frame, and a record only when one moves.
     let ps = &app.player.session;
-    let now_seen = (plx_media::route::cur_audio_sid(ps), plx_media::route::cur_sub_sid(ps), plx_media::player::subtitle_offset_ms());
+    let now_seen = (plx_media::playback::cur_audio_sid(ps), plx_media::playback::cur_sub_sid(ps), plx_media::player::subtitle_offset_ms());
     match w.seen {
         Some(seen) if seen != now_seen => {
             local_progress::set_choices(&w.path, choices_now(w, now_seen.0, now_seen.1, now_seen.2));

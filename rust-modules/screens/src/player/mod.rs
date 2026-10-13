@@ -231,7 +231,7 @@ impl PlayerScreen {
     /// pointer can hit is registered by [`Self::record_stops`], from this screen's `Focusable`.
     pub fn draw_hud(
         &mut self,
-        ps: &plx_media::route::PlaybackSession,
+        ps: &plx_media::playback::PlaybackSession,
         now: u32,
         measure: &dyn plx_machine::machine::Measure,
         meta: plx_data::metadata::MetadataView<'_>,
@@ -357,7 +357,7 @@ impl PlayerScreen {
     ///   is not repeated here.)
     /// * `busy` — the read-out appearing and vanishing, including the `Playing -> Error` edge with
     ///   the HUD auto-hidden, where nothing else in the frame moves at all.
-    pub fn clock_fingerprint(&self, ps: &plx_media::route::PlaybackSession, now: u32) -> u64 {
+    pub fn clock_fingerprint(&self, ps: &plx_media::playback::PlaybackSession, now: u32) -> u64 {
         use std::sync::atomic::Ordering::Relaxed;
         let pos = plx_media::player::playpos_ns();
         let hud_up = self.hud_up(ps, now);
@@ -385,7 +385,7 @@ impl PlayerScreen {
         mix(u64::from(plx_appkit::player_hud::caption_page(
             &self.render.captions,
             self.subs_lift(ps, now),
-            plx_media::route::subtitles_burned(ps),
+            plx_media::playback::subtitles_burned(ps),
         )));
         mix(plx_media::player::active_bitmap_key(pos).unwrap_or(0) as u64);
         mix(u64::from(hud_up));
@@ -414,7 +414,7 @@ impl PlayerScreen {
     /// ([`HudPolicy::Hidden`], the Timing capsule) regardless of what the timer/dismissal say —
     /// gated HERE, not just at the draw call site, so [`Self::clock_fingerprint`] (which calls this
     /// too) sees the same answer the frame draws.
-    pub fn hud_up(&self, ps: &plx_media::route::PlaybackSession, now: u32) -> bool {
+    pub fn hud_up(&self, ps: &plx_media::playback::PlaybackSession, now: u32) -> bool {
         self.hud.visible(ps, now, plx_media::player::TX.paused.load(std::sync::atomic::Ordering::Relaxed))
             && self.hud_policy != HudPolicy::Hidden
     }
@@ -434,13 +434,13 @@ impl PlayerScreen {
 
     /// Does the caption block lift clear of the transport this frame? While the transport is up,
     /// or while a panel is being read over it.
-    fn subs_lift(&self, ps: &plx_media::route::PlaybackSession, now: u32) -> bool {
+    fn subs_lift(&self, ps: &plx_media::playback::PlaybackSession, now: u32) -> bool {
         self.hud_up(ps, now) || self.hud_policy == HudPolicy::Lifted
     }
 
     /// Is the transport actually DRAWN this frame? Whenever the captions lift for it, unless the
     /// repair alert has the screen.
-    fn hud_drawn(&self, ps: &plx_media::route::PlaybackSession, now: u32) -> bool {
+    fn hud_drawn(&self, ps: &plx_media::playback::PlaybackSession, now: u32) -> bool {
         self.subs_lift(ps, now) && !self.repair_alert.visible()
     }
 }
@@ -623,7 +623,7 @@ impl PlayerScreen {
     /// Perform control `idx` of the failure read-out's row — the ONE resolution a key and a click
     /// share, through the same table the row was drawn from (`player::failure_actions`), so a
     /// press can only ever do what the focused control says.
-    fn failure_activate<H: AppLike>(&mut self, ps: &plx_media::route::PlaybackSession, idx: usize, fx: &mut Effects<'_, H>) {
+    fn failure_activate<H: AppLike>(&mut self, ps: &plx_media::playback::PlaybackSession, idx: usize, fx: &mut Effects<'_, H>) {
         use plx_media::player::FailureAction as A;
         let readout = player_hud::FailureReadout::now(ps);
         let Some(action) = readout.actions().get(idx).copied() else { return };
@@ -669,7 +669,7 @@ impl PlayerScreen {
     /// invisible timed-out scrub band committed a blind seek".
     fn handle_click<H: AppLike>(
         &mut self,
-        ps: &plx_media::route::PlaybackSession,
+        ps: &plx_media::playback::PlaybackSession,
         hit: Option<u32>,
         x: f32,
         now: u32,
@@ -791,7 +791,7 @@ impl PlayerScreen {
     /// Classify → dispatch, the one entry every `Input(Key)` event goes through.
     fn handle_key<H: AppLike>(
         &mut self,
-        ps: &plx_media::route::PlaybackSession,
+        ps: &plx_media::playback::PlaybackSession,
         key: consts::Key,
         edge: Edge,
         now: u32,
@@ -946,7 +946,7 @@ impl PlayerScreen {
     /// the release does (`key_scrub_release`), on the debounce for a tap and at once for a hold.
     fn key_scrub_fresh(
         &mut self,
-        ps: &plx_media::route::PlaybackSession,
+        ps: &plx_media::playback::PlaybackSession,
         key: consts::Key,
         now: u32,
         meta: plx_data::metadata::MetadataView<'_>,
@@ -1342,7 +1342,7 @@ impl<H: PlayerLike + crate::registry::MetadataLike> Screen<H> for PlayerScreen {
             plx_appkit::player_hud::draw_subtitle_message(message, subs_lift);
         }
         self.draw_subtitle_bitmap(subs_lift); // PGS/VobSub image subs
-        plx_appkit::player_hud::draw_subtitles(&self.render.captions, subs_lift, plx_media::route::subtitles_burned(ps));
+        plx_appkit::player_hud::draw_subtitles(&self.render.captions, subs_lift, plx_media::playback::subtitles_burned(ps));
         // What a pointer can hit is registered AFTER the paint, by `record_stops`, from this
         // screen's own `Focusable` — the rects D-pad focus uses, in the z-order `groups` states.
         // `Hover::Ignore` on the transport's stops: the old pointer path never followed the mouse
@@ -1418,7 +1418,7 @@ impl<H: PlayerLike + crate::registry::MetadataLike> Screen<H> for PlayerScreen {
 mod clock_animator_tests {
     use super::*;
     use plx_media::player::machine::Player;
-    use plx_media::route::PlaybackSession;
+    use plx_media::playback::PlaybackSession;
 
     /// One iteration of the loop's motion report, with the plane UNBOUND — the fingerprint and
     /// the machine's comparison, exactly as `app::run`'s prepare phase runs them. `true` = THIS
@@ -1833,8 +1833,8 @@ mod step_ladder_tests {
         use plx_ui::screen::{At, DrawFrame};
         let _g = plx_base::testlock::serial();
         let marker = |kind| Marker { kind, start_ms: 1_000, end_ms: 2_000, final_seg: kind == MarkerKind::Credits };
-        let skip = player_hud::slot_for(Some(marker(MarkerKind::Intro)), false, plx_media::route::NextEpisodeMode::Countdown);
-        let up_next = player_hud::slot_for(Some(marker(MarkerKind::Credits)), true, plx_media::route::NextEpisodeMode::Countdown);
+        let skip = player_hud::slot_for(Some(marker(MarkerKind::Intro)), false, plx_media::playback::NextEpisodeMode::Countdown);
+        let up_next = player_hud::slot_for(Some(marker(MarkerKind::Credits)), true, plx_media::playback::NextEpisodeMode::Countdown);
         assert!(matches!(skip, ControlSlot::Skip(_)) && matches!(up_next, ControlSlot::UpNext(_)));
         let failed = Busy::Readout(plx_ui::widgets::StatusKind::Failed, c"Playback failed");
         let row = |n: u32| (0..n).map(|i| ELEM_ROW_BASE + i).collect::<Vec<_>>();
@@ -2580,12 +2580,12 @@ mod repair_confirmation_tests {
         type Fx = AppFx;
         type Msg = crate::registry::AppMsg;
         type Elem = u32;
-        type Views<'a> = &'a plx_media::route::PlaybackSession;
+        type Views<'a> = &'a plx_media::playback::PlaybackSession;
         type Init = plx_ui::fixture::FixtureArg;
         type Memory = crate::registry::PageMemory;
     }
     impl PlayerLike for TestHost {
-        fn session<'a>(cx: &Cx<'a, Self>) -> &'a plx_media::route::PlaybackSession { cx.views }
+        fn session<'a>(cx: &Cx<'a, Self>) -> &'a plx_media::playback::PlaybackSession { cx.views }
     }
     thread_local! {
         static TEST_METADATA: std::cell::UnsafeCell<plx_data::stores::metadata::MetadataStore> =
@@ -2599,13 +2599,13 @@ mod repair_confirmation_tests {
             test_store().view()
         }
     }
-    fn context(ps: &plx_media::route::PlaybackSession, elem: Option<u32>) -> Cx<'_, TestHost> {
+    fn context(ps: &plx_media::playback::PlaybackSession, elem: Option<u32>) -> Cx<'_, TestHost> {
         let mut cx = Cx { views: ps, tick: Tick::default(), measure: &plx_ui::fixture::FixtureMeasure,
             focus: Default::default(), press: Default::default(), owner: InputOwner::Entry(EntryId(1)) };
         cx.focus.current = elem.map(|elem| FocusKey { entry: EntryId(1), elem });
         cx
     }
-    fn deliver(page: &mut PlayerScreen, ps: &plx_media::route::PlaybackSession, elem: Option<u32>, ev: ScreenEvent<TestHost>) -> Vec<PlayerReq> {
+    fn deliver(page: &mut PlayerScreen, ps: &plx_media::playback::PlaybackSession, elem: Option<u32>, ev: ScreenEvent<TestHost>) -> Vec<PlayerReq> {
         let mut out = Vec::new();
         let mut present = plx_machine::present::Present::new();
         page.step(&ev, &context(ps, elem), &mut Effects::new(&mut out, MachineId::Instance(InstanceId(1)), &mut present));
@@ -2619,8 +2619,8 @@ mod repair_confirmation_tests {
     fn key_event(sym: u32, wcode: u32) -> ScreenEvent<TestHost> {
         ScreenEvent::Input(InputEvent { kind: InputKind::Key { key: plx_machine::machine::Key::Other, sym, wcode, edge: Edge::Down, at_edge: false }, at: Tick::default(), source: Source::Sdl })
     }
-    fn blocked() -> plx_media::route::PlaybackSession {
-        let mut ps = plx_media::route::PlaybackSession::IDLE;
+    fn blocked() -> plx_media::playback::PlaybackSession {
+        let mut ps = plx_media::playback::PlaybackSession::IDLE;
         ps.jail_load_blocked = true;
         ps
     }
@@ -2635,8 +2635,8 @@ mod repair_confirmation_tests {
         plx_base::devtrig::with_private_triggers(|| {
             let path = plx_base::devtrig::path("failtest");
             std::fs::write(&path, "jail").unwrap();
-            let mut ps = plx_media::route::PlaybackSession::IDLE;
-            plx_media::route::reset_player_control_for_test(&ps);
+            let mut ps = plx_media::playback::PlaybackSession::IDLE;
+            plx_media::playback::reset_player_control_for_test(&ps);
             let hardware_verdict = plx_platform::tv::sandbox::blocks_native_video();
             plx_media::player::failure_fixture(&mut ps);
             let mut page = PlayerScreen::new(EntryId(1));
@@ -2659,7 +2659,7 @@ mod repair_confirmation_tests {
     fn repair_requires_second_explicit_answer_and_cancel_is_the_default() {
         let _g = plx_base::testlock::serial();
         let ps = blocked();
-        plx_media::route::reset_player_control_for_test(&ps);
+        plx_media::playback::reset_player_control_for_test(&ps);
         let mut page = PlayerScreen::new(EntryId(1));
         assert!(deliver(&mut page, &ps, None, key_event(consts::SDLK_RETURN, 0)).is_empty());
         assert!(page.repair_alert.is_open());
@@ -2677,7 +2677,7 @@ mod repair_confirmation_tests {
     fn back_then_stale_commit_and_underlying_click_cannot_repair_or_reopen() {
         let _g = plx_base::testlock::serial();
         let ps = blocked();
-        plx_media::route::reset_player_control_for_test(&ps);
+        plx_media::playback::reset_player_control_for_test(&ps);
         let mut page = PlayerScreen::new(EntryId(1));
         deliver(&mut page, &ps, None, key_event(consts::SDLK_RETURN, 0));
         assert!(deliver(&mut page, &ps, Some(REPAIR_CONFIRM), key_event(0, consts::WCODE_BACK)).is_empty());
@@ -2695,7 +2695,7 @@ mod repair_confirmation_tests {
         let mut player = plx_media::player::machine::Player::new();
         let token = player.repair.begin(true).unwrap();
         assert!(!player.repair.complete(token + 1, Ok(())));
-        player.session = plx_media::route::PlaybackSession::IDLE;
+        player.session = plx_media::playback::PlaybackSession::IDLE;
         let _replacement = PlayerScreen::new(EntryId(9));
         assert_eq!(player.repair.state(), State::Running);
         assert_eq!(player.repair.begin(true), None);
@@ -2709,7 +2709,7 @@ mod repair_confirmation_tests {
         let _g = plx_base::testlock::serial();
         for state in [plx_platform::tv::sandbox::State::Running, plx_platform::tv::sandbox::State::Repaired, plx_platform::tv::sandbox::State::Failed(plx_platform::tv::sandbox::Failure::Timeout)] {
             let mut ps = blocked(); ps.repair_status = state;
-            plx_media::route::reset_player_control_for_test(&ps);
+            plx_media::playback::reset_player_control_for_test(&ps);
             let row = plx_appkit::player_hud::FailureReadout::now(&ps).actions().to_vec();
             assert!(!row.contains(&plx_media::player::FailureAction::Repair), "{state:?}: {row:?}");
             let mut page = PlayerScreen::new(EntryId(1));

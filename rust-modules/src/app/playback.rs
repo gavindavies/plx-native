@@ -58,7 +58,7 @@ pub(crate) fn playpos() -> i64 {
 /// PUBLISHED position is the point (the re-pause gate, which is already behind `seek_pending() < 0`,
 /// and the heartbeat's `pos=`, which the harness grades real playback progress from).
 #[inline]
-pub(crate) fn intended_pos(ps: &plx_media::route::PlaybackSession) -> i64 {
+pub(crate) fn intended_pos(ps: &plx_media::playback::PlaybackSession) -> i64 {
     plx_media::player::intended_pos_ns(ps)
 }
 #[inline]
@@ -103,7 +103,7 @@ pub(crate) fn is_started() -> bool {
 
 /// Perform what the `…` popover reported. Shared by the OK key and the pointer click, so
 /// the two paths can never come to disagree about what a row does.
-pub(crate) fn apply_more_action(ps: &mut plx_media::route::PlaybackSession, pa: &mut plx_media::player::adapter::PlayerAdapter, bridge: &mut super::bridge::Bridge, a: plx_appkit::more_menu::Action) {
+pub(crate) fn apply_more_action(ps: &mut plx_media::playback::PlaybackSession, pa: &mut plx_media::player::adapter::PlayerAdapter, bridge: &mut super::bridge::Bridge, a: plx_appkit::more_menu::Action) {
     match a {
         // A rung of the playback-quality ladder — a routing POLICY, not a number handed to a
         // running stream: `route::set_quality` re-asks the routing question for the playback on
@@ -111,10 +111,10 @@ pub(crate) fn apply_more_action(ps: &mut plx_media::route::PlaybackSession, pa: 
         plx_appkit::more_menu::Action::SetQuality(q) => {
             let failed = matches!(plx_media::player::state(ps), plx_media::player::PlaybackState::Error);
             if failed {
-                plx_media::route::set_quality_for_retry(q);
+                plx_media::playback::set_quality_for_retry(q);
                 retry_failed_playback(ps, pa, bridge.metadata_mut(), None, AttemptOrigin::QualityChange);
             } else {
-                plx_media::route::set_quality(ps, q);
+                plx_media::playback::set_quality(ps, q);
             }
         }
         plx_appkit::more_menu::Action::ToggleStats
@@ -134,7 +134,7 @@ pub(crate) fn apply_more_action(ps: &mut plx_media::route::PlaybackSession, pa: 
 /// or a quality pick on the failure screen — and rides to the error report of the attempt this
 /// starts, which is the next open of the same session.
 pub(crate) fn retry_failed_playback(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     meta: &mut plx_data::stores::metadata::MetadataStore,
     direct_play: Option<plx_plex::plex::session::DirectPlayMode>,
@@ -143,7 +143,7 @@ pub(crate) fn retry_failed_playback(
     // URL/dev-trigger playback has no Plex descriptor.  Check BEFORE teardown: extinguishing its
     // Error Engine and only then discovering it cannot be rebuilt would replace an actionable
     // read-out with an idle black frame.
-    if !plx_media::route::can_retry_current_play(ps) {
+    if !plx_media::playback::can_retry_current_play(ps) {
         log("playback retry: current source has no reusable Plex request");
         return false;
     }
@@ -152,10 +152,10 @@ pub(crate) fn retry_failed_playback(
     // retry was refused before presenting anything, retain its target too: the stopped Engine now
     // reports zero and must not send a second quality attempt back to the beginning.
     let resume_ns = intended_pos(ps)
-        .max(plx_media::route::unpresented_resume_ns(ps))
+        .max(plx_media::playback::unpresented_resume_ns(ps))
         .max(0);
     plx_media::player::stop_bufferfeed(ps, pa);
-    if plx_media::route::retry_current_play(ps, meta, resume_ns, direct_play, origin) {
+    if plx_media::playback::retry_current_play(ps, meta, resume_ns, direct_play, origin) {
         plx_machine::idle::invalidate();
         true
     } else {
@@ -174,12 +174,12 @@ pub(crate) fn retry_failed_playback(
 /// this session. The retry resolves under Auto explicitly rather than inheriting the failed
 /// attempt's Force, which a plain retry keeps on purpose.
 pub(crate) fn play_automatically(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     meta: &mut plx_data::stores::metadata::MetadataStore,
 ) -> bool {
     use plx_plex::plex::session::{DirectPlayMode, DirectPlayModePref};
-    plx_media::route::choose::<DirectPlayModePref>(DirectPlayMode::Auto, plx_media::route::How::Optimistic(None));
+    plx_media::playback::choose::<DirectPlayModePref>(DirectPlayMode::Auto, plx_media::playback::How::Optimistic(None));
     retry_failed_playback(ps, pa, meta, Some(DirectPlayMode::Auto), AttemptOrigin::UserRetry)
 }
 
@@ -255,7 +255,7 @@ pub(crate) fn enter_player(
 /// The ONE start-playback ritual: arm the resume point BEFORE the first Load, start the engine,
 /// record the Stop/BACK/EOS return target, reset the HUD focus cursor, and show the HUD.
 pub(crate) fn start_playback(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     resume_ns: i64,
     from: Origin,
@@ -289,11 +289,11 @@ pub(crate) fn start_playback(
 
 /// Arm the resume point and start the engine, or defer both to the play landing while a resolve
 /// is in flight.
-fn prepare_start(ps: &mut plx_media::route::PlaybackSession,
+fn prepare_start(ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter, resume_ns: i64) -> bool {
     // A resolve in flight means the route is NOT installed yet: applying the resume now would read
     // an empty session and arm a seek that blocks feeding forever. Defer it to `pump_play`.
-    let pending = plx_media::route::play_pending();
+    let pending = plx_media::playback::play_pending();
     let resume = if pending || resume_ns <= 0 {
         plx_media::player::ResumeStart::Settled(plx_media::player::ResumeOutcome::Prepared)
     } else {
@@ -304,14 +304,14 @@ fn prepare_start(ps: &mut plx_media::route::PlaybackSession,
         plx_media::player::ResumeStart::Settled(plx_media::player::ResumeOutcome::Prepared)
     );
     if !resume_prepared && !matches!(resume, plx_media::player::ResumeStart::Pending) {
-        if let Some(transaction) = plx_media::route::pending_route_start() {
-            let _ = plx_media::route::reject_route_start_preparation(transaction);
+        if let Some(transaction) = plx_media::playback::pending_route_start() {
+            let _ = plx_media::playback::reject_route_start_preparation(transaction);
         }
     }
     // Enter the player NOW so the HUD draws its Resolving state this frame; `pump_play` starts the
     // engine when the plan lands.
     if pending {
-        plx_media::route::arm_play_resume(ps, resume_ns);
+        plx_media::playback::arm_play_resume(ps, resume_ns);
         true
     } else if matches!(resume, plx_media::player::ResumeStart::Pending) {
         true
@@ -335,7 +335,7 @@ pub(crate) fn close_player_overlays(pages: &mut plx_ui::dispatch::Dispatcher<sup
 /// before the card goes away. So the surface arms `PlayerReq::ArmInfoPress`, the loop's press
 /// machine holds the frame, and this reads the decision back out of the panel that is still up.
 pub(crate) unsafe fn commit_info_press(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
     bridge: &mut super::bridge::Bridge,
@@ -355,26 +355,26 @@ pub(crate) unsafe fn commit_info_press(
 /// [`TrackCommit`](plx_appkit::track_menu::TrackCommit) and this is where it lands, from the
 /// overlay's `PlayerReq` and from the headless `plxnative-menupick` trigger alike.
 pub(crate) fn commit_track(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     commit: plx_appkit::track_menu::TrackCommit,
 ) {
     use plx_appkit::track_menu::TrackCommit;
     match commit {
         // A local file's track the sink cannot decode has no server to convert it: say so.
         TrackCommit::Audio(audio)
-            if plx_media::localfile::is_file_url(&plx_media::route::url(ps))
+            if plx_media::localfile::is_file_url(&plx_media::playback::url(ps))
                 && plx_media::player::engine::audio_payload_codec(&audio.codec).is_none() =>
         {
             plx_base::eventlog::log(&format!("local audio: {} is not decodable here; pick refused", audio.codec));
             super::toast::raise(plx_media::localplay::LocalPlayError::AudioCodecs(vec![audio.codec]).message());
         }
-        TrackCommit::Audio(audio) => plx_media::route::commit_audio_selection(ps, audio),
+        TrackCommit::Audio(audio) => plx_media::playback::commit_audio_selection(ps, audio),
         TrackCommit::AudioEnhancement(a) => plx_media::player::request_audio_enhancement(ps, a),
         TrackCommit::Subtitle { render_ordinal, stream_id, sidecar_key, sidecar_codec } => {
             // What the client can draw itself — an embedded ordinal or an external sidecar — is
             // what an Original route (issue #266's candidate) can carry without a burn.
             let client_renderable = render_ordinal >= 0 || sidecar_key.is_some();
-            plx_media::route::commit_subtitle_selection(ps, render_ordinal, stream_id, client_renderable);
+            plx_media::playback::commit_subtitle_selection(ps, render_ordinal, stream_id, client_renderable);
             // An EXTERNAL pick has no demuxer ordinal (`render_ordinal` is -1, so the embedded
             // renderer is off) — on direct play `player::sidecar` fetches and draws it instead.
             // While transcoding the commit above already asked for a burn and the sidecar draw
@@ -382,27 +382,27 @@ pub(crate) fn commit_track(
             // the line survives the playback going BACK to direct play.
             match sidecar_key {
                 // A local file's sidecar is a file beside it (`localplay::playing_item`).
-                Some(key) if plx_media::localfile::is_file_url(&plx_media::route::url(ps)) => {
+                Some(key) if plx_media::localfile::is_file_url(&plx_media::playback::url(ps)) => {
                     plx_media::player::sidecar::select_file(stream_id, key, sidecar_codec)
                 }
-                Some(key) => plx_media::player::sidecar::select(plx_media::route::cur_sid(ps), stream_id, key, sidecar_codec),
+                Some(key) => plx_media::player::sidecar::select(plx_media::playback::cur_sid(ps), stream_id, key, sidecar_codec),
                 None => plx_media::player::sidecar::deselect(),
             }
         }
         TrackCommit::SubtitleTone(tone) => plx_media::player::set_subtitle_tone(tone),
         // live first, persisted after, nothing republished on completion (`route::select_subtitle_size`)
-        TrackCommit::SubtitleSize(size) => plx_media::route::select_subtitle_size(size, None),
-        TrackCommit::SubtitlePosition(position) => plx_media::route::select_subtitle_position(position, None),
+        TrackCommit::SubtitleSize(size) => plx_media::playback::select_subtitle_size(size, None),
+        TrackCommit::SubtitlePosition(position) => plx_media::playback::select_subtitle_position(position, None),
         TrackCommit::SubtitleOffset(offset) => {
             plx_media::player::set_subtitle_offset(offset);
-            plx_media::route::persist_subtitle_offset(ps, offset);
+            plx_media::playback::persist_subtitle_offset(ps, offset);
         }
     }
 }
 
 pub(crate) fn player_requests(
     repair: &mut plx_media::player::machine::RepairAttempt,
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     reqs: Vec<plx_screens::registry::PlayerReq>,
     now: u32,
@@ -506,11 +506,11 @@ pub(super) fn return_from_player(
 /// off the mounted screen here. Re-entry is `NavOp::PopTo(entry)`, the same container op a BACK
 /// off a stacking page performs.
 pub(crate) fn exit_player(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
 ) {
-    plx_media::route::cancel_play(ps); // BACK during a load: supersede, drop the landing
+    plx_media::playback::cancel_play(ps); // BACK during a load: supersede, drop the landing
     close_player_overlays(pages);
     plx_media::player::stop_bufferfeed(ps, pa);
     // `stop_bufferfeed` reports/clears a real engine through `report::ended`, but a refusal or a
@@ -528,12 +528,12 @@ pub(crate) fn exit_player(
 /// `exit_player`'s `PopTo` only PARKS the navigation (`Dispatcher::request`, applied at the next
 /// commit), so `app.route()` still reads `Player` for the rest of this frame.
 pub(crate) fn finish_playback(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
     bridge: &mut super::bridge::Bridge,
 ) -> bool {
-    if plx_media::route::next_episode_mode() != plx_media::route::NextEpisodeMode::Off
+    if plx_media::playback::next_episode_mode() != plx_media::playback::NextEpisodeMode::Off
         && play_up_next(ps, pa, HUD_LINGER_MS, pages, bridge)
     {
         return true;
@@ -549,7 +549,7 @@ pub(crate) fn finish_playback(
 /// the route flipped, which is the only thing the two callers still handle differently.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn activate_ctrl_row(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     slot: plx_appkit::player_hud::ControlSlot,
     btn: c_int,
@@ -608,7 +608,7 @@ pub(crate) fn activate_ctrl_row(
 /// must happen BEFORE `request_play_up_next`: teardown reads the outgoing item's session
 /// ids and clears the URL, both of which the new plan is about to overwrite.
 pub(crate) fn play_up_next(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     hud_ms: u32,
     pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
@@ -630,7 +630,7 @@ pub(crate) fn play_up_next(
     close_player_overlays(pages);
     plx_media::player::stop_bufferfeed(ps, pa);
     let ctx = plx_ui::fmt::episode_kicker(u.season, u.index, &u.ep_title);
-    if !plx_media::route::request_play_up_next(ps, bridge.metadata_mut(), u, &ctx) {
+    if !plx_media::playback::request_play_up_next(ps, bridge.metadata_mut(), u, &ctx) {
         return false;
     }
     // Same ritual as `play_item_now`: retire the finished episode's descriptor so the HUD
@@ -659,7 +659,7 @@ pub(crate) fn play_up_next(
 /// **Perform the Info card's chosen action.** The card itself decided and is already dismissing;
 /// this is what the loop does about it.
 fn apply_info_action(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     action: plx_appkit::info_panel::InfoAction,
     pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
@@ -686,7 +686,7 @@ fn apply_info_action(
 /// mid-press has already changed what the user is looking at.
 #[allow(clippy::too_many_arguments)]
 pub(crate) unsafe fn activate_player_row(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     ctrl: plx_appkit::player_hud::ControlSlot,
     now: u32,
@@ -745,7 +745,7 @@ pub(crate) fn key_pause(
 
 /// PLAY — off the player route it starts the buffer-feed and enters the player; on it, it un-pauses.
 pub(crate) unsafe fn key_play(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     now: u32,
     foreground: &mut ForegroundLifecycle,

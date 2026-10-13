@@ -76,7 +76,7 @@ pub struct ClockWarm {
 
 impl ClockWarm {
     /// Queue the clocks for the playhead the playbar would draw right now.
-    pub fn queue_live(&mut self, ps: &plx_media::route::PlaybackSession) {
+    pub fn queue_live(&mut self, ps: &plx_media::playback::PlaybackSession) {
         let pos = display_pos_ns(
             plx_media::player::loading(ps),
             plx_media::player::seek_display_ns(),
@@ -178,9 +178,9 @@ pub fn draw_subtitle_message(text: &str, hud_up: bool) {
 /// same direction, on top of that. The third value is the lowest y the block may reach — with the
 /// HUD up that is the transport's ceiling, so a block that grows down cannot run into the scrubber.
 fn caption_geometry(hud_up: bool) -> (f32, f32, f32) {
-    let scale = subtitle_size_scale(plx_media::route::subtitle_size());
+    let scale = subtitle_size_scale(plx_media::playback::subtitle_size());
     let baseline = (if hud_up { SUB_CEIL_Y } else { SUB_BASE_Y })
-        - subtitle_position_lift(plx_media::route::subtitle_position());
+        - subtitle_position_lift(plx_media::playback::subtitle_position());
     let floor = if hud_up { SUB_CEIL_Y } else { CAPTION_FLOOR_Y };
     (scale, baseline, floor)
 }
@@ -918,14 +918,14 @@ impl ControlSlot {
 /// The Next episode preference only changes the offer for that final-credits-with-a-successor
 /// case: `AfterCredits` and `Off` offer nothing there (the discs stay), because the successor is
 /// not announced until the stream ends, if then. The last episode and films keep Skip Credits.
-pub fn slot_for(marker: Option<plx_data::metadata::Marker>, has_next: bool, mode: plx_media::route::NextEpisodeMode) -> ControlSlot {
+pub fn slot_for(marker: Option<plx_data::metadata::Marker>, has_next: bool, mode: plx_media::playback::NextEpisodeMode) -> ControlSlot {
     match marker {
         Some(m) => {
             let pr = crate::skip_pill::prompt_for(m);
             if has_next && m.kind == plx_data::metadata::MarkerKind::Credits && m.final_seg {
                 match mode {
-                    plx_media::route::NextEpisodeMode::Countdown => ControlSlot::UpNext(m),
-                    plx_media::route::NextEpisodeMode::AfterCredits | plx_media::route::NextEpisodeMode::Off => ControlSlot::Discs,
+                    plx_media::playback::NextEpisodeMode::Countdown => ControlSlot::UpNext(m),
+                    plx_media::playback::NextEpisodeMode::AfterCredits | plx_media::playback::NextEpisodeMode::Off => ControlSlot::Discs,
                 }
             } else {
                 ControlSlot::Skip(pr)
@@ -939,9 +939,9 @@ pub fn slot_for(marker: Option<plx_data::metadata::Marker>, has_next: bool, mode
 /// around: `playpos_ns` is written by LG's media thread and `player::pump` runs between the input
 /// handlers and the draw, so re-deriving per call site let a keypress dispatch to a control that
 /// the same frame then declined to draw.
-pub fn slot(ps: &plx_media::route::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>) -> ControlSlot {
-    let has_next = plx_media::route::up_next(ps).is_some();
-    let mode = plx_media::route::next_episode_mode();
+pub fn slot(ps: &plx_media::playback::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>) -> ControlSlot {
+    let has_next = plx_media::playback::up_next(ps).is_some();
+    let mode = plx_media::playback::next_episode_mode();
     // The data layer does not read the player: the playhead is sampled here, once, and handed in.
     let head = plx_data::metadata::Playhead {
         playing: plx_media::player::is_playing(ps),
@@ -952,7 +952,7 @@ pub fn slot(ps: &plx_media::route::PlaybackSession, meta: plx_data::metadata::Me
     // (a Plex Pass server feature) — see `metadata::synthesized_tail_marker` — and only to feed
     // the Up Next countdown, so it is not even computed in the other modes.
     let m = meta.active_marker(head).or_else(|| {
-        (mode == plx_media::route::NextEpisodeMode::Countdown)
+        (mode == plx_media::playback::NextEpisodeMode::Countdown)
             .then(|| meta.synthesized_tail_marker(head, has_next))
             .flatten()
     });
@@ -1016,7 +1016,7 @@ pub enum Busy {
 /// it is both the cold-start tail AND the 1-3 frame tail of every seek (between prime→Play, where
 /// `engine` clears `seeking`, and the first presented frame). Keyed on the state alone, one of
 /// those two flashes the wrong surface every time.
-pub fn busy_surface(ps: &plx_media::route::PlaybackSession, st: plx_media::player::PlaybackState, seen_frame: bool) -> Busy {
+pub fn busy_surface(ps: &plx_media::playback::PlaybackSession, st: plx_media::player::PlaybackState, seen_frame: bool) -> Busy {
     busy_surface_with(ps, st, seen_frame, plx_media::player::audio_switching())
 }
 
@@ -1024,7 +1024,7 @@ pub fn busy_surface(ps: &plx_media::route::PlaybackSession, st: plx_media::playe
 /// viewer's audio-track pick asked for, the read-out says "Switching audio…" instead of
 /// "Buffering…" (`player::busy_caption_with`). Any other rebuild keeps the plain caption.
 pub fn busy_surface_with(
-    ps: &plx_media::route::PlaybackSession,
+    ps: &plx_media::playback::PlaybackSession,
     st: plx_media::player::PlaybackState,
     seen_frame: bool,
     audio_switch: bool,
@@ -1069,7 +1069,7 @@ pub fn readout_owns_frame(busy: Busy) -> bool {
 ///
 /// It resamples [`busy`] rather than taking one, because the event loop runs before the frame's
 /// single resolve exists; both reads are of the same main-thread state within one iteration.
-pub fn transport_hidden(ps: &plx_media::route::PlaybackSession) -> bool {
+pub fn transport_hidden(ps: &plx_media::playback::PlaybackSession) -> bool {
     readout_owns_frame(busy(ps))
 }
 
@@ -1077,7 +1077,7 @@ pub fn transport_hidden(ps: &plx_media::route::PlaybackSession) -> bool {
 /// to both [`draw_hud`] and [`draw_readout`] — the same discipline [`slot`] keeps, and for the same
 /// reason: two independent derivations of one three-way choice is how the two indicators drifted
 /// apart in the first place.
-pub fn busy(ps: &plx_media::route::PlaybackSession) -> Busy {
+pub fn busy(ps: &plx_media::playback::PlaybackSession) -> Busy {
     // dev: `/tmp/plxnative-failtest` forces the failure read-out — the other half of
     // `player::failtest_arm`, which shapes WHICH failure. It is forced HERE, on the one impure
     // sampler, rather than in `player::state()`: the pump acts on that state, and a dev switch
@@ -1212,7 +1212,7 @@ fn readout_frame() -> Rect {
 /// disappeared 4.5 s in with the HUD linger, leaving exactly the silent black screen the read-out
 /// exists to prevent. A read-out is not transport chrome.
 pub fn draw_readout(
-    ps: &plx_media::route::PlaybackSession,
+    ps: &plx_media::playback::PlaybackSession,
     busy: Busy,
     now: u32,
     failure_focus: usize,
@@ -1303,7 +1303,7 @@ fn failure_glyph(kind: plx_media::player::FailureKind) -> plx_ui::icons::Icon {
 
 impl FailureReadout {
     /// The read-out for the failure on screen now (main thread).
-    pub fn now(ps: &plx_media::route::PlaybackSession) -> Self {
+    pub fn now(ps: &plx_media::playback::PlaybackSession) -> Self {
         let mut e = plx_media::player::error_now(ps);
         if e.kind == plx_media::player::FailureKind::JailMissingRtkmem {
             use plx_platform::tv::sandbox::State;
@@ -1499,7 +1499,7 @@ fn repair_failure_message(reason: plx_platform::tv::sandbox::Failure) -> &'stati
 }
 
 fn draw_failed_readout(
-    ps: &plx_media::route::PlaybackSession,
+    ps: &plx_media::playback::PlaybackSession,
     p: Painter,
     focus: usize,
     measure: &dyn plx_machine::machine::Measure,
@@ -1626,7 +1626,7 @@ pub const LINGER_MS: u32 = 4500;
 /// What one fresh press hops: the Skip interval preference (10 s unless Settings changed it),
 /// read per press so a pick takes effect in a film already playing.
 pub fn scrub_step_ns() -> i64 {
-    plx_media::route::skip_interval().ns()
+    plx_media::playback::skip_interval().ns()
 }
 pub const SCRUB_BASE: f32 = 10.0;
 pub const SCRUB_ACCEL: f32 = 45.0; // added per second of hold
@@ -1639,19 +1639,19 @@ pub const SCRUB_LOST_MS: u32 = 400; // holding but no repeat this long → lost 
 /// Sets the Skip interval for one test and puts the prior value back on drop. The caller holds
 /// `testlock::serial()`: the live value is a process global, like every preference.
 #[cfg(any(test, feature = "test-support"))]
-pub struct SkipIntervalGuard(plx_media::route::SkipInterval);
+pub struct SkipIntervalGuard(plx_media::playback::SkipInterval);
 #[cfg(any(test, feature = "test-support"))]
 impl SkipIntervalGuard {
-    pub fn set(interval: plx_media::route::SkipInterval) -> Self {
-        let prior = plx_media::route::skip_interval();
-        plx_media::route::restore_skip_interval(interval);
+    pub fn set(interval: plx_media::playback::SkipInterval) -> Self {
+        let prior = plx_media::playback::skip_interval();
+        plx_media::playback::restore_skip_interval(interval);
         Self(prior)
     }
 }
 #[cfg(any(test, feature = "test-support"))]
 impl Drop for SkipIntervalGuard {
     fn drop(&mut self) {
-        plx_media::route::restore_skip_interval(self.0);
+        plx_media::playback::restore_skip_interval(self.0);
     }
 }
 
@@ -1750,7 +1750,7 @@ impl Playbar {
     /// The player route's bar: the live scrub preview and seek target over the published
     /// playhead, the knob from the HUD's own focus ring, and the four-state read-out.
     fn live(
-        ps: &plx_media::route::PlaybackSession,
+        ps: &plx_media::playback::PlaybackSession,
         busy: Busy,
         focus: i32,
         since_play_ms: Option<u32>,
@@ -1966,7 +1966,7 @@ pub fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn plx_machine::machine
 /// transport draws its inline spinner only when it is [`Busy::Transport`], and the centred read-out
 /// is [`draw_readout`]'s, drawn by the caller AFTER this.
 pub fn draw_hud(
-    ps: &plx_media::route::PlaybackSession,
+    ps: &plx_media::playback::PlaybackSession,
     row: &mut TransportRow,
     up: &crate::up_next::Countdown,
     slot: ControlSlot,
@@ -2030,8 +2030,8 @@ pub fn draw_hud(
         } else {
             draw_title(
                 p,
-                Kicker::Context(plx_media::route::ctxline_cptr(ps)),
-                plx_media::route::title_cptr(ps),
+                Kicker::Context(plx_media::playback::ctxline_cptr(ps)),
+                plx_media::playback::title_cptr(ps),
             );
         }
 
@@ -2185,7 +2185,7 @@ mod tests {
     }
 
     use plx_data::metadata::{Marker, MarkerKind};
-    use plx_media::route::NextEpisodeMode;
+    use plx_media::playback::NextEpisodeMode;
     use crate::skip_pill::SkipAction;
 
     /// **The image-subtitle display set is a render, and it says how much of one** (§8.3 rule (c)):
@@ -2658,7 +2658,7 @@ mod tests {
     /// the coverage claim can't be satisfied by quietly narrowing it.
     #[test]
     fn exactly_one_surface_owns_the_busy_signal() {
-        let ps = plx_media::route::PlaybackSession::IDLE;
+        let ps = plx_media::playback::PlaybackSession::IDLE;
         for st in ALL_STATES {
             for seen in [false, true] {
                 let b = busy_surface(&ps, st, seen);
@@ -2681,7 +2681,7 @@ mod tests {
     /// live picture is the transport's alone.
     #[test]
     fn a_seek_over_a_live_picture_belongs_to_the_transport() {
-        let ps = plx_media::route::PlaybackSession::IDLE;
+        let ps = plx_media::playback::PlaybackSession::IDLE;
         assert_eq!(busy_surface(&ps, S::Seeking, true), Busy::Transport);
         assert!(!matches!(busy_surface(&ps, S::Seeking, true), Busy::Readout(..)));
     }
@@ -2692,7 +2692,7 @@ mod tests {
     /// `seen_frame`, and without the assertion someone will "simplify" it back.
     #[test]
     fn the_post_seek_buffering_tail_does_not_flash_the_centre_readout() {
-        let ps = plx_media::route::PlaybackSession::IDLE;
+        let ps = plx_media::playback::PlaybackSession::IDLE;
         assert_eq!(busy_surface(&ps, S::Buffering, true), Busy::Transport);
         assert_eq!(
             busy_surface(&ps, S::Resolving, true),
@@ -2707,7 +2707,7 @@ mod tests {
     /// Preparing/Connecting and a seek stay as they were.
     #[test]
     fn an_audio_pick_rebuild_reads_switching_audio_and_nothing_else_does() {
-        let ps = plx_media::route::PlaybackSession::IDLE;
+        let ps = plx_media::playback::PlaybackSession::IDLE;
         assert_eq!(
             busy_surface_with(&ps, S::Buffering, false, true),
             Busy::Readout(StatusKind::Working, c"Switching audio\u{2026}")
@@ -2727,7 +2727,7 @@ mod tests {
     /// kind↔caption pairing the enum carries (both are chosen once, by this function).
     #[test]
     fn a_cold_start_and_a_reload_both_own_the_whole_panel() {
-        let ps = plx_media::route::PlaybackSession::IDLE;
+        let ps = plx_media::playback::PlaybackSession::IDLE;
         assert_eq!(
             busy_surface(&ps, S::Resolving, false),
             Busy::Readout(StatusKind::Working, c"Preparing\u{2026}")
@@ -2752,7 +2752,7 @@ mod tests {
     /// treatment.
     #[test]
     fn a_dead_producer_reads_out_whether_or_not_a_picture_was_up() {
-        let ps = plx_media::route::PlaybackSession::IDLE;
+        let ps = plx_media::playback::PlaybackSession::IDLE;
         for seen in [false, true] {
             assert_eq!(
                 busy_surface(&ps, S::Error, seen),
@@ -2772,7 +2772,7 @@ mod tests {
     #[test]
     fn the_forced_readout_says_what_and_why_once_and_draws_the_diagnostics_as_the_footer() {
         use plx_media::player::FailureAction as A;
-        let verdict = plx_media::route::PlayVerdict::Forced(plx_media::route::ForcedFailure::Video).text().to_owned();
+        let verdict = plx_media::playback::PlayVerdict::Forced(plx_media::playback::ForcedFailure::Video).text().to_owned();
         let e = plx_media::player::failtest_policy_shape_for_test(&verdict);
         let r = readout_of(&e);
         assert_eq!(r.reason(), verdict.as_str());
@@ -2792,7 +2792,7 @@ mod tests {
     #[test]
     fn the_diagnostics_footer_sits_below_the_row_inside_the_safe_bottom_band() {
         use plx_base::fontcov::advances::ShippedMeasure;
-        let verdict = plx_media::route::PlayVerdict::Forced(plx_media::route::ForcedFailure::Video).text().to_owned();
+        let verdict = plx_media::playback::PlayVerdict::Forced(plx_media::playback::ForcedFailure::Video).text().to_owned();
         let e = plx_media::player::failtest_policy_shape_for_test(&verdict);
         let r = readout_of(&e);
         let row_bottom = r.frames(&ShippedMeasure).iter().flatten().map(|f| f.y + f.h).fold(0.0, f32::max);
@@ -2894,7 +2894,7 @@ mod tests {
     /// the transport is what the user reads the instant the first frame lands.
     #[test]
     fn only_a_failure_takes_the_frame_away_from_the_transport() {
-        let ps = plx_media::route::PlaybackSession::IDLE;
+        let ps = plx_media::playback::PlaybackSession::IDLE;
         for seen in [false, true] {
             assert!(
                 readout_owns_frame(busy_surface(&ps, S::Error, seen)),

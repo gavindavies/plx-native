@@ -98,7 +98,7 @@ pub(crate) fn loop_tick(iters_ct: &mut i32, loop_t: &mut u32, loop_shown: &mut i
 /// Boot's restore: the live player preferences from the record, before any route can resolve a
 /// stream.
 pub(super) fn restore_player_preferences(session: &plx_plex::plex::session::Session) {
-    plx_media::route::restore_all(session, plx_media::route::Overrides { quality: None });
+    plx_media::playback::restore_all(session, plx_media::playback::Overrides { quality: None });
 }
 
 /// Everything before the loop: SDL and the window, GL, text, the poster workers and the `App`

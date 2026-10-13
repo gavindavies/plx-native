@@ -48,10 +48,10 @@ pub(crate) struct AppViews<'a> {
     pub(crate) subtitle_search: plx_data::subsearch::SubSearchView<'a>,
     /// **The playback session, as this frame's publication.** The Player machine (`App.player`)
     /// owns the value; `Split` can only lend what the RIG owns, so the loop copies the decisions
-    /// in once per frame ([`plx_media::route::PlaybackSession::publication`]) and a screen reads
+    /// in once per frame ([`plx_media::playback::PlaybackSession::publication`]) and a screen reads
     /// them here. A screen that wants to CHANGE the playback emits an effect (`AppFx::Player`) —
     /// there is no `&mut` on this path by construction.
-    pub(crate) session: &'a plx_media::route::PlaybackSession,
+    pub(crate) session: &'a plx_media::playback::PlaybackSession,
 }
 
 impl Bridge {
@@ -95,7 +95,7 @@ impl Host for AppHost {
 }
 
 impl plx_screens::registry::PlayerLike for AppHost {
-    fn session<'a>(cx: &Cx<'a, Self>) -> &'a plx_media::route::PlaybackSession { cx.views.session }
+    fn session<'a>(cx: &Cx<'a, Self>) -> &'a plx_media::playback::PlaybackSession { cx.views.session }
 }
 
 impl plx_screens::registry::MetadataLike for AppHost {
@@ -115,7 +115,7 @@ pub(crate) struct Bridge {
     mounter: AppMounter,
     /// This frame's publication of the playback session — see `AppViews::session`. Refreshed by
     /// [`Bridge::publish_playback`] from the loop, once per iteration.
-    playback: plx_media::route::PlaybackSession,
+    playback: plx_media::playback::PlaybackSession,
     /// Was the publication above refreshed on the last frame?
     playback_live: bool,
     /// **Is the video plane bound?** `Player::video_plane_bound`, published here by the loop on its
@@ -155,7 +155,7 @@ impl Bridge {
         Self {
             stores: plx_data::stores::Stores::default(),
             mounter: AppMounter::default(),
-            playback: plx_media::route::PlaybackSession::IDLE,
+            playback: plx_media::playback::PlaybackSession::IDLE,
             playback_live: false,
             video_plane: false,
             measure: plx_ui::rec::Measurements::Live(measure),
@@ -312,12 +312,12 @@ impl Bridge {
     /// iteration by the loop, BEFORE the dispatcher frame and the tree draw, so every screen in one
     /// frame reads one consistent picture of the playback. Off the player the publication is
     /// `PlaybackSession::IDLE` and stays there.
-    pub(crate) fn publish_playback(&mut self, session: &plx_media::route::PlaybackSession, live: bool) {
+    pub(crate) fn publish_playback(&mut self, session: &plx_media::playback::PlaybackSession, live: bool) {
         if live {
             self.playback = session.publication();
             self.playback_live = true;
         } else if self.playback_live {
-            self.playback = plx_media::route::PlaybackSession::IDLE;
+            self.playback = plx_media::playback::PlaybackSession::IDLE;
             self.playback_live = false;
         }
     }
@@ -474,7 +474,7 @@ pub(crate) fn frame_with_tap(
 /// to take and nothing to freeze (`ui/popover.rs`'s `HostPolicy::Live` says exactly this about the
 /// player route). `survives_failure` is the `…` popover's alone — see `OverlayKind`.
 pub(crate) fn open_player_overlay(
-    ps: &plx_media::route::PlaybackSession,
+    ps: &plx_media::playback::PlaybackSession,
     meta: plx_data::metadata::MetadataView<'_>,
     d: &mut Dispatcher<AppHost>,
     kind: plx_screens::player::overlay::OverlayKind,

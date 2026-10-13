@@ -1,12 +1,10 @@
-//! **External (sidecar) subtitles on the direct-play path** — the `.srt` beside the film.
+//! **External (sidecar) subtitles** — the `.srt` beside the film.
 //!
-//! The demuxer only ever sees the streams INSIDE the container it opened, so a sidecar was
-//! unreachable on direct play and the track menu hid it (`docs/parity-gaps.md`, "Sidecar
-//! (external) subtitle streams are unreachable on the direct-play path"). This is the missing
-//! producer: fetch the whole file from PMS once (or, for the Linux build's local files, read it
-//! from disk: [`select_file`]). Plain captions answer [`active`]; ASS/SSA
-//! keeps its complete script for [`ass_source`] and the native styled renderer. Styles,
-//! overlapping events, drawings and embedded fonts must never pass through plain-text parsing.
+//! The demuxer only ever sees the streams INSIDE the container it opened, so a subtitle file beside
+//! the video needs a producer of its own: read the whole file from disk once ([`select_file`]).
+//! Plain captions answer [`active`]; ASS/SSA keeps its complete script for [`ass_source`] and the
+//! native styled renderer. Styles, overlapping events, drawings and embedded fonts must never pass
+//! through plain-text parsing.
 //!
 //! # Why its own store, and not `SHARED.sub_cues`
 //!
@@ -19,13 +17,8 @@
 //!
 //! # The clock
 //!
-//! A sidecar's timestamps are file time, and on DIRECT PLAY `playpos_ns` is file time too (the
-//! rebase keeps it so across seeks). Where the server BURNS the selection into the picture (a
-//! re-encode, or a remux the app may not draw over) [`active`] answers nothing while its caller
-//! says the selection is burned (`route::subtitles_burned`) — otherwise a direct play that becomes
-//! a burn mid-film (a DTS audio pick) would show the line twice. Over a plain remux nothing is
-//! burned and a sidecar is drawn from here. The fact is PASSED IN rather than read: the playback session is
-//! the frame's publication, and the draw that calls this already holds it.
+//! A sidecar's timestamps are file time, and `playpos_ns` is file time too (the rebase keeps it so
+//! across seeks).
 //!
 //! The draw asks on the SUBTITLE clock (`player::subtitle_clock_ns`, the playhead less the
 //! viewer's timing offset). Because the whole file is here, a sidecar is the one kind of track
@@ -34,7 +27,7 @@
 //!
 //! # Threading
 //!
-//! [`select`]/[`deselect`]/[`active`] are main-thread calls; the fetch runs on a `task` worker and
+//! [`select_file`]/[`deselect`]/[`active`] are main-thread calls; the read runs on a `task` worker and
 //! lands under the one mutex, fenced by a generation so an answer for a pick the viewer has
 //! already moved off is dropped rather than installed. One worker drains a single latest-pick
 //! slot, so repeated picks cannot accumulate threads or downloads.
@@ -69,11 +62,9 @@ impl Failure {
     }
 }
 
-/// Stream ids belong to a server; the codec controls how that server is asked for the file.
-/// Keep all of that identity beside the cache so identical ids on two servers cannot alias.
+/// The picked file's identity: its stream id within the playing item, its path and its codec.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Selection {
-    server: plx_plex::plex::ServerId,
     stream_id: i64,
     key: String,
     codec: String,
@@ -105,43 +96,30 @@ static STATE: Mutex<State> = Mutex::new(State {
 
 /// How long a [`Failure`] stays on screen.
 const FAILURE_SHOWN: Duration = Duration::from_secs(6);
+/// A subtitle file larger than this is refused before it is read: a real one is well under 1 MB.
+const SIDECAR_MAX_BYTES: usize = 4 * 1024 * 1024;
 fn state() -> std::sync::MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Select the sidecar `stream_id`, fetching `key` from `server` unless that file is already
-/// loaded. MAIN THREAD.
-pub fn select(server: plx_plex::plex::ServerId, stream_id: i64, key: String, codec: String) {
-    select_with_fetch(server, stream_id, key, codec, |server, key, codec| {
-        let Some(client) = plx_plex::plex::client_for(server) else {
-            super::log("sidecar: no client for the playing server");
-            return None;
-        };
-        client.sidecar_subtitle_detailed(key, codec)
-            .map_err(|why| super::log(&format!("sidecar: fetch failed: {why}")))
-            .ok()
-    });
-}
 
-/// Select a subtitle FILE on this machine's disk (the Linux build's local library: `key` is its
-/// path). The same store and the same worker as a server's sidecar, reading the file instead.
-/// MAIN THREAD.
+/// Select the subtitle FILE `key` (its path) beside the playing video, reading it unless it is
+/// already loaded. MAIN THREAD.
 pub fn select_file(stream_id: i64, key: String, codec: String) {
-    let server = plx_plex::plex::ServerId::from_raw(plx_data::local::ART_SRV);
-    select_with_fetch(server, stream_id, key, codec, |_, path, _| {
+    select_with_fetch(stream_id, key, codec, |path, _| {
         std::fs::read(path).map_err(|why| super::log(&format!("sidecar: could not read the file ({why})"))).ok()
     });
 }
 
 fn select_with_fetch(
-    server: plx_plex::plex::ServerId, stream_id: i64, key: String, codec: String,
-    fetch: impl Fn(plx_plex::plex::ServerId, &str, &str) -> Option<Vec<u8>> + Send + 'static,
+    stream_id: i64, key: String, codec: String,
+    fetch: impl Fn(&str, &str) -> Option<Vec<u8>> + Send + 'static,
 ) {
     if stream_id <= 0 || key.is_empty() {
         deselect();
         return;
     }
-    let selection = Selection { server, stream_id, key, codec: codec.to_ascii_lowercase() };
+    let selection = Selection { stream_id, key, codec: codec.to_ascii_lowercase() };
     {
         let mut st = state();
         st.generation = st.generation.wrapping_add(1);
@@ -167,7 +145,7 @@ fn select_with_fetch(
         };
         let stream_id = selection.stream_id;
         super::log(&format!("sidecar: fetching stream {stream_id}"));
-        let body = fetch(selection.server, &selection.key, &selection.codec);
+        let body = fetch(&selection.key, &selection.codec);
         let outcome = match body {
             None => Err(Failure::Fetch),
             Some(bytes) => decode(bytes, &selection.codec),
@@ -224,7 +202,7 @@ pub fn select_without_fetch_for_test(stream_id: i64) {
     st.generation = st.generation.wrapping_add(1);
     st.pending = None;
     st.want = Some(Selection {
-        server: plx_plex::plex::ServerId::UNSET, stream_id, key: String::new(), codec: String::new(),
+        stream_id, key: String::new(), codec: String::new(),
     });
     st.failed = None;
 }
@@ -239,33 +217,17 @@ pub fn reset() {
     st.failed = None;
 }
 
-/// **Honour a sidecar the SERVER already has selected for this part** — picked here in an earlier
-/// session, or on another Plex client. The embedded twin is `route::pick_dp_subtitle`, which
-/// leaves an external selection off because nothing could render it; now something can.
-/// Direct play, or a plain remux start (the caller's gate): a start that burns keeps subtitles off, as before.
-pub fn restore_server_selection(server: plx_plex::plex::ServerId, meta: plx_data::metadata::MetadataView<'_>) -> Option<i64> {
-    let item = meta.playing()?;
-    if let Some(s) = plx_data::metadata::server_selected_sidecar(item) {
-        super::log(&format!("server-selected sidecar subtitle: sid={}", s.id));
-        select(server, s.id, s.key.clone(), s.codec.clone());
-        return Some(s.id);
-    }
-    None
-}
 
-/// The line to draw at `now_ns`, if a sidecar is selected and the server is not burning it.
-pub fn active(now_ns: i64, burned: bool) -> Option<String> {
-    active_span(now_ns, burned).map(|(text, _, _)| text)
+/// The line to draw at `now_ns`, if a sidecar is selected.
+pub fn active(now_ns: i64) -> Option<String> {
+    active_span(now_ns).map(|(text, _, _)| text)
 }
 
 /// [`active`] with the `(start_ns, end_ns)` the cue is shown over, in the subtitle clock — what a
 /// caption too tall for one screen pages across. The on-screen failure notice has no cue span; it
 /// comes back as `(0, i64::MAX)`.
-pub fn active_span(now_ns: i64, burned: bool) -> Option<(String, i64, i64)> {
+pub fn active_span(now_ns: i64) -> Option<(String, i64, i64)> {
     let st = state();
-    if burned {
-        return None; // the server BURNS the selection; drawing it too would double the line
-    }
     let want = st.want.as_ref()?;
     if let Some((source, why, at)) = &st.failed {
         if source == want && at.elapsed() < FAILURE_SHOWN {
@@ -278,10 +240,9 @@ pub fn active_span(now_ns: i64, burned: bool) -> Option<(String, i64, i64)> {
     }
 }
 
-/// The selected styled script, unless the server burns it. It is the same immutable source through seeks
-/// and Off→On; render requests carry the current clock, so no cue is lost on a backward seek.
-pub fn ass_source(burned: bool) -> Option<Arc<super::ass::Source>> {
-    if burned { return None; }
+/// The selected styled script. It is the same immutable source through seeks and Off→On; render
+/// requests carry the current clock, so no cue is lost on a backward seek.
+pub fn ass_source() -> Option<Arc<super::ass::Source>> {
     let mut st = state();
     let State { want, loaded, .. } = &mut *st;
     let want = want.as_ref()?;
@@ -313,7 +274,7 @@ fn is_ass_script(text: &str) -> bool {
 }
 
 fn decode(bytes: Vec<u8>, codec: &str) -> Result<Content, Failure> {
-    if bytes.len() > plx_plex::plex::SIDECAR_MAX_BYTES { return Err(Failure::Empty); }
+    if bytes.len() > SIDECAR_MAX_BYTES { return Err(Failure::Empty); }
     let text = String::from_utf8_lossy(&bytes);
     if is_ass_script(&text) {
         // Validate only the presence of events. libass owns the script grammar, including
@@ -465,7 +426,7 @@ impl Subtitles {
     /// subtitle, a styled script (its native renderer owns the grammar), or one with no usable
     /// cue. SubRip and WebVTT share one reader; ASS/SSA is never flattened here.
     fn from_bytes(bytes: Vec<u8>) -> Self {
-        if bytes.len() > plx_plex::plex::SIDECAR_MAX_BYTES {
+        if bytes.len() > SIDECAR_MAX_BYTES {
             return Self::empty();
         }
         let mut text = match String::from_utf8(bytes) {
@@ -603,24 +564,22 @@ mod tests {
         let _guard = plx_base::testlock::serial();
         reset();
         finish_download();
-        let server = plx_plex::plex::ServerId::from_raw(0);
-        select_with_fetch(server, 42, "/library/streams/42".into(), "ass".into(),
-            |_, _, _| Some(STYLED_SCRIPT.to_vec()));
+        select_with_fetch(42, "/library/streams/42".into(), "ass".into(),
+            |_, _| Some(STYLED_SCRIPT.to_vec()));
         finish_download();
-        let first = ass_source(false).expect("native script available");
-        assert!(ass_source(true).is_none(), "a server burn silences the native script");
+        let first = ass_source().expect("native script available");
         for clock in [2_000_000_000, 80_000_000_000, 1_000_000_000] {
-            assert_eq!(active(clock, false), None, "ASS never enters the plain renderer");
-            assert_eq!(ass_source(false).unwrap().id, first.id, "seek keeps the whole script");
+            assert_eq!(active(clock), None, "ASS never enters the plain renderer");
+            assert_eq!(ass_source().unwrap().id, first.id, "seek keeps the whole script");
         }
         deselect();
         assert!(!selected());
-        assert!(ass_source(false).is_none());
-        select_with_fetch(server, 42, "/library/streams/42".into(), "ASS".into(),
-            |_, _, _| panic!("the same cached script must not be downloaded again"));
-        assert!(Arc::ptr_eq(&ass_source(false).unwrap(), &first));
+        assert!(ass_source().is_none());
+        select_with_fetch(42, "/library/streams/42".into(), "ASS".into(),
+            |_, _| panic!("the same cached script must not be downloaded again"));
+        assert!(Arc::ptr_eq(&ass_source().unwrap(), &first));
         reset();
-        assert!(ass_source(false).is_none(), "new item drops the old source");
+        assert!(ass_source().is_none(), "new item drops the old source");
     }
 
     #[test]
@@ -629,14 +588,14 @@ mod tests {
         reset();
         finish_download();
         super::super::ass_source::reset();
-        select_with_fetch(plx_plex::plex::ServerId::from_raw(0), 42,
-            "/library/streams/42".into(), "ass".into(), |_, _, _| Some(STYLED_SCRIPT.to_vec()));
+        select_with_fetch(42,
+            "/library/streams/42".into(), "ass".into(), |_, _| Some(STYLED_SCRIPT.to_vec()));
         finish_download();
-        let before = ass_source(false).unwrap();
+        let before = ass_source().unwrap();
         let font = super::super::ass::Font { name: "sign.ttf".into(), data: Arc::from(&b"font"[..]) };
         // Fonts belong to the media even when it has no embedded ASS track.
         super::super::ass_source::begin("fixture", Vec::new(), vec![font]);
-        let after = ass_source(false).unwrap();
+        let after = ass_source().unwrap();
         assert_eq!(after.id, before.id, "the script's identity is stable");
         assert!(after.revision > before.revision, "new fonts invalidate native rasterization");
         let super::super::ass::Content::Script { bytes: old_bytes, fonts: old_fonts } = &before.content else { panic!() };
@@ -646,25 +605,11 @@ mod tests {
         assert_eq!(fonts[0].name, "sign.ttf");
         assert!(Arc::ptr_eq(bytes, old_bytes), "script bytes must not be recopied per font update");
         assert!(Arc::ptr_eq(fonts, &super::super::ass_source::font_snapshot().1));
-        assert!(Arc::ptr_eq(&ass_source(false).unwrap(), &after), "unchanged frames reuse the source");
+        assert!(Arc::ptr_eq(&ass_source().unwrap(), &after), "unchanged frames reuse the source");
         reset();
         super::super::ass_source::reset();
     }
 
-    #[test]
-    fn identical_stream_ids_on_different_servers_do_not_reuse_the_sidecar() {
-        let _guard = plx_base::testlock::serial();
-        reset();
-        finish_download();
-        let key = "/library/streams/42";
-        for server in [0, 1] {
-            select_with_fetch(plx_plex::plex::ServerId::from_raw(server), 42, key.into(), "srt".into(),
-                move |_, _, _| Some(format!("00:00:01 --> 00:00:03\nserver {server}\n").into_bytes()));
-            finish_download();
-            assert_eq!(active(2_000_000_000, false), Some(format!("server {server}")));
-        }
-        reset();
-    }
 
     #[test]
     fn styled_sidecars_never_draw_a_flattened_second_caption() {
@@ -677,13 +622,13 @@ mod tests {
         assert!(!state().running);
         let script = b"[Script Info]\nScriptType: v4.00+\n[Events]\n\
             Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\pos(300,100)\\c&H0000FF&}SIGN\n";
-        select_with_fetch(plx_plex::plex::ServerId::from_raw(0), 42,
-            "/library/streams/42.ass".into(), "ass".into(), move |_, _, _| Some(script.to_vec()));
+        select_with_fetch(42,
+            "/library/streams/42.ass".into(), "ass".into(), move |_, _| Some(script.to_vec()));
         let until = Instant::now() + Duration::from_secs(2);
         while state().running && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(5));
         }
-        let plain_caption = active(2_000_000_000, false);
+        let plain_caption = active(2_000_000_000);
         reset();
         assert_eq!(plain_caption, None, "styled ASS belongs to its native renderer");
     }
@@ -705,25 +650,24 @@ mod tests {
         let release_rx = std::sync::Arc::new(Mutex::new(release_rx));
         let fetch = {
             let calls = calls.clone();
-            move |_: plx_plex::plex::ServerId, key: &str, _: &str| {
+            move |key: &str, _: &str| {
                 let n = calls.fetch_add(1, Relaxed);
                 started_tx.send(()).unwrap();
                 if n == 0 { release_rx.lock().unwrap().recv().unwrap(); }
                 Some(format!("00:00:01 --> 00:00:03\n{key}\n").into_bytes())
             }
         };
-        let sid = plx_plex::plex::ServerId::from_raw(0);
-        select_with_fetch(sid, 1, "old".into(), "srt".into(), fetch.clone());
+        select_with_fetch(1, "old".into(), "srt".into(), fetch.clone());
         started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         reset();
-        select_with_fetch(sid, 1, "new".into(), "srt".into(), fetch);
+        select_with_fetch(1, "new".into(), "srt".into(), fetch);
         let parallel = started_rx.recv_timeout(Duration::from_millis(100)).is_ok();
         release_tx.send(()).unwrap();
         let until = Instant::now() + Duration::from_secs(2);
-        while active(2_000_000_000, false).as_deref() != Some("new") && Instant::now() < until {
+        while active(2_000_000_000).as_deref() != Some("new") && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert_eq!(active(2_000_000_000, false).as_deref(), Some("new"));
+        assert_eq!(active(2_000_000_000).as_deref(), Some("new"));
         reset();
         assert!(!parallel, "an abandoned fetch must finish before another worker is started");
     }
@@ -911,38 +855,4 @@ mod tests {
         assert_eq!(timestamp("-1:00:00,000"), None);
     }
 
-    /// Issue #266 I6: the route withholds the audio enhancement exactly when this restore would
-    /// put a sidecar on screen, so the two must read ONE predicate
-    /// (`metadata::server_selected_sidecar`). Graded against every shape the predicate splits on:
-    /// a drawable selected sidecar is restored and is the shared answer; an unselected one, a
-    /// keyless one, a bitmap one and a selected EMBEDDED track are all nothing to both.
-    #[test]
-    fn restore_uses_shared_server_selected_sidecar() {
-        let _guard = plx_base::testlock::serial();
-        let sidecar = |id: i64, codec: &str, key: &str, selected: bool, external: bool| plx_data::metadata::Stream {
-            id,
-            codec: codec.into(),
-            key: key.into(),
-            selected,
-            external,
-            ..Default::default()
-        };
-        let cases: [(Vec<plx_data::metadata::Stream>, Option<i64>); 5] = [
-            (vec![sidecar(1, "srt", "/library/streams/1", false, true), sidecar(2, "srt", "/library/streams/2", true, true)], Some(2)),
-            (vec![sidecar(3, "srt", "/library/streams/3", false, true)], None),
-            (vec![sidecar(4, "srt", "", true, true)], None),
-            (vec![sidecar(5, "pgs", "/library/streams/5", true, true)], None),
-            (vec![sidecar(6, "srt", "", true, false)], None),
-        ];
-        for (subs, want) in cases {
-            let ids: Vec<i64> = subs.iter().map(|s| s.id).collect();
-            let item = plx_data::metadata::PlayingItem::with_subs(subs);
-            assert_eq!(plx_data::metadata::server_selected_sidecar(&item).map(|s| s.id), want, "{ids:?}");
-            let mut store = plx_data::stores::metadata::MetadataStore::default();
-            assert!(store.run(plx_data::stores::metadata::MetadataCmd::InstallPlaying(Some(item))));
-            assert_eq!(restore_server_selection(plx_plex::plex::ServerId::UNSET, store.view()), want, "{ids:?}");
-            finish_download();
-            deselect();
-        }
-    }
 }

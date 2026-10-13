@@ -23,7 +23,7 @@
 //! interim source; a second reader of a second clock is exactly how two stamps of "now" in one
 //! frame come to disagree.
 
-use crate::route::PlaybackSession;
+use crate::playback::PlaybackSession;
 
 /// The playback state `App` owns (§2.2).
 pub struct Player {

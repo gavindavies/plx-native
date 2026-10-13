@@ -263,7 +263,7 @@ static PTYPE: AtomicI32 = AtomicI32::new(10); // g_ptype (PLAYER_TYPE_MSE)
 // A/V apps on this chassis) INSIDE `engine::start_bufferfeed_tracked` itself, latching the
 // refusal onto `ps.jail_load_blocked` — a `PlaybackSession` field, not a process-wide static —
 // so `state()` derives `PlaybackState::Error` for exactly the attempt that was refused and
-// `crate::route::cancel_play`'s `clear_play_verdict` (the same ritual that retires a `/decision`
+// `crate::playback::cancel_play`'s `clear_play_verdict` (the same ritual that retires a `/decision`
 // refusal on leaving the player, called from `app.rs`'s `exit_player`) retires it precisely the
 // same way. See `engine.rs`'s `start_bufferfeed`/`start_bufferfeed_tracked` for the gate itself.
 pub use engine::{
@@ -548,8 +548,8 @@ pub fn ended() -> bool {
     SHARED.ended.load(Relaxed)
 }
 pub fn request_seek(ns: i64) {
-    report::note_seek_for(crate::route::playback_trace_generation());
-    crate::route::note_user_seek_intent(ns);
+    report::note_seek_for(crate::playback::playback_trace_generation());
+    crate::playback::note_user_seek_intent(ns);
     SHARED.ended.store(false, Relaxed); // seeking back from the end un-ends the stream
     SHARED.seeking.store(true, Relaxed); // HUD: spinner + freeze the playhead until it lands
     SHARED.seek_display_ns.store(ns, Relaxed);
@@ -578,7 +578,7 @@ pub fn request_seek(ns: i64) {
 /// HUD reads that as "no seek target" and a stale one would keep the frozen playhead after the
 /// spinner cleared.
 pub fn abandon_seek() {
-    crate::route::reject_user_seek();
+    crate::playback::reject_user_seek();
     SHARED.seeking.store(false, Relaxed);
     SHARED.seek_display_ns.store(-1, Relaxed);
     // A failed seek never got the one-frame preroll it was promised. Preserve the viewer's Paused
@@ -589,7 +589,7 @@ pub fn abandon_seek() {
 }
 /// true while a seek is resolving (request → reopen/reload → prime → Play): the HUD shows a
 /// spinner and freezes the playhead at `seek_display_ns` instead of wobbling through the reopen.
-pub fn loading(ps: &crate::route::PlaybackSession) -> bool {
+pub fn loading(ps: &crate::playback::PlaybackSession) -> bool {
     state(ps).is_busy()
 }
 /// true only while the pipeline is actually presenting frames — not resolving, connecting,
@@ -598,11 +598,11 @@ pub fn loading(ps: &crate::route::PlaybackSession) -> bool {
 /// branch), so the position reads 0 until the first decoded frame lands at the resume offset.
 /// Logging that pre-roll 0 would show the harness a 0→600 step and read as 600s of "climb"
 /// inside one second — a false PASS on `min_timeline_climb_s`.
-pub fn is_playing(ps: &crate::route::PlaybackSession) -> bool {
+pub fn is_playing(ps: &crate::playback::PlaybackSession) -> bool {
     matches!(state(ps), shared::PlaybackState::Playing)
 }
 /// The derived playback state — the ONE thing the HUD renders from. See `PlaybackState`.
-pub fn state(ps: &crate::route::PlaybackSession) -> shared::PlaybackState {
+pub fn state(ps: &crate::playback::PlaybackSession) -> shared::PlaybackState {
     // Resolving is DERIVED here rather than stored: the pump owns `pb_state` but only runs once
     // an engine exists, which is false for the whole resolve window. Deriving in the one reader
     // keeps a single writer instead of poking the state in from the frame loop.
@@ -612,7 +612,7 @@ pub fn state(ps: &crate::route::PlaybackSession) -> shared::PlaybackState {
     // the Resolving spinner until it lands. So does every recovery no Engine waits on (the
     // foreground restore's resume, a rollback after a Load that failed before its Engine
     // existed): `route::engineless_flight_outstanding`.
-    if crate::route::play_pending() || crate::route::engineless_flight_outstanding() {
+    if crate::playback::play_pending() || crate::playback::engineless_flight_outstanding() {
         return shared::PlaybackState::Resolving;
     }
     // …and so is the PRE-FLIGHT refusal, for exactly the same reason: `/decision` answers before a
@@ -625,8 +625,8 @@ pub fn state(ps: &crate::route::PlaybackSession) -> shared::PlaybackState {
     // nothing else could say why the player is empty.
     if ps.jail_load_blocked
         || ps.native_start_refused
-        || crate::route::play_refused(ps)
-        || crate::route::play_resolution_failed(ps)
+        || crate::playback::play_refused(ps)
+        || crate::playback::play_resolution_failed(ps)
     {
         return shared::PlaybackState::Error;
     }
@@ -867,10 +867,10 @@ pub fn failure_actions(kind: FailureKind, cx: FailureContext) -> Vec<FailureActi
 }
 
 /// The live [`FailureContext`] (main thread).
-pub fn failure_context(ps: &crate::route::PlaybackSession) -> FailureContext {
+pub fn failure_context(ps: &crate::playback::PlaybackSession) -> FailureContext {
     FailureContext {
-        forced: crate::route::forced_direct_play(ps) || failtest_forced(),
-        can_retry: crate::route::can_retry_current_play(ps),
+        forced: crate::playback::forced_direct_play(ps) || failtest_forced(),
+        can_retry: crate::playback::can_retry_current_play(ps),
         repair_idle: ps.repair_status == plx_platform::tv::sandbox::State::Idle,
     }
 }
@@ -1096,8 +1096,8 @@ fn error_shape(
 /// `Error` (the plan's own refusal and the engine it would otherwise have started).
 ///
 /// MAIN THREAD, like every other reader of `route`'s playback state.
-fn playing_subscription(ps: &crate::route::PlaybackSession) -> plx_plex::plex::serverinfo::Subscription {
-    plx_plex::plex::serverinfo::subscription_of(crate::route::cur_sid(ps))
+fn playing_subscription(ps: &crate::playback::PlaybackSession) -> plx_plex::plex::serverinfo::Subscription {
+    plx_plex::plex::serverinfo::subscription_of(crate::playback::cur_sid(ps))
 }
 
 /// Keep the runtime diagnosis while making the active override and its recovery path visible.
@@ -1123,7 +1123,7 @@ fn with_forced_playback_context(mut shape: ErrorShape, forced: bool) -> ErrorSha
 
 /// The live [`ErrorShape`] for `PlaybackState::Error` (main thread — `route::is_transcoding` and
 /// `route::play_verdict` read main-thread state).
-pub fn error_now(ps: &crate::route::PlaybackSession) -> ErrorShape {
+pub fn error_now(ps: &crate::playback::PlaybackSession) -> ErrorShape {
     if let Some(arm) = failtest_arm(ps) {
         return arm;
     }
@@ -1141,9 +1141,9 @@ pub fn error_now(ps: &crate::route::PlaybackSession) -> ErrorShape {
         .load(std::sync::atomic::Ordering::Acquire);
     with_forced_playback_context(error_shape(
         SHARED.demux_no_video.load(Relaxed),
-        crate::route::is_transcoding(ps),
+        crate::playback::is_transcoding(ps),
         playing_subscription(&ps),
-        crate::route::play_verdict(ps),
+        crate::playback::play_verdict(ps),
         runtime_failure(
             demux_failed,
             demux_io_failed,
@@ -1151,7 +1151,7 @@ pub fn error_now(ps: &crate::route::PlaybackSession) -> ErrorShape {
             // The refused start's cause: an abandoned Load exists only after the budget fired.
             SHARED.load_timed_out.load(Relaxed) || ps.native_start_refused,
         ),
-    ), crate::route::forced_direct_play(ps))
+    ), crate::playback::forced_direct_play(ps))
 }
 
 /// A sample PMS refusal, for the `verdict` variant of the dev trigger below. Real wording: this is
@@ -1183,7 +1183,7 @@ const FAILTEST_VERDICT: &str =
 /// the capsule reachable and it applies to EVERY server, so the pairing `docs/agent-reference.md`
 /// documents is unaffected — but note the arm still has to be looked at from the player route,
 /// i.e. after a play, which is when `route::cur_sid` names a server at all.
-fn failtest_arm(ps: &crate::route::PlaybackSession) -> Option<ErrorShape> {
+fn failtest_arm(ps: &crate::playback::PlaybackSession) -> Option<ErrorShape> {
     let arm = plx_base::devtrig::read("failtest")?;
     let sub = playing_subscription(&ps);
     Some(match arm.trim() {
@@ -1199,7 +1199,7 @@ fn failtest_arm(ps: &crate::route::PlaybackSession) -> Option<ErrorShape> {
         // verdict sentence for a video format the engine cannot take, through the real resolver.
         "policy" => with_forced_playback_context(
             error_shape(false, false, sub,
-                Some(crate::route::PlayVerdict::Forced(crate::route::ForcedFailure::Video).text()),
+                Some(crate::playback::PlayVerdict::Forced(crate::playback::ForcedFailure::Video).text()),
                 RuntimeFailure::Unknown),
             true,
         ),
@@ -1222,18 +1222,18 @@ fn failtest_forced() -> bool {
 /// Only ordinary development scenarios call this; controlled replay never reads this trigger.
 /// It lives beside [`failtest_arm`], the other reader of `/tmp/plxnative-failtest`, because it
 /// only reads that trigger and writes a `PlaybackSession` field — nothing of the app's.
-pub fn failure_fixture(session: &mut crate::route::PlaybackSession) {
+pub fn failure_fixture(session: &mut crate::playback::PlaybackSession) {
     if plx_base::devtrig::read("failtest").is_some_and(|arm| arm.trim() == "jail") {
         session.jail_load_blocked = true;
     }
 }
 
 /// HUD caption for `PlaybackState::Error` (main thread).
-pub fn error_caption(ps: &crate::route::PlaybackSession) -> &'static std::ffi::CStr {
+pub fn error_caption(ps: &crate::playback::PlaybackSession) -> &'static std::ffi::CStr {
     error_now(ps).caption
 }
 /// The same non-empty answer for the diagnostics panel's verdict line.
-pub fn error_reason(ps: &crate::route::PlaybackSession) -> &'static str {
+pub fn error_reason(ps: &crate::playback::PlaybackSession) -> &'static str {
     error_now(ps).panel
 }
 /// Test-only: drive the derived playback state, returning the previous raw value to restore.
@@ -1450,7 +1450,7 @@ impl Diag {
     }
 }
 
-pub fn diag(ps: &crate::route::PlaybackSession) -> Diag {
+pub fn diag(ps: &crate::playback::PlaybackSession) -> Diag {
     let (fed_v, fed_a) = engine::fed_totals();
     // The sink hands back the seam's own static buffer — never NULL, "" when no window was
     // created — so this is a copy of a bounded char[64], not a borrow with a lifetime to reason about.
@@ -1499,7 +1499,7 @@ pub fn diag(ps: &crate::route::PlaybackSession) -> Diag {
         video_fps_milli: SHARED.video_fps_milli.load(Relaxed),
         pos_ns: SHARED.playpos_ns.load(Relaxed),
         dur_ns: SHARED.duration_ns.load(Relaxed),
-        source_kbps: crate::route::transport_kbps(ps),
+        source_kbps: crate::playback::transport_kbps(ps),
         abr_mode: SHARED.dg_abr_mode.load(Relaxed),
         abr_kbps: SHARED.dg_abr_kbps.load(Relaxed),
         abr_declared_kbps: SHARED.dg_abr_declared_kbps.load(Relaxed),
@@ -1542,11 +1542,11 @@ pub fn seek_display_ns() -> i64 {
 ///
 /// `appkit/player_hud.rs` deliberately does NOT call this: it needs the same outer two rungs with the
 /// live scrub preview between them, so its expression is a superset rather than a caller.
-pub fn intended_pos_ns(ps: &crate::route::PlaybackSession) -> i64 {
+pub fn intended_pos_ns(ps: &crate::playback::PlaybackSession) -> i64 {
     let t = seek_display_ns();
     if loading(ps) && t >= 0 {
         t
-    } else if let Some(offset_ns) = crate::route::recovery_flight_offset_ns() {
+    } else if let Some(offset_ns) = crate::playback::recovery_flight_offset_ns() {
         // A resume/recovery flight is out and has not landed: `playpos_ns` is still the zero
         // `reset_session` left (it is seeded at the landing), so the flight's own offset is where
         // the viewer is. Without it a Home press mid-resume saves 0 and the restore plays from the
@@ -1558,24 +1558,24 @@ pub fn intended_pos_ns(ps: &crate::route::PlaybackSession) -> i64 {
 }
 /// request an audio-track switch (Plex audioStreamID); the pump forces a fresh
 /// transcode with that source audio at the current position next tick.
-pub fn request_audio_switch(ps: &crate::route::PlaybackSession, _sid: i64) {
-    crate::route::request_user_route_intent(ps, crate::route::UserRouteIntent::Retranscode);
+pub fn request_audio_switch(ps: &crate::playback::PlaybackSession, _sid: i64) {
+    crate::playback::request_user_route_intent(ps, crate::playback::UserRouteIntent::Retranscode);
     SHARED.sub_cues.lock().unwrap().clear(); // the fresh transcode carries no embedded subs
 }
 /// request a NATIVE audio-track switch (direct-play, NO transcode): feed the 0-based `audio_idx`
 /// audio stream from the same MKV with codec `codec`. The pump reloads direct-play at the current
 /// position next tick (switch_audio_native). Used when the item direct-plays and the target track
 /// is a direct-playable codec (aac/ac3/eac3).
-pub fn request_audio_track(ps: &mut crate::route::PlaybackSession, audio_idx: i32, codec: &str) {
+pub fn request_audio_track(ps: &mut crate::playback::PlaybackSession, audio_idx: i32, codec: &str) {
     stage_native_audio(ps, audio_idx, codec);
-    crate::route::request_user_route_intent(ps, crate::route::UserRouteIntent::NativeAudioReload);
+    crate::playback::request_user_route_intent(ps, crate::playback::UserRouteIntent::NativeAudioReload);
 }
 /// Everything a native audio switch needs BEFORE its direct-play reload, without queueing one:
 /// the Load payload codec, the demuxer's stream index, and the old track's embedded cues gone.
 /// A claimed action that owes a displaced pick its reload (issue #266) stages it here and runs
 /// the reload itself, so no second intent is queued mid-claim.
-pub fn stage_native_audio(ps: &mut crate::route::PlaybackSession, audio_idx: i32, codec: &str) {
-    crate::route::set_stream_acodec(ps, codec); // the reload's Load payload uses this audio codec
+pub fn stage_native_audio(ps: &mut crate::playback::PlaybackSession, audio_idx: i32, codec: &str) {
+    crate::playback::set_stream_acodec(ps, codec); // the reload's Load payload uses this audio codec
     SHARED.desired_audio_idx.store(audio_idx, Relaxed);
     SHARED.sub_cues.lock().unwrap().clear();
 }
@@ -1602,27 +1602,27 @@ pub fn set_audio_track(idx: i32) {
 /// request a re-transcode at the current position with the CURRENT audio + subtitle —
 /// used when a subtitle is (de)selected while already transcoding, so the server
 /// re-burns (or drops) it. No-op-ish if not transcoding (the caller gates on that).
-pub fn request_transcode_refresh(ps: &crate::route::PlaybackSession) {
-    crate::route::request_user_route_intent(ps, crate::route::UserRouteIntent::Retranscode);
+pub fn request_transcode_refresh(ps: &crate::playback::PlaybackSession) {
+    crate::playback::request_user_route_intent(ps, crate::playback::UserRouteIntent::Retranscode);
     SHARED.sub_cues.lock().unwrap().clear(); // burned/absent in the fresh transcode
 }
 
 /// Restart the current stream at the current movie position so a fresh demux worker captures a
 /// newly-enabled adaptive controller. This mailbox does not itself mutate the route or ask PMS for
 /// another encode; the main-thread pump owns the eventual same-position restart.
-pub fn request_adaptive_reload(ps: &crate::route::PlaybackSession) {
-    crate::route::request_user_route_intent(ps, crate::route::UserRouteIntent::AdaptiveReload);
+pub fn request_adaptive_reload(ps: &crate::playback::PlaybackSession) {
+    crate::playback::request_user_route_intent(ps, crate::playback::UserRouteIntent::AdaptiveReload);
 }
 
 pub fn cancel_adaptive_reload() {
-    crate::route::cancel_user_route_intent(crate::route::UserRouteIntent::AdaptiveReload);
+    crate::playback::cancel_user_route_intent(crate::playback::UserRouteIntent::AdaptiveReload);
 }
 
 /// Whether a route change has scheduled an encoder rebuild. Test-visible so route policy can be
 /// graded independently of the pump's frame timing.
 #[cfg(any(test, feature = "test-support"))]
 pub fn pending_transcode_refresh() -> bool {
-    crate::route::pending_user_route_intent(crate::route::UserRouteIntent::Retranscode)
+    crate::playback::pending_user_route_intent(crate::playback::UserRouteIntent::Retranscode)
 }
 
 // Dev-only: used only by `route::decision`'s `#[cfg(feature = "devtriggers")]` tests (a store
@@ -1630,23 +1630,23 @@ pub fn pending_transcode_refresh() -> bool {
 // the comment on that module's first gated test).
 #[cfg(all(any(test, feature = "test-support"), feature = "devtriggers"))]
 pub fn pending_adaptive_reload() -> bool {
-    crate::route::pending_user_route_intent(crate::route::UserRouteIntent::AdaptiveReload)
+    crate::playback::pending_user_route_intent(crate::playback::UserRouteIntent::AdaptiveReload)
 }
 
 /// Route-policy tests share the process-wide player mailbox even though no Engine pumps it.
 /// Empty it between cases so one test's requested handoff cannot become the next test's input.
 #[cfg(any(test, feature = "test-support"))]
-pub fn reset_route_requests_for_test(ps: &crate::route::PlaybackSession) {
-    crate::route::reset_player_control_for_test(ps);
+pub fn reset_route_requests_for_test(ps: &crate::playback::PlaybackSession) {
+    crate::playback::reset_player_control_for_test(ps);
 }
 
 /// Request the main-thread HLS→Original pipeline replacement. Used by an explicit Original pick;
 /// the adaptive worker publishes through the same synchronized route-intent controller after its
 /// source probes pass.
-pub fn request_original_recovery(ps: &crate::route::PlaybackSession) {
-    crate::route::request_user_route_intent(
+pub fn request_original_recovery(ps: &crate::playback::PlaybackSession) {
+    crate::playback::request_user_route_intent(
         ps,
-        crate::route::UserRouteIntent::RecoverOriginal(crate::route::RecoveryCause::ManualOriginal),
+        crate::playback::UserRouteIntent::RecoverOriginal(crate::playback::RecoveryCause::ManualOriginal),
     );
     SHARED.sub_cues.lock().unwrap().clear();
 }
@@ -1669,15 +1669,15 @@ pub fn request_subtitle(idx: i32) {
         SHARED.sub_bitmaps.lock().unwrap().clear();
     }
 }
-/// The tone client-rendered subtitles are drawn in. A [`crate::route::LiveCell`] rather than a field
+/// The tone client-rendered subtitles are drawn in. A [`crate::playback::LiveCell`] rather than a field
 /// of [`SHARED`] because it OUTLIVES a playback — it is a preference, not session state
 /// (the same reasoning as the quality cell in `route::prefs`) — and `reset_session` must not put a viewer back on white
 /// between two episodes. Restored by `route::restore_all`; written by [`set_subtitle_tone`] through
 /// the one write door (`route::choose`).
 ///
 /// Seeded to white, which is what every build before the preference drew.
-pub(crate) static SUBTITLE_TONE: crate::route::LiveCell<plx_plex::plex::session::SubtitleTone> =
-    crate::route::LiveCell::new("subtitle tone preference");
+pub(crate) static SUBTITLE_TONE: crate::playback::LiveCell<plx_plex::plex::session::SubtitleTone> =
+    crate::playback::LiveCell::new("subtitle tone preference");
 
 /// The selected tone. Read once a frame by the two subtitle draws (`appkit::player_hud`) and by the
 /// track menu for its checkmark.
@@ -1792,8 +1792,8 @@ fn clamp_subtitle_offset_ms(offset_ms: i64) -> i32 {
 /// resolve's `ResolveEnv::snapshot` reads it, on the main thread, and it reaches the wire only
 /// through `route::desired_audio`: with no Plex Pass (or an unknown one) nothing reads it at all.
 /// Restored by `route::restore_all`; written through the one write door (`route::choose`).
-pub(crate) static AUDIO_ENHANCEMENTS: crate::route::LiveCell<plx_plex::plex::AudioEnhancements> =
-    crate::route::LiveCell::new("audio enhancements preference");
+pub(crate) static AUDIO_ENHANCEMENTS: crate::playback::LiveCell<plx_plex::plex::AudioEnhancements> =
+    crate::playback::LiveCell::new("audio enhancements preference");
 
 /// The current preference (see [`AUDIO_ENHANCEMENTS`]).
 pub fn audio_enhancements() -> plx_plex::plex::AudioEnhancements {
@@ -1810,15 +1810,15 @@ pub fn restore_audio_enhancements(a: plx_plex::plex::AudioEnhancements) {
 /// worker, exactly as [`set_subtitle_tone`] does: both go through `route::choose` with
 /// `How::Optimistic`.
 pub fn set_audio_enhancements(a: plx_plex::plex::AudioEnhancements) {
-    crate::route::choose::<plx_plex::plex::session::AudioEnhancementsPref>(a, crate::route::How::Optimistic(None));
+    crate::playback::choose::<plx_plex::plex::session::AudioEnhancementsPref>(a, crate::playback::How::Optimistic(None));
 }
 
 /// **The Audio tab's toggle rows land here** (issue #266): persist the preference, then bring the
 /// playing route in line with it. The reconcile itself defers behind a pending Original trial, so
 /// a toggle during one applies to whichever route that trial settles on.
-pub fn request_audio_enhancement(ps: &mut crate::route::PlaybackSession, a: plx_plex::plex::AudioEnhancements) {
+pub fn request_audio_enhancement(ps: &mut crate::playback::PlaybackSession, a: plx_plex::plex::AudioEnhancements) {
     set_audio_enhancements(a);
-    crate::route::reconcile_enhancement(ps, false);
+    crate::playback::reconcile_enhancement(ps, false);
     // the rows' checkmarks move on this — see `route::choose`
     plx_machine::idle::invalidate();
 }
@@ -1833,7 +1833,7 @@ pub fn restore_subtitle_tone(tone: plx_plex::plex::session::SubtitleTone) {
 /// (`route::choose`, `How::Optimistic`). Takes effect on the next drawn frame — the draws read the
 /// cell — so there is nothing to reload and no cue store to touch.
 pub fn set_subtitle_tone(tone: plx_plex::plex::session::SubtitleTone) {
-    crate::route::choose::<plx_plex::plex::session::SubtitleTonePref>(tone, crate::route::How::Optimistic(None));
+    crate::playback::choose::<plx_plex::plex::session::SubtitleTonePref>(tone, crate::playback::How::Optimistic(None));
 }
 
 /// Set the timing offset (ms) on the main thread, clamped to the range; like the tone it takes
@@ -3384,7 +3384,7 @@ mod tests {
     /// being dropped, and the guard no longer has to put it back.
     #[test]
     fn the_failure_read_out_states_the_playing_items_server_not_the_current_one() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         use plx_plex::plex::serverinfo::{store_for_test, Subscription as Sub};
         struct Fresh {
             _g: plx_base::testlock::Serial,
@@ -3397,7 +3397,7 @@ mod tests {
         let g = plx_base::testlock::serial();
         plx_plex::plex::reset_servers_for_test();
         let _fresh = Fresh { _g: g };
-        crate::route::swap_cur_sid_for_test(&mut ps, plx_plex::plex::ServerId::UNSET);
+        crate::playback::swap_cur_sid_for_test(&mut ps, plx_plex::plex::ServerId::UNSET);
 
         let reg =
             |m: &str, host: &str| plx_plex::plex::register_for_test(m, host, 32400, "tok", "cid");
@@ -3411,7 +3411,7 @@ mod tests {
         // …and browsing a share does NOT re-point `current`, which is the whole trap
         assert!(plx_plex::plex::set_current(ours));
 
-        crate::route::swap_cur_sid_for_test(&mut ps, theirs);
+        crate::playback::swap_cur_sid_for_test(&mut ps, theirs);
         assert_eq!(
             playing_subscription(&ps),
             Sub::No,
@@ -3433,7 +3433,7 @@ mod tests {
 
         // the inverse polarity: playing from OUR Pass'd server while `current` sits on the share
         assert!(plx_plex::plex::set_current(theirs));
-        crate::route::swap_cur_sid_for_test(&mut ps, ours);
+        crate::playback::swap_cur_sid_for_test(&mut ps, ours);
         assert_eq!(
             playing_subscription(&ps),
             Sub::Yes,
@@ -3453,7 +3453,7 @@ mod tests {
 
         // before the first play there is no playing server, and "we have not heard" is the honest
         // answer — never slot 0's, and never a blamed subscription
-        crate::route::swap_cur_sid_for_test(&mut ps, plx_plex::plex::ServerId::UNSET);
+        crate::playback::swap_cur_sid_for_test(&mut ps, plx_plex::plex::ServerId::UNSET);
         assert_eq!(playing_subscription(&ps), Sub::Unknown);
         assert!(
             !error_shape(
@@ -3871,8 +3871,8 @@ mod native_failure_regressions {
     fn jail_refusal_enters_error_without_engine_and_retires_on_exit() {
         let _serial = plx_base::testlock::serial();
         let _guard = JailGuard;
-        let mut ps = crate::route::PlaybackSession::IDLE;
-        crate::route::reset_player_control_for_test(&ps);
+        let mut ps = crate::playback::PlaybackSession::IDLE;
+        crate::playback::reset_player_control_for_test(&ps);
         SHARED.reset_session();
         let mut pa = adapter::PlayerAdapter::new(unsafe { plx_base::task::MainThread::assume() });
         plx_platform::tv::sandbox::FORCE_BLOCKED.store(true, Relaxed);
@@ -3880,13 +3880,13 @@ mod native_failure_regressions {
         assert!(!pa.is_live());
         assert_eq!(state(&ps), PlaybackState::Error);
         assert_eq!(error_now(&ps).kind, FailureKind::JailMissingRtkmem);
-        crate::route::cancel_play(&mut ps);
+        crate::playback::cancel_play(&mut ps);
         assert!(!ps.jail_load_blocked);
         assert_ne!(state(&ps), PlaybackState::Error);
         assert!(matches!(start_bufferfeed_tracked(&mut ps, &mut pa), BufferfeedStartOutcome::Failed));
         assert!(ps.jail_load_blocked);
         assert!(!pa.is_live());
-        crate::route::cancel_play(&mut ps);
+        crate::playback::cancel_play(&mut ps);
     }
     #[test]
     fn timeout_is_distinct_from_pipeline_refusal_and_resets_per_session() {
@@ -3930,8 +3930,8 @@ mod seek_hud_regressions {
     #[test]
     fn a_requested_seek_reads_as_seeking_before_the_pump_republishes() {
         let _serial = plx_base::testlock::serial();
-        let ps = crate::route::PlaybackSession::IDLE;
-        crate::route::reset_player_control_for_test(&ps);
+        let ps = crate::playback::PlaybackSession::IDLE;
+        crate::playback::reset_player_control_for_test(&ps);
         SHARED.reset_session();
         TX.reset();
         SHARED.pb_state.store(PlaybackState::Playing as u8, Relaxed);
@@ -3944,7 +3944,7 @@ mod seek_hud_regressions {
         assert_eq!(seek_display_ns(), 90_000_000_000, "…and this is the target it freezes on");
         SHARED.reset_session();
         TX.reset();
-        crate::route::reset_player_control_for_test(&ps);
+        crate::playback::reset_player_control_for_test(&ps);
     }
 }
 

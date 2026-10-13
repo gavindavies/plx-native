@@ -3,7 +3,7 @@ name = "plx_media"
 version = "0.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "PlxNative media layer: demux (the bundled FFmpeg), the HTTPS media plane, HLS, adaptive bitrate, the buffer-feed player engine and route selection."
+description = "Media layer: demux (FFmpeg), the buffer-feed player engine, its GStreamer sink and the playback session."
 repository = "https://github.com/GLinnik21/plx-native"
 publish = false
 
@@ -24,7 +24,7 @@ default = []
 # behaviour here, not plumbing: the quality-override, track-name, playurl and forced-route triggers
 # read their files through `plx_base::devtrig`, which is compile-time `None` without it, and
 # 130-odd `cfg`s select the dev surface.
-devtriggers = ["plx_base/devtriggers", "plx_machine/devtriggers", "plx_net/devtriggers", "plx_platform/devtriggers", "plx_gfx/devtriggers", "plx_plex/devtriggers", "plx_telemetry/devtriggers", "plx_data/devtriggers"]
+devtriggers = ["plx_base/devtriggers", "plx_machine/devtriggers", "plx_platform/devtriggers", "plx_gfx/devtriggers", "plx_data/devtriggers"]
 # `player::ffi_host` (the simulator's `VideoSink`) and `player::sim_video` replace `player::ffi`
 # (Starfish/ACB) under it. `sim_video` is the one thing here that draws, so `plx_gfx` is a
 # dependency of this feature only.
@@ -38,16 +38,13 @@ devtriggers = ["plx_base/devtriggers", "plx_machine/devtriggers", "plx_net/devtr
 # `cfg(test)` alone cannot give a dependent (the stand-in sink, the stepped feed clock, the asset
 # directory, the settled route start). Enabled from the dependents' `[dev-dependencies]`; never in a
 # shipped build.
-test-support = ["plx_base/test-support", "plx_machine/test-support", "plx_platform/test-support", "plx_gfx/test-support", "plx_net/test-support", "plx_plex/test-support", "plx_telemetry/test-support", "plx_data/test-support"]
+test-support = ["plx_base/test-support", "plx_machine/test-support", "plx_platform/test-support", "plx_gfx/test-support", "plx_data/test-support"]
 
 [dependencies]
 plx_base = { path = "../base" }
 plx_machine = { path = "../machine" }
 plx_platform = { path = "../platform" }
 plx_gfx = { path = "../gfx" }
-plx_net = { path = "../net" }
-plx_plex = { path = "../plex" }
-plx_telemetry = { path = "../telemetry" }
 plx_data = { path = "../data" }
 libc = "0.2"
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
@@ -62,9 +59,6 @@ plx_media = { path = ".", features = ["devtriggers"] }
 plx_base = { path = "../base", features = ["test-support"] }
 plx_machine = { path = "../machine", features = ["test-support"] }
 plx_platform = { path = "../platform", features = ["test-support"] }
-plx_net = { path = "../net", features = ["test-support"] }
-plx_plex = { path = "../plex", features = ["test-support"] }
-plx_telemetry = { path = "../telemetry", features = ["test-support"] }
 plx_data = { path = "../data", features = ["test-support"] }
 
 [lints]

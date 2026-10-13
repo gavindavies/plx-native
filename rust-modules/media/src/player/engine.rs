@@ -13,9 +13,7 @@
 use super::shared::{HlsPlayCompletion, HlsPrimeKind, Stage};
 use super::{log, sink, threads, ACB_OK, PTYPE, SHARED, TX};
 use crate::aq::{AuNode, AuQueue};
-use plx_net::stream::HttpStream;
 use plx_base::task::MainThread;
-use plx_telemetry::telemetry::window::Stage as WindowStage;
 use std::os::raw::{c_char, c_int, c_long, c_void};
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -147,18 +145,6 @@ pub const fn feed_leads_ms() -> (i64, i64) {
 const AQ_VIDEO_BYTES: c_long = 10 * 1024 * 1024;
 const AQ_AUDIO_BYTES: c_long = 1024 * 1024;
 
-pub struct SampleBuf {
-    pub data: Vec<u8>,
-    pub au: Vec<usize>, // AU start offsets
-    pub next: usize,
-    pub loops: i64,
-}
-
-pub enum Source {
-    Stream, // host/port/path are consumed by the demux thread at spawn
-    Sample(Box<SampleBuf>),
-}
-
 /// owns a popped au_node; frees on drop (paired with the malloc in aq_push).
 pub struct AuBox(pub *mut AuNode);
 impl Drop for AuBox {
@@ -171,7 +157,7 @@ impl Drop for AuBox {
 pub struct Engine {
     /// Exact reducer attempt which constructed this native object. A duplicate start for this
     /// attempt is harmless; a different Prepared transaction must never be mistaken for it.
-    pub route_start: crate::route::RouteStartAttempt,
+    pub route_start: crate::playback::RouteStartAttempt,
     /// Firmware callback context for this exact native `Load`.
     pub native_epoch: u32,
     pub stage: Stage,
@@ -213,31 +199,18 @@ pub struct Engine {
     pub prime_play: bool,
     // Two-lane feed (Kodi m_messageQueueVideo/Audio): the demuxer routes es=1 video to aq_video
     // and es=2 audio to aq_audio; each lane is fed independently so a video BufferFull can't stall
-    // the audio lane (the audioSync master clock). Both are allocated for a stream. (None only
-    // pre-start and on the local-sample source.)
+    // the audio lane (the audioSync master clock). Both are allocated at start; `None` once
+    // teardown has taken them.
     pub aq_video: Option<Box<AuQueue>>, // g_aq (M owns; ptr handed to D)
     pub aq_audio: Option<Box<AuQueue>>, // audio lane
-    // hs/payload are RAII: held alive for the workers (which hold raw ptrs into
-    // them) and freed only after join — never read back through the field.
-    #[allow(dead_code)]
-    pub hs: Box<HttpStream>, // demux socket (M owns; D uses via raw ptr)
     pub pending_video: Option<AuBox>, // bf_pending, VIDEO lane (held across BufferFull)
     pub pending_audio: Option<AuBox>, // bf_pending, AUDIO lane
+    // The payload is RAII: held alive for the media thread (which holds a raw ptr into it) and
+    // freed only after join — never read back through the field.
     #[allow(dead_code)]
     pub payload: std::ffi::CString, // bf_payload (kept alive for the session)
-    pub source: Source,
     pub stream_th: Option<std::thread::JoinHandle<()>>,
     pub load_th: Option<std::thread::JoinHandle<()>>,
-    pub report_th: Option<std::thread::JoinHandle<()>>, // /:/timeline progress reporter
-    pub report_stop: Option<std::sync::Arc<threads::ReportStop>>, // ITS stop signal, not SHARED's
-    /// Preview Load that must land unbound. The media join waits until the thread has returned.
-    pub preview_abandon: bool,
-}
-
-impl Engine {
-    pub fn uses_stream_queues(&self) -> bool {
-        matches!(self.source, Source::Stream)
-    }
 }
 
 // The `ENGINE` slot is `App.adapters.player` since phase 9 — a field, reached as
@@ -388,7 +361,6 @@ fn release_native_object(mt: &MainThread, epoch: u32) {
     // object is preferable to letting D1 turn a late producer callback into a use-after-free.
     if unsafe { sink().ready(mt) } != 0 {
         unsafe { sink().unload(mt) };
-        window_step(WindowStage::NativeUnload);
         let callback_gate_proven = unsafe { sink().callback_gate_retire(mt) } != 0;
         let callback_intercepts = unsafe { sink().callback_intercepts(mt) };
         let unload_completed = SHARED.native_unload_completed(epoch);
@@ -410,21 +382,17 @@ fn release_native_object(mt: &MainThread, epoch: u32) {
         }
         if ACB_OK.load(Ordering::Relaxed) {
             unsafe { sink().plane_unload(mt) };
-            window_step(WindowStage::AcbPlaneUnload);
         }
         match native_object_disposition(unload_completed, callback_gate_proven, rust_epoch_retired)
         {
             NativeObjectDisposition::Destroy => {
                 if unsafe { sink().destroy(mt) } == 0 {
                     log("native lifecycle: C seam rejected D1 and quarantined the object");
-                    window_step(WindowStage::NativeQuarantined);
                 } else {
-                    window_step(WindowStage::NativeDestroyed);
                 }
             }
             NativeObjectDisposition::Quarantine => {
                 unsafe { sink().quarantine(mt) };
-                window_step(WindowStage::NativeQuarantined);
             }
         }
     } else if !SHARED.retire_native_session(epoch) {
@@ -438,21 +406,6 @@ fn release_native_object(mt: &MainThread, epoch: u32) {
     // otherwise leak it, and the next Load would ask for another. Unguarded because the seam
     // already no-ops in the other modes (see starfish.h).
     unsafe { sink().destroy_window(mt) };
-    if sink().window_mode() == super::VP_EXPORTED {
-        window_step(WindowStage::ExportedWindowDestroy);
-    }
-}
-
-/// One closed teardown/exported-window breadcrumb on a native crash event, **only inside an app
-/// switch's background or foreground cycle** (`window::record_in_cycle`): this runs for every
-/// engine that comes and goes (a trailer, a seek or quality reload, an abandoned Load), and those
-/// would fill the shared 16-slot ring with steps of no cycle. Consent-gated inside
-/// `window::record` and a no-op while the crash backend is not running; carries no data beyond the
-/// label, so a crash in the next step shows which step had already returned.
-fn window_step(stage: WindowStage) {
-    plx_telemetry::telemetry::window::record_in_cycle(
-        plx_telemetry::telemetry::window::Observation::step(stage, None),
-    );
 }
 
 /// Bind the decoded video sink to the display plane, whichever way this television does it.
@@ -511,26 +464,6 @@ fn acb_init_acb(mt: &MainThread) {
     let acb = unsafe { sink().plane_create(mt, app_ptr, pt) };
     ACB_OK.store(acb != 0, Ordering::Relaxed);
     log(&format!("acb create={acb}"));
-}
-
-/// split Annex-B into AUs on the 5-byte AUD prefix 00 00 00 01 <aud5>
-/// (H264 AUD = 0x09; HEVC AUD is NAL type 35 → first header byte 0x46).
-fn bf_split(data: &[u8], aud5: u8) -> Vec<usize> {
-    let mut au = Vec::new();
-    let mut i = 0usize;
-    while i + 4 < data.len() {
-        if data[i] == 0
-            && data[i + 1] == 0
-            && data[i + 2] == 0
-            && data[i + 3] == 1
-            && data[i + 4] == aud5
-        {
-            au.push(i);
-            i += 4;
-        }
-        i += 1;
-    }
-    au
 }
 
 /// Build the streamed BUFFERSTREAM Load payload from PAYLOAD_AV, substituting the item's real
@@ -733,7 +666,7 @@ fn fps_class(fps: f64) -> u32 {
     fps.ceil() as u32
 }
 
-fn sink_envelope_now(ps: &crate::route::PlaybackSession, video: LoadVideo) -> SinkEnvelope {
+fn sink_envelope_now(ps: &crate::playback::PlaybackSession, video: LoadVideo) -> SinkEnvelope {
     if let Some(spec) = plx_base::devtrig::read("sinkmax") {
         if let Some(env) = parse_sinkmax(&spec) {
             #[cfg(feature = "devtriggers")]
@@ -747,10 +680,10 @@ fn sink_envelope_now(ps: &crate::route::PlaybackSession, video: LoadVideo) -> Si
     }
     sink_envelope(
         video,
-        crate::route::sink_max_raster(ps),
-        crate::route::stream_fps(ps),
+        crate::playback::sink_max_raster(ps),
+        crate::playback::stream_fps(ps),
         plx_platform::devcaps::caps(),
-        plx_platform::devcaps::measured() && !crate::route::forced_direct_play(ps),
+        plx_platform::devcaps::measured(),
     )
 }
 
@@ -798,7 +731,7 @@ pub const GST_AUDIO_PAYLOAD_CODECS: [(&str, &str, u8); 7] = [
 
 /// The pipeline reads the true dimensions from the SPS (Phase 0 HEVC probe), so mw/mh are only
 /// the sink envelope.
-fn build_av_payload(ps: &crate::route::PlaybackSession, video: &str, audio: &str, env: SinkEnvelope) -> String {
+fn build_av_payload(ps: &crate::playback::PlaybackSession, video: &str, audio: &str, env: SinkEnvelope) -> String {
     let mut p = PAYLOAD_AV
         .replace(r#""video":"H264""#, &format!(r#""video":"{video}""#))
         .replace(r#""audio":"AC3""#, &format!(r#""audio":"{audio}""#))
@@ -822,7 +755,7 @@ fn build_av_payload(ps: &crate::route::PlaybackSession, video: &str, audio: &str
     if plx_base::devtrig::flag("nofps") {
         #[cfg(feature = "devtriggers")]
         log("esInfo: videoFps WITHHELD by /tmp/plxnative-nofps");
-    } else if let Some((num, den)) = fps_rational(crate::route::stream_fps(ps)) {
+    } else if let Some((num, den)) = fps_rational(crate::playback::stream_fps(ps)) {
         p = p
             .replace(
                 r#""seperatedPTS":true}"#,
@@ -834,130 +767,10 @@ fn build_av_payload(ps: &crate::route::PlaybackSession, video: &str, audio: &str
             );
         log(&format!(
             "esInfo: videoFps {num}/{den} + adaptiveResolution (src {:.3})",
-            crate::route::stream_fps(ps)
+            crate::playback::stream_fps(ps)
         ));
     }
-    let p = with_dolby_hdr_info(&p, video, crate::route::stream_dv_presentation(ps));
-    with_immersive(&p, audio, crate::route::stream_immersive(ps))
-}
-
-/// The `contents.immersive` node — **the Dolby Atmos half of the same envelope**, and the reason
-/// the television's Atmos read-out never appeared while its Dolby Vision one did.
-///
-/// PURE, so the splice is host-testable, and spliced at the same `provider` anchor and in the same
-/// shape as [`with_dolby_hdr_info`], which is its sibling in every sense: one key inside
-/// `externalStreamingInfo.contents`, one string, and the whole difference between a stream the
-/// pipeline treats as ordinary E-AC3 and one it treats as immersive.
-///
-/// **The key and the value are both read off the television's own binaries** (2026-08-21), which
-/// matters because neither is guessable and a wrong one is silent:
-/// - `libpf-1.0.so.1.0.0` holds the literal key path `option.externalStreamingInfo.contents.immersive`,
-///   logs it as `PF_EXT_IMMERSIVE : %s`, and carries it onto the audio caps it builds —
-///   `audio mediaInfo … channels[%d] language[%s] … immersive[%s] role[%s]`. It is a `%s` all the
-///   way down: libpf validates nothing and passes the string through.
-/// - The VALUE therefore has to come from whoever fills it, and **the bare literal `ATMOS` exists in
-///   exactly one library on this device: `libcbe.so`** — Chromium's media backend, i.e. the path
-///   LG's own web apps (Plex's included) take. In its string pool that literal sits immediately
-///   after `immersive` and in the same run as `externalStreamingInfo`, `esInfo`, `seperatedPTS`,
-///   `provider`, `DolbyHdrInfo`, `encryptionType`, `profileId` and `contents` — the payload we
-///   build, key for key. So `"ATMOS"` is not our invention; it is the value the working client
-///   sends, recovered from the binary that sends it.
-///
-/// `libplayerAPIs` injects `platformSupportDolbyATMOS` itself from its configd cache, exactly as it
-/// does for Dolby Vision, so this node states a fact about the STREAM and never about the set.
-fn with_immersive(p: &str, audio: &str, atmos: bool) -> String {
-    if !atmos {
-        return p.to_string();
-    }
-    if audio != "AC3 PLUS" {
-        // Same consistency guard as DolbyHdrInfo's H265 check.  The only Atmos elementary-stream
-        // path this player feeds is E-AC3 JOC, named "AC3 PLUS" in LG's Load vocabulary.  AAC is
-        // the HLS transcode output and cannot inherit the source track's immersive declaration.
-        log(&format!(
-            "atmos: immersive NOT sent — payload audio codec is {audio}, not AC3 PLUS"
-        ));
-        return p.to_string();
-    }
-    let anchor = r#""provider":"plxnative""#;
-    if !p.contains(anchor) {
-        log("atmos: payload has no provider anchor — immersive NOT spliced");
-        return p.to_string();
-    }
-    log("atmos: sourceInfo contents.immersive=ATMOS");
-    p.replace(anchor, &format!(r#"{anchor},"immersive":"ATMOS""#))
-}
-
-/// The `contents.DolbyHdrInfo` node, spliced into the Load payload only for a route whose frozen
-/// decision declared Dolby Vision after affirmative platform capability.
-///
-/// PURE, so the splice is host-testable; the decision arrives from route state and is the SAME
-/// frozen value `route::build_stream` gated direct play on
-/// ([`plx_data::metadata::Dovi::presentation`]).
-///
-/// **Why this one node is the fix, from the television's own binaries** (decompiled 2026-08-21,
-/// webOS 4.10.2 `libpf`): `CustomPipeline::parseOptionStringSpi` builds the literal key
-/// `option.externalStreamingInfo.contents.DolbyHdrInfo`, asks `Options::checkKeyExistance` for it,
-/// and on a hit sets `hasDolbyHdrInfo` — unconditionally, before a single sub-field is read and
-/// with no platform gate. `getVideoCaps` then ends by adding `dolby-vision=TRUE` (plus
-/// `dolby-vision-profile` when `profileId != -1`) to the caps it was already building. Without the
-/// node, appsrc gets plain `video/x-h265` and nothing downstream can engage Dolby Vision. The
-/// pipeline has parsed this all along; we simply never sent it.
-///
-/// Three things that look like they should change and do not:
-/// - **the codec string stays `"H265"`.** `getVideoCaps` maps H265 to `video/x-h265` and that
-///   branch falls THROUGH into the Dolby Vision tail; there is no DVHE/DVH1 entry in its codec
-///   table (those literals belong to AdaptivePipeline's RFC-6381 parser, a different pipeline).
-///   LG's own Chromium client also reports `codec.video = "H265"` for a Dolby Vision stream. The
-///   `video == "H265"` guard below is therefore a consistency check, not a translation.
-/// - **`profileId` must be a JSON integer** (`getInt`). Quoting it would leave the `-1` sentinel.
-/// - **the library's injected platform metadata is not a safety gate.** libplayerAPIs injects
-///   `platformSupportDolbyVision` / `supportDolbyTVATMOS` at the root, but libpf enables DV from
-///   our node's presence regardless. We do not duplicate those root fields; `webos::caps` reads
-///   the same public configd key independently and route policy requires an exact `true` before
-///   this function can receive `Declare`.
-///
-/// The anchor is `"provider":"plxnative"` — the last key of `contents` and, by the test below,
-/// present exactly once in `PAYLOAD_AV`. A `replace` that finds nothing is a silent no-node, which
-/// is why the miss is logged rather than assumed away.
-fn with_dolby_hdr_info(p: &str, video: &str, dv: plx_data::metadata::DvPresentation) -> String {
-    let Some(n) = dv.declared() else {
-        return p.to_string();
-    };
-    if plx_data::metadata::dv_node_suppressed() {
-        #[cfg(feature = "devtriggers")]
-        log(&format!(
-            "dv: DolbyHdrInfo P{} SUPPRESSED by /tmp/plxnative-dvnonode (direct play kept)",
-            n.profile_id
-        ));
-        return p.to_string();
-    }
-    if video != "H265" {
-        // Unreachable by construction — `route` records the DV layering on the direct-play branch
-        // only, and that branch's payload codec is the file's own hevc — so this is the guard that
-        // says so out loud rather than declaring Dolby Vision over an H264 elementary stream. A
-        // malformed sourceInfo does not fail loudly; it wedges the sink.
-        log(&format!(
-            "dv: DolbyHdrInfo P{} NOT sent — payload video codec is {video}, not H265",
-            n.profile_id
-        ));
-        return p.to_string();
-    }
-    let anchor = r#""provider":"plxnative""#;
-    if !p.contains(anchor) {
-        log("dv: payload has no provider anchor — DolbyHdrInfo NOT spliced");
-        return p.to_string();
-    }
-    let node = format!(
-        r#","DolbyHdrInfo":{{"trackType":"{}","encryptionType":"{}","profileId":{}}}"#,
-        n.track_type, n.encryption_type, n.profile_id
-    );
-    // ONE line, and it is the answer to "what did we actually send" — the only place the emitted
-    // values exist as fact rather than as intent.
-    log(&format!(
-        "dv: sourceInfo contents.DolbyHdrInfo profileId={} trackType={} encryptionType={} (codec {video})",
-        n.profile_id, n.track_type, n.encryption_type
-    ));
-    p.replace(anchor, &format!("{anchor}{node}"))
+    p
 }
 
 /// `"appId":"<this install's id>"` — the payload key, and the anchor `with_window_id` splices onto.
@@ -1001,7 +814,6 @@ fn with_window_id(mt: &MainThread, p: &str) -> String {
         return p.to_string();
     }
     let id = unsafe { sink().create_window(mt) };
-    window_step(WindowStage::ExportedWindowCreate);
     if id.is_null() {
         log("windowId: no exported window — video will not bind");
         return p.to_string();
@@ -1047,7 +859,7 @@ fn fps_rational(fps: f64) -> Option<(i64, i64)> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BufferfeedStartOutcome {
     AlreadyRunning,
-    Launched(crate::route::RouteStartAttempt),
+    Launched(crate::playback::RouteStartAttempt),
     Failed,
 }
 
@@ -1057,52 +869,42 @@ impl BufferfeedStartOutcome {
     }
 }
 
-pub fn start_bufferfeed(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter) -> bool {
-    let outcome = start_bufferfeed_tracked(ps, pa);
-    ps.jail_load_blocked || outcome.accepted()
+pub fn start_bufferfeed(ps: &mut crate::playback::PlaybackSession, pa: &mut super::adapter::PlayerAdapter) -> bool {
+    start_bufferfeed_tracked(ps, pa).accepted()
 }
 
 /// Start the native Engine while retaining the identity of the exact asynchronous `sf_load`.
 /// Foreground recovery uses this to wait for the media-thread result instead of treating thread
 /// creation as proof that the television accepted the payload.
-pub fn start_bufferfeed_tracked(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter) -> BufferfeedStartOutcome {
-    if plx_platform::tv::sandbox::blocks_native_video() {
-        ps.jail_load_blocked = true;
-        log("start_bufferfeed: refusing native video; affected chassis cannot read /dev/rtkmem");
-        if let Some(ticket) = crate::route::begin_route_start() {
-            let _ = crate::route::abort_route_start(ticket, crate::route::RouteStartResult::StartFailed);
-        }
-        return BufferfeedStartOutcome::Failed;
-    }
-    ps.jail_load_blocked = false;
+pub fn start_bufferfeed_tracked(ps: &mut crate::playback::PlaybackSession, pa: &mut super::adapter::PlayerAdapter) -> BufferfeedStartOutcome {
     ps.native_start_refused = false;
     if let Some(existing) = pa.engine().map(|engine| engine.route_start) {
-        match crate::route::classify_live_engine_start(existing) {
-            crate::route::LiveEngineStartRelation::CurrentAttempt => {
+        match crate::playback::classify_live_engine_start(existing) {
+            crate::playback::LiveEngineStartRelation::CurrentAttempt => {
                 // The exact Load is already in flight. Return its identity so foreground can
                 // observe that same attempt instead of treating an idempotent rediscovery as an
                 // untracked Engine and entering an endless AlreadyRunning retry.
                 log("start_bufferfeed: following already-running Load attempt");
                 return BufferfeedStartOutcome::Launched(existing);
             }
-            crate::route::LiveEngineStartRelation::NoPendingRoute => {
+            crate::playback::LiveEngineStartRelation::NoPendingRoute => {
                 log("start_bufferfeed: already running (no-op)");
                 return BufferfeedStartOutcome::AlreadyRunning;
             }
-            crate::route::LiveEngineStartRelation::Conflict(ticket) => {
+            crate::playback::LiveEngineStartRelation::Conflict(ticket) => {
                 log("start_bufferfeed: live Engine belongs to another Load attempt");
-                let _ = crate::route::abort_route_start(
+                let _ = crate::playback::abort_route_start(
                     ticket,
-                    crate::route::RouteStartResult::StartFailed,
+                    crate::playback::RouteStartResult::StartFailed,
                 );
                 return BufferfeedStartOutcome::Failed;
             }
         }
     }
-    let Some(route_start) = crate::route::begin_route_start() else {
+    let Some(route_start) = crate::playback::begin_route_start() else {
         log(&format!(
             "start_bufferfeed: route reducer refused a start owner (phase={})",
-            crate::route::control_phase_label()
+            crate::playback::control_phase_label()
         ));
         return BufferfeedStartOutcome::Failed;
     };
@@ -1116,22 +918,10 @@ pub fn start_bufferfeed_tracked(ps: &mut crate::route::PlaybackSession, pa: &mut
     outcome
 }
 
-/// Builds the "stream: <origin> path=<path>" diagnostic line for the freshly opened
-/// transcode/direct-stream URL. `plx_base::eventlog::log()` runs every line through
-/// `eventlog::scrub::scrub_local()`, which already redacts `X-Plex-Token=` (and other
-/// credential query params) by value only, stopping at the next `&` — so the token,
-/// which `Client::with_token` always appends last, never reaches the log. Truncating
-/// `path` here on top of that is redundant, and for a burn transcode URL it cuts the
-/// line off before `subtitleStreamID=`/`subtitles=burn`, which is exactly the evidence
-/// `tests/run.py`'s `op_audio_enhancement_burn` grader looks for.
-fn stream_open_log_line(origin_log_form: &str, path: &str) -> String {
-    format!("stream: {origin_log_form} path={path}")
-}
-
 fn start_bufferfeed_for(
-    ps: &mut crate::route::PlaybackSession,
+    ps: &mut crate::playback::PlaybackSession,
     pa: &mut super::adapter::PlayerAdapter,
-    route_start: crate::route::RouteStartTransaction,
+    route_start: crate::playback::RouteStartTransaction,
 ) -> BufferfeedStartOutcome {
     match start_bufferfeed_inner(ps, pa, route_start) {
         Ok(attempt) => {
@@ -1143,24 +933,24 @@ fn start_bufferfeed_for(
             BufferfeedStartOutcome::Launched(attempt)
         }
         Err(result) => {
-            let _ = crate::route::abort_route_start(route_start, result);
+            let _ = crate::playback::abort_route_start(route_start, result);
             BufferfeedStartOutcome::Failed
         }
     }
 }
 
 fn start_bufferfeed_inner(
-    ps: &mut crate::route::PlaybackSession,
+    ps: &mut crate::playback::PlaybackSession,
     pa: &mut super::adapter::PlayerAdapter,
-    route_start: crate::route::RouteStartTransaction,
-) -> Result<crate::route::RouteStartAttempt, crate::route::RouteStartResult> {
+    route_start: crate::playback::RouteStartTransaction,
+) -> Result<crate::playback::RouteStartAttempt, crate::playback::RouteStartResult> {
     // A timed-out Load from an earlier Engine may still own the one native object the C seam
     // holds. Release it now if it has returned; otherwise refuse before anything below (the
     // exported window in particular) can touch state that object is still using.
     reap_abandoned_load(pa);
     if pa.has_abandoned_load() {
         log("start_bufferfeed: an abandoned Load has not returned yet (refusing native start)");
-        return Err(crate::route::RouteStartResult::StartFailed);
+        return Err(crate::playback::RouteStartResult::StartFailed);
     }
     // Guard a double-start: overwriting a live ENGINE slot would DROP the running
     // Engine, detaching its worker threads and freeing the hs/aq boxes those
@@ -1172,117 +962,23 @@ fn start_bufferfeed_inner(
     ATOT.store(0, Ordering::Relaxed);
     VATT.store(0, Ordering::Relaxed);
     AATT.store(0, Ordering::Relaxed);
-    // resolve the URL, in precedence order: route (a selected movie) wins, then
-    // /tmp/plxnative-playurl (a URL + its declaration), then /tmp/plxnative-url (a URL
-    // alone), then a local sample.
-    let mut url = crate::route::url(ps);
-    if url.is_empty() {
-        // dev: /tmp/plxnative-playurl — a URL *and the Load declaration to play it with*, with no
-        // library item behind it. This is the player-PIPELINE test tier's entry (tests/README.md):
-        // `plxnative-url` below hands over a URL only, which leaves the payload describing
-        // whatever the route happened to hold — an empty string, i.e. H264 + "AC3" — so a 4K HEVC
-        // or a Dolby file could never be declared honestly without Plex. Read HERE rather than at
-        // the app.rs entry point because the declaration has to be in `route` before the payload
-        // is composed a few lines below, and because a reload (a seek that escalates) comes back
-        // through this same function and must re-apply it.
-        //
-        // `route::url()` still wins: a real selection is never overridden by a stale trigger.
-        match crate::player::playurl::playurl() {
-            Some(Ok(p)) => {
-                url = install_synthetic_playurl(ps, &p)?;
-                if let Some([w, h]) = p.source_raster {
-                    crate::route::set_stream_source_raster(ps, w, h);
-                }
-                if p.auto_source_kbps > 0 && !p.auto_hls_base.is_empty() {
-                    // A fixture that starts in HLS hands back the playlist to open: the route's
-                    // own `url` has already moved, and this local copy is what everything below
-                    // reads.
-                    if let Some(hls) = crate::route::arm_auto_fixture(
-                        ps,
-                        &p.url,
-                        p.auto_source_kbps,
-                        &p.auto_hls_base,
-                        p.auto_start_hls,
-                        p.source_raster.map_or((1_920, 1_080), |[w, h]| (w, h)),
-                    ) {
-                        url = hls;
-                    }
-                }
-            }
-            // Log and fall through rather than refuse: the next candidate may well be armed. The
-            // harness grades this as a failure anyway, because the `load:` line below will not say
-            // what the case expected.
-            Some(Err(e)) => log(&format!("playurl: unreadable spec ({e}) — ignored")),
-            None => {}
-        }
-    }
-    if url.is_empty() {
-        if let Some(t) = plx_base::devtrig::read("url") {
-            if !t.is_empty() {
-                url = t;
-                crate::route::set_url(ps, &url);
-            }
-        }
-    }
-    let mut sample: Option<Box<SampleBuf>> = None;
-    let mut is_h265 = false;
-    if url.is_empty() {
-        if let Some(data) = plx_base::devtrig::read_sample("sample.h264") {
-            let au = bf_split(&data, 0x09);
-            log(&format!(
-                "bf_split h264: {} AUs in {} bytes",
-                au.len(),
-                data.len()
-            ));
-            if au.len() < 2 {
-                return Err(crate::route::RouteStartResult::StartFailed);
-            }
-            sample = Some(Box::new(SampleBuf {
-                data,
-                au,
-                next: 0,
-                loops: 0,
-            }));
-        } else if let Some(data) = plx_base::devtrig::read_sample("sample.h265") {
-            // Phase 0 probe: feed a local HEVC Annex-B sample to test native HEVC decode.
-            let au = bf_split(&data, 0x46);
-            log(&format!(
-                "bf_split h265: {} AUs in {} bytes",
-                au.len(),
-                data.len()
-            ));
-            if au.len() < 2 {
-                return Err(crate::route::RouteStartResult::StartFailed);
-            }
-            is_h265 = true;
-            sample = Some(Box::new(SampleBuf {
-                data,
-                au,
-                next: 0,
-                loops: 0,
-            }));
-        } else {
-            // nothing to play: no selected item, no /tmp/plxnative-url, no local sample. (The old
-            // baked-in demo-movie fallback is gone — the binary carries no URLs/credentials.)
-            #[cfg(feature = "devtriggers")]
-            log("start_bufferfeed: no URL — select an item (or set /tmp/plxnative-url)");
-            return Err(crate::route::RouteStartResult::NoRoute);
-        }
-    }
-    if !crate::route::prepare_route_start(route_start) {
+    // The session's URL names the file to play (`localplay::install`); nothing else can.
+    let url = crate::playback::url(ps);
+    let Some(local) = crate::localfile::path_of(&url) else {
+        log("start_bufferfeed: no file to play");
+        return Err(crate::playback::RouteStartResult::NoRoute);
+    };
+    if !crate::playback::prepare_route_start(route_start) {
         log("start_bufferfeed: prepared route no longer owns the transaction");
-        return Err(crate::route::RouteStartResult::StartFailed);
+        return Err(crate::playback::RouteStartResult::StartFailed);
     }
-    let stream = sample.is_none();
-    // For a streamed direct-play/transcode, pick the Load codecs from the item: video H264 vs
-    // H265 (native HEVC direct-play), audio AC3/EAC3/AAC/DTS. (The local sample paths keep their
-    // fixed payloads.)
+    // Pick the Load codecs from the file: the video codec, and the audio codec the demuxer feeds.
     // dev A/B: /tmp/plxnative-noaudio feeds video only (needAudio:false + skip es=2) to isolate
     // whether the audio ES (E-AC3/Atmos) is what stalls the sink on 4K HEVC.
     let no_audio = plx_base::devtrig::flag("noaudio");
     // On the Linux build a local file with no audio track at all plays silent
     // (`localplay::admit`); its declaration carries no audio codec.
-    let no_audio = no_audio || crate::route::stream_acodec(ps).is_empty();
+    let no_audio = no_audio || crate::playback::stream_acodec(ps).is_empty();
     crate::ff::set_feed_audio(!no_audio);
     let stream_payload;
     // Every arm below assigns this — the static payloads through `static_envelope`, the streamed
@@ -1294,15 +990,15 @@ fn start_bufferfeed_inner(
     // ...and the video name beside it, for the same reason and to keep the codec->name mapping
     // written ONCE (`LoadVideo`): the `load:` line below would otherwise re-read the route and
     // re-derive it.
-    let mut video_declared: &str = "-";
-    let payload_str: &str = if stream {
-        let stream_vcodec = crate::route::stream_vcodec(ps);
+    let video_declared: &str;
+    let payload_str: &str = {
+        let stream_vcodec = crate::playback::stream_vcodec(ps);
         let Some(lv) = LoadVideo::of_stream(&stream_vcodec) else {
             log(&format!(
                 "start_bufferfeed: the pipeline cannot feed video codec {stream_vcodec:?}; refusing the Load instead of declaring it H.264"
             ));
             SHARED.demux_failed.store(true, Ordering::Release);
-            return Err(crate::route::RouteStartResult::StartFailed);
+            return Err(crate::playback::RouteStartResult::StartFailed);
         };
         // The Linux build's decoders are this machine's GStreamer's, not a television's table.
         let refused = !super::gst_sink::decodes_video(lv.payload_name());
@@ -1312,7 +1008,7 @@ fn start_bufferfeed_inner(
                 lv.payload_name()
             ));
             SHARED.demux_failed.store(true, Ordering::Release);
-            return Err(crate::route::RouteStartResult::StartFailed);
+            return Err(crate::playback::RouteStartResult::StartFailed);
         }
         video_declared = lv.payload_name();
         // Record what the payload ACTUALLY says, for the diagnostics read-out — including the
@@ -1334,11 +1030,11 @@ fn start_bufferfeed_inner(
             // LG's pipeline names E-AC3 "AC3 PLUS" (Dolby Digital Plus), NOT "EAC3" — the
             // wrong string leaves the audio ES unconfigured, and with audioSync the video
             // sink slaves to the dead audio clock and stalls (verified: video-only plays).
-            let codec = crate::route::stream_acodec(ps);
+            let codec = crate::playback::stream_acodec(ps);
             let Some((ac, diagnostic)) = audio_payload_codec(&codec) else {
                 log(&format!("start_bufferfeed: unsupported audio codec {codec:?}; refusing incorrect Load declaration"));
                 SHARED.demux_failed.store(true, Ordering::Release);
-                return Err(crate::route::RouteStartResult::StartFailed);
+                return Err(crate::playback::RouteStartResult::StartFailed);
             };
             SHARED.dg_load_a.store(diagnostic, Ordering::Relaxed);
             audio_declared = ac;
@@ -1356,12 +1052,6 @@ fn start_bufferfeed_inner(
             stream_payload = build_av_payload(ps, lv.payload_name(), ac, sink_env);
             &stream_payload
         }
-    } else if is_h265 {
-        sink_env = static_envelope(LoadVideo::H265);
-        PAYLOAD_H265
-    } else {
-        sink_env = static_envelope(LoadVideo::H264);
-        PAYLOAD_V
     };
     // The windowId splice happens HERE, at the single point every payload variant passes through,
     // rather than inside build_av_payload — three of the four variants are static strings that
@@ -1371,31 +1061,17 @@ fn start_bufferfeed_inner(
     // `with_window_id`'s anchor is the composed `"appId":"<id>"`, so the placeholder has to be
     // gone by then.
     let payload_c = std::ffi::CString::new(with_window_id(pa.mt(), &with_app_id(payload_str))).unwrap();
-    if stream {
-        // What the payload ACTUALLY declared, once, in the event log. Not test scaffolding: until
-        // this line, the only answer to "what did we tell the television this stream was" lived in
-        // the on-screen diagnostics read-out (`dg_load_v`/`dg_load_a` above), i.e. nowhere a log
-        // could settle it — and the `"AC3 PLUS"` renaming a few lines up is exactly the kind of
-        // thing a log should be able to settle, since getting it wrong leaves the audio ES
-        // unconfigured and stalls the video sink through audioSync. Streamed only: the two static
-        // sample payloads declare nothing chosen and would be claiming a declaration they never
-        // consulted. Carries no URL and no token, and costs one line per playback.
-        let dv = crate::route::stream_dovi(ps);
-        log(&format!(
-            "load: v={} a={:?} fps={:.3} dv=present:{} P{}/{} el:{} atmos:{} max={}x{}@{}",
-            video_declared,
-            audio_declared,
-            crate::route::stream_fps(ps),
-            dv.present as i32,
-            dv.profile,
-            dv.bl_compat,
-            dv.el_present as i32,
-            crate::route::stream_immersive(ps) as i32,
-            sink_env.w,
-            sink_env.h,
-            sink_env.fps
-        ));
-    }
+    // What the payload ACTUALLY declared, once, in the event log: the one place a log can settle
+    // "what did we tell the sink this stream was". Carries no path.
+    log(&format!(
+        "load: v={} a={:?} fps={:.3} max={}x{}@{}",
+        video_declared,
+        audio_declared,
+        crate::playback::stream_fps(ps),
+        sink_env.w,
+        sink_env.h,
+        sink_env.fps
+    ));
 
     // The native object starts stopped. Publish that physical fact before either worker can arm an
     // ABR trial or observe a user command; the guard rolls it back on every construction failure.
@@ -1403,102 +1079,43 @@ fn start_bufferfeed_inner(
         Some(guard) => guard,
         None => {
             log("start_bufferfeed: clock state is not idle (refusing overlapping start)");
-            return Err(crate::route::RouteStartResult::StartFailed);
+            return Err(crate::playback::RouteStartResult::StartFailed);
         }
     };
     let native_start = match NativeSessionStartGuard::arm() {
         Some(guard) => guard,
         None => {
             log("start_bufferfeed: native session is not idle (refusing overlapping Load)");
-            return Err(crate::route::RouteStartResult::StartFailed);
+            return Err(crate::playback::RouteStartResult::StartFailed);
         }
     };
-    let Some(route_attempt) = crate::route::claim_route_start_attempt(route_start) else {
+    let Some(route_attempt) = crate::playback::claim_route_start_attempt(route_start) else {
         log("start_bufferfeed: prepared route lost before native construction");
-        return Err(crate::route::RouteStartResult::StartFailed);
+        return Err(crate::playback::RouteStartResult::StartFailed);
     };
 
-    // fd = -1 (CLOSED) so a teardown before/without http_open doesn't close(0)
-    let mut hs = plx_net::stream::http_stream_boxed();
-    let mut aqv_box: Option<Box<AuQueue>> = None;
-    let mut aqa_box: Option<Box<AuQueue>> = None;
-    let mut stream_th = None;
-    let source;
-    // Whether the side subtitle reader will run for this engine run, decided BEFORE the demuxer is
-    // spawned: the demuxer reads `side_subs_owner` once, as it opens the stream, and must never
-    // also open subtitle decoders or ASS sources the reader replaces.
-    let side_target = if stream { crate::route::side_reader_target(ps) } else { None };
-
-    if stream {
-        // A `file://` location is this machine's own disk (`crate::localfile`), read by the
-        // demuxer directly; there is no origin, credential or transport choice to make for it.
-        let input = if let Some(local) = crate::localfile::path_of(&url) {
-            log(&format!(
-                "stream: local file {}",
-                local.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned())
-            ));
-            crate::ff::MediaInput::File(local)
-        } else {
-            // **The whole ORIGIN goes down, not a `(host, port)` pair, because the SCHEME chooses the
-            // transport**: `ff::demux` reads http through `plx_net::stream`'s cleartext socket and https
-            // through `crate::curlio`. This used to REFUSE an https origin outright — cleartext to a
-            // TLS port is a hang or a garbage response with nothing in the log — and that refusal is
-            // what a remote QA reviewer, with no PMS on their LAN, would have hit on every Play.
-            // Rebuilding the origin from an address would put the refusal back in a subtler form: the
-            // certificate is issued for the `plex.direct` NAME, so a TLS connection to the dotted quad
-            // behind it fails validation however well the packets flow (`net/origin.rs`).
-            let su = plx_plex::plex::StreamUrl::parse(&url); // the typed layer's URL splitter
-            if !plx_plex::http::credential_transport_allowed(&su.origin, &su.path, &[]) {
-                plx_base::eventlog::log("stream: refused insecure credential transport");
-                return Err(crate::route::RouteStartResult::StartFailed);
-            }
-            let path = su.path;
-            log(&stream_open_log_line(&su.origin.log_form(), &path));
-            let origin = su.origin;
-            crate::ff::MediaInput::Http { origin, path }
-        };
-        // Two-lane feed: the demuxer routes es=1 video to aq_video and es=2 audio to
-        // aq_audio, each with its own cap + feeder.
-        let mut qv = crate::aq::aq_new(AQ_VIDEO_BYTES);
-        let mut qa = crate::aq::aq_new(AQ_AUDIO_BYTES);
-        let aqv_raw = &mut *qv as *mut AuQueue;
-        let aqa_raw = &mut *qa as *mut AuQueue;
-        let hs_raw = &mut *hs as *mut HttpStream;
-        SHARED.hs_ptr.store(hs_raw, Ordering::Release);
-        {
-            let aqp = threads::SendPtr(aqv_raw);
-            let aqap = threads::SendPtr(aqa_raw);
-            let hsp = threads::SendPtr(hs_raw);
-            // The Load payload's audio codec, captured BY VALUE here on the main thread.
-            // `ff::demux` used to call `route::stream_acodec()` from the demux thread, cloning
-            // a `static mut String` that main-thread route transitions and native audio switches
-            // reassign — a data race, and a use-after-free if the reassignment dropped the old
-            // buffer mid-clone.
-            // Capturing is free: every one of those writers is followed by
-            // `teardown(true) + start_bufferfeed()` (reload_at / reload_transcode /
-            // switch_audio_native), which respawns this thread with the new value.
-            let acodec = crate::route::stream_acodec(ps);
-            let abr = crate::route::hls_abr_control(ps);
-            let auto_original = crate::route::auto_original_watch(ps);
-            SHARED.side_subs_owner.store(side_target.is_some(), Ordering::Release);
-            stream_th = plx_base::task::spawn_off_frame_keeping("demux", move |off| {
-                crate::ff::demux(off, input, acodec, abr, auto_original, aqp, aqap, hsp)
-            });
-            if stream_th.is_none() {
-                SHARED.side_subs_owner.store(false, Ordering::Release);
-                // Nothing will ever fill the AU queues, so there is no session to start. `hs` is
-                // about to drop with this early return, so retract the pointer first — the pump
-                // and teardown both read it straight off SHARED.
-                SHARED.hs_ptr.store(std::ptr::null_mut(), Ordering::Release);
-                return Err(crate::route::RouteStartResult::StartFailed);
-            }
-        }
-        aqv_box = Some(qv);
-        aqa_box = Some(qa);
-        source = Source::Stream;
-    } else {
-        source = Source::Sample(sample.unwrap());
+    log(&format!(
+        "stream: local file {}",
+        local.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+    ));
+    // Two-lane feed: the demuxer routes es=1 video to aq_video and es=2 audio to aq_audio, each
+    // with its own cap + feeder.
+    let mut qv = crate::aq::aq_new(AQ_VIDEO_BYTES);
+    let mut qa = crate::aq::aq_new(AQ_AUDIO_BYTES);
+    let aqp = threads::SendPtr(&mut *qv as *mut AuQueue);
+    let aqap = threads::SendPtr(&mut *qa as *mut AuQueue);
+    // The Load payload's audio codec, captured BY VALUE here on the main thread: every writer of
+    // it is followed by `teardown(true) + start_bufferfeed()`, which respawns this thread.
+    let acodec = crate::playback::stream_acodec(ps);
+    let mut stream_th = plx_base::task::spawn_off_frame_keeping("demux", move |off| {
+        crate::ff::demux(off, local, acodec, aqp, aqap)
+    });
+    if stream_th.is_none() {
+        // Nothing will ever fill the AU queues, so there is no session to start.
+        return Err(crate::playback::RouteStartResult::StartFailed);
     }
+    let mut aqv_box = Some(qv);
+    let mut aqa_box = Some(qa);
 
     // the media thread constructs + loads + runs the loop (owns the GMainContext)
     let payload_ptr = threads::SendPtr(payload_c.as_ptr() as *mut c_char);
@@ -1514,45 +1131,11 @@ fn start_bufferfeed_inner(
         for q in [aqv_box.as_mut(), aqa_box.as_mut()].into_iter().flatten() {
             crate::aq::aq_abort(&mut **q);
         }
-        let p = SHARED.hs_ptr.swap(std::ptr::null_mut(), Ordering::AcqRel);
-        if !p.is_null() {
-            plx_net::stream::http_shutdown(p);
-        }
-        super::subside::stop("start-failed"); // before the demux join, like teardown
-        crate::curlio::abort_active(); // the https demuxer's equivalent — see teardown
         if let Some(t) = stream_th.take() {
             plx_base::task::join("demux", t);
         }
-        if !p.is_null() {
-            plx_net::stream::http_close(p); // sole owner now: the reader is joined
-        }
-        return Err(crate::route::RouteStartResult::StartFailed);
+        return Err(crate::playback::RouteStartResult::StartFailed);
     }
-    // The side subtitle reader (dev trigger `plxnative-subside`), started once the demuxer is
-    // spawned and the media thread exists: it waits for the demuxer's first keyframe before it
-    // reads anything. (Its ownership flag was set before the demux spawn, below.)
-    if let Some(target) = side_target {
-        start_side_reader(&target);
-    }
-
-    // progress reporter: post the play position to /:/timeline (updates resume + watched).
-    // The complete report projection and Engine epoch are captured atomically now. The reporter
-    // never reads route::Session: a stale lease stops at teardown, while active encoder changes
-    // remain synchronized with the projection under PlayerControl.
-    let report_stop = threads::ReportStop::new();
-    // `begin_timeline_reporting` is the gate: it refuses any session resolved for a preview.
-    let report_th = if stream {
-        if let Some(lease) = crate::route::begin_timeline_reporting(ps) {
-            // best-effort: refused, the only loss is that the resume point stops being posted
-            let st = report_stop.clone();
-            plx_base::task::spawn("timeline", move || threads::timeline_thread(lease, st))
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
     let eng = Engine {
         route_start: route_attempt,
         native_epoch,
@@ -1578,16 +1161,11 @@ fn start_bufferfeed_inner(
         prime_play: false,
         aq_video: aqv_box,
         aq_audio: aqa_box,
-        hs,
         pending_video: None,
         pending_audio: None,
         payload: payload_c,
-        source,
         stream_th,
         load_th,
-        report_th,
-        report_stop: Some(report_stop),
-        preview_abandon: false,
     };
     // Re-arm the in-place-seek probe for this session. `feed_stream` clears it when
     // `sf_send_segment` can't reach the pipeline, and that is a fact about the StarfishMediaAPIs
@@ -1627,33 +1205,8 @@ fn start_bufferfeed_inner(
     native_start.commit();
     clock_start.commit();
     TX.started.store(true, Ordering::Relaxed);
-    log(&format!(
-        "SMP: media thread spawned, stream={}",
-        stream as i32
-    ));
+    log("SMP: media thread spawned");
     Ok(route_attempt)
-}
-
-/// Validate and publish the no-Plex synthetic route as one admission step. The URL must remain
-/// absent when declaration policy refuses it: a later PLAY uses URL presence to decide whether to
-/// revisit this validation, so publishing first turns a one-time refusal into a retry bypass.
-fn install_synthetic_playurl(
-    ps: &mut crate::route::PlaybackSession,
-    play: &crate::player::playurl::PlayUrl,
-) -> Result<String, crate::route::RouteStartResult> {
-    if !crate::route::set_stream_declaration(
-        ps,
-        &play.vcodec,
-        &play.acodec,
-        play.fps,
-        play.dovi.to_dovi(),
-        play.atmos,
-    ) {
-        return Err(crate::route::RouteStartResult::StartFailed);
-    }
-    let url = play.url.clone();
-    crate::route::set_url(ps, &url);
-    Ok(url)
 }
 
 /// Arm the demuxer to open+seek to `target_ns` on the NEXT Load, displaying honest content
@@ -1667,106 +1220,27 @@ pub fn arm_seek(target_ns: i64) {
     SHARED.playpos_ns.store(t, Ordering::Relaxed); // instant HUD feedback until frames land
 }
 
-/// Resume/seek AT the first Load. A direct-play item seeks the demuxer (av_seek via arm_seek).
-/// A TRANSCODE item's stream is 0-based and NOT seekable (no byte-index, Content-Length=-1), so
-/// av_seek fails — instead restart the encode at `&offset=secs` and display content time via
-/// disp_base. Call BEFORE start_bufferfeed, AFTER route::play_movie has run the decision (so the
-/// transcode session + flavor are set). Used for viewOffset resume.
-///
-/// **There is one entry point, [`begin_resume`] / [`land_resume`], and it is a flight** (the cold
-/// resume of a freshly resolved play, and the foreground restore of a parked one): a transcode's
-/// rebuild at the saved position is planned on the frame thread and its PMS half runs on a worker.
+/// What [`begin_resume`] decided.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[must_use = "resume preparation is an external route effect and must be settled"]
+#[must_use = "resume preparation decides whether the start may proceed"]
 pub enum ResumeOutcome {
+    /// The resume (if any) is armed: the caller starts the Load now.
     Prepared,
+    /// There is no file to resume.
     NoRoute,
-    RebuildRejected,
 }
 
-/// What [`begin_resume`] did.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[must_use = "a pending resume owes a start when it lands"]
-pub enum ResumeStart {
-    /// Decided on the spot (no rebuild is owed): the caller starts the Load (or fails the start)
-    /// now.
-    Settled(ResumeOutcome),
-    /// A flight owns the rebuild at the saved position (`route::dispatch_resume_rebase`): the start
-    /// stays owed, `player::state` answers `Resolving` (via `route::resume_flight_outstanding`), and [`land_resume`] delivers the
-    /// outcome the caller starts the Load on.
-    Pending,
-}
-
-/// The part of a resume that never reaches PMS.
-enum ResumePrelude {
-    Settled(ResumeOutcome),
-    /// A transcode with a saved position: its encode must restart at the offset.
-    Rebuild,
-}
-
-fn resume_prelude(ps: &mut crate::route::PlaybackSession, resume_ns: i64) -> ResumePrelude {
+/// Prepare a resume at `resume_ns`: arm the demuxer to seek there at its first open. Nothing to
+/// arm at zero.
+pub fn begin_resume(ps: &mut crate::playback::PlaybackSession, resume_ns: i64) -> ResumeOutcome {
     if resume_ns <= 0 {
-        return ResumePrelude::Settled(ResumeOutcome::Prepared);
+        return ResumeOutcome::Prepared;
     }
-    if crate::route::url(ps).is_empty() {
-        return ResumePrelude::Settled(ResumeOutcome::NoRoute);
+    if crate::playback::url(ps).is_empty() {
+        return ResumeOutcome::NoRoute;
     }
-    if !crate::route::is_transcoding(ps) {
-        arm_seek(resume_ns); // direct-play: av_seek the file at the first open
-        return ResumePrelude::Settled(ResumeOutcome::Prepared);
-    }
-    ResumePrelude::Rebuild
-}
-
-/// The transcode half of a resume, once its encode restarts at the offset (0-based): `disp_base`
-/// carries the offset so the HUD reads content time.
-fn note_transcode_resumed(resume_ns: i64) {
-    SHARED.disp_base.store(resume_ns, Ordering::Relaxed);
-    SHARED.playpos_ns.store(resume_ns, Ordering::Relaxed);
-    log(&format!(
-        "resume(transcode): restart at offset {}s",
-        resume_ns / 1_000_000_000
-    ));
-}
-
-/// Prepare a resume at `resume_ns`: a cold start (a play whose plan just landed) or a foreground
-/// restore (the parked session's start transaction is `Stable`/`Prepared`/`Failed`, or an Original
-/// trial's own `Prepared` one for a session suspended mid-trial, which the flight flies over without
-/// touching the trial's rollback; an `Idle` one has no URL and answers `NoRoute` here, never
-/// reaching the rebuild). No Engine exists. Everything but a transcode settles on the spot; a transcode's
-/// rebuild at the saved position is a FLIGHT — planned here on the frame thread, the PMS half on a
-/// worker — and answers [`ResumeStart::Pending`]. The frame never reaches the server.
-pub fn begin_resume(ps: &mut crate::route::PlaybackSession, resume_ns: i64) -> ResumeStart {
-    match resume_prelude(ps, resume_ns) {
-        ResumePrelude::Settled(outcome) => ResumeStart::Settled(outcome),
-        ResumePrelude::Rebuild => match crate::route::dispatch_resume_rebase(ps, resume_ns) {
-            crate::route::RecoveryDispatch::Flying { .. } => ResumeStart::Pending,
-            // Nothing to rebuild or the worker could not start: a refusal.
-            crate::route::RecoveryDispatch::Refused => ResumeStart::Settled(ResumeOutcome::RebuildRejected),
-        },
-    }
-}
-
-/// Drain a pending resume's landing, once a frame while [`crate::route::resume_flight_outstanding`].
-/// `None` while the worker is still running, or when the flight went stale (a Back, a teardown, a
-/// newer play request: the landing is discarded and its replacement stopped — here, by the stale
-/// reap this runs first, since a flight with no Engine has no pump to do it — and whoever ended the
-/// flight owns what happens next). `Some` is the outcome of the rebuild: the
-/// route is installed and `Prepared` (the caller starts the Load), or the rebuild was refused and
-/// the transaction is `Failed`.
-pub fn land_resume(ps: &mut crate::route::PlaybackSession) -> Option<ResumeOutcome> {
-    crate::route::discard_stale_flight_landing();
-    if !crate::route::resume_flight_outstanding() {
-        return None;
-    }
-    let landing = crate::route::take_ready_recovery_flight(ps)?;
-    Some(match landing.verdict {
-        crate::route::RecoveryVerdict::Install => {
-            note_transcode_resumed(landing.offset_ns);
-            ResumeOutcome::Prepared
-        }
-        crate::route::RecoveryVerdict::Refused => ResumeOutcome::RebuildRejected,
-    })
+    arm_seek(resume_ns);
+    ResumeOutcome::Prepared
 }
 
 /// Direct-play seek = tear down the pipeline and start a FRESH Load at `target_ns`. The old
@@ -1793,19 +1267,19 @@ pub enum ReloadOutcome {
 ///
 /// **Observe rather than reserve.** `begin_route_start` MINTS a transaction from a reducer which
 /// owns none — from `Stable`, and, since a completed stop now publishes `Idle`
-/// ([`crate::route::finish_engine_teardown`]), from `Idle` too — and aborting a transaction no
+/// ([`crate::playback::finish_engine_teardown`]), from `Idle` too — and aborting a transaction no
 /// caller ever used would publish `Failed` for a route that never had a `Load` to lose. Every
 /// phase that really does own one (`Preparing`/`Prepared`/`Starting`, ordinary or Original) is
 /// exactly the set `pending_route_start` returns without minting, so nothing leaks.
 fn settle_missing_route_start() {
-    if let Some(ticket) = crate::route::pending_route_start() {
-        let _ = crate::route::abort_route_start(ticket, crate::route::RouteStartResult::NoRoute);
+    if let Some(ticket) = crate::playback::pending_route_start() {
+        let _ = crate::playback::abort_route_start(ticket, crate::playback::RouteStartResult::NoRoute);
     }
 }
 
-fn prepare_reload_transaction() -> Option<crate::route::RouteStartTransaction> {
-    let ticket = crate::route::begin_route_start()?;
-    if crate::route::prepare_route_start(ticket) {
+fn prepare_reload_transaction() -> Option<crate::playback::RouteStartTransaction> {
+    let ticket = crate::playback::begin_route_start()?;
+    if crate::playback::prepare_route_start(ticket) {
         Some(ticket)
     } else {
         log("reload: route start transaction was superseded before teardown");
@@ -1814,9 +1288,9 @@ fn prepare_reload_transaction() -> Option<crate::route::RouteStartTransaction> {
 }
 
 fn reload_start_outcome(
-    ps: &mut crate::route::PlaybackSession,
+    ps: &mut crate::playback::PlaybackSession,
     pa: &mut super::adapter::PlayerAdapter,
-    ticket: crate::route::RouteStartTransaction,
+    ticket: crate::playback::RouteStartTransaction,
 ) -> ReloadOutcome {
     if start_bufferfeed_for(ps, pa, ticket).accepted() {
         ReloadOutcome::Started
@@ -1825,33 +1299,10 @@ fn reload_start_outcome(
     }
 }
 
-/// Start the side subtitle reader for the live remux this engine run plays, drawing the track
-/// the route's target names.
-fn start_side_reader(target: &crate::route::SideReaderTarget) {
-    let started = super::subside::spec_for(target).is_some_and(super::subside::start);
-    if !started {
-        log("subside: could not start the reader thread");
-        // Nothing reads beside the stream: the demuxer must not leave the subtitle to a reader
-        // that is not there.
-        SHARED.side_subs_owner.store(false, Ordering::Release);
-        super::subside::raise_failure(); // the route falls back to the server's burn
-    }
-}
 
-fn reload_transcode_start(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, offset_ns: i64) -> Option<BufferfeedStartOutcome> {
-    let ticket = prepare_reload_transaction()?;
-    log(&format!(
-        "reload_transcode: fresh Load at offset {}s",
-        offset_ns / 1_000_000_000
-    ));
-    teardown(ps, pa, true); // keep the session; reload mode
-    SHARED.disp_base.store(offset_ns, Ordering::Relaxed); // transcode is 0-based at content=offset
-    SHARED.playpos_ns.store(offset_ns, Ordering::Relaxed);
-    Some(start_bufferfeed_for(ps, pa, ticket))
-}
 
-pub fn reload_at(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, target_ns: i64) -> ReloadOutcome {
-    if crate::route::url(ps).is_empty() {
+pub fn reload_at(ps: &mut crate::playback::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, target_ns: i64) -> ReloadOutcome {
+    if crate::playback::url(ps).is_empty() {
         log("reload_at: no url (ignored)");
         settle_missing_route_start();
         return ReloadOutcome::NoRoute;
@@ -1873,7 +1324,7 @@ pub fn reload_at(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter
 /// was already set to the chosen track's codec, so the fresh Load configures the right audio
 /// decoder). desired_audio_idx persists across the reload, so the demuxer keeps feeding the
 /// chosen stream and the choice survives later seeks.
-pub fn switch_audio_native(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, audio_idx: i32, pos_ns: i64) -> ReloadOutcome {
+pub fn switch_audio_native(ps: &mut crate::playback::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, audio_idx: i32, pos_ns: i64) -> ReloadOutcome {
     SHARED.desired_audio_idx.store(audio_idx, Ordering::Relaxed);
     log(&format!(
         "switch_audio_native: audio_idx={audio_idx} at {}s",
@@ -1882,54 +1333,18 @@ pub fn switch_audio_native(ps: &mut crate::route::PlaybackSession, pa: &mut supe
     reload_at(ps, pa, pos_ns) // fresh direct-play Load at the current position, new audio stream
 }
 
-/// Reload the pipeline for a MODE/CODEC change — an audio-track switch on a direct-play HEVC
-/// item forces a transcode (H264/AC3), so the pipeline must be re-Loaded with the H264 payload
-/// (feeding H264 into the H265-configured pipeline stalls). Unlike reload_at, the transcode
-/// start.mkv is already 0-based at `&offset`, so no av_seek — just set disp_base to the offset.
-/// route::retranscode has already set the URL + session + STREAM_VCODEC=h264 before this call.
-pub fn reload_transcode(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, offset_ns: i64) -> ReloadOutcome {
-    if crate::route::url(ps).is_empty() {
-        // The other abandonment path with the same hole: `request_seek` armed the spinner and
-        // nothing here would ever disarm it. See `player::abandon_seek`.
-        crate::player::abandon_seek();
-        log("reload_transcode: no url (ignored)");
-        settle_missing_route_start();
-        return ReloadOutcome::NoRoute;
-    }
-    match reload_transcode_start(ps, pa, offset_ns) {
-        Some(outcome) if outcome.accepted() => ReloadOutcome::Started,
-        Some(BufferfeedStartOutcome::Failed) | None => ReloadOutcome::StartFailed,
-        // `start_bufferfeed_for` always creates a fresh attempt, but keep the conversion total if
-        // that implementation changes.
-        Some(BufferfeedStartOutcome::AlreadyRunning) => ReloadOutcome::Started,
-        Some(BufferfeedStartOutcome::Launched(_)) => unreachable!("accepted handled above"),
-    }
-}
 
-/// The same reload edge as [`reload_transcode`], retaining the exact physical Load token for the
-/// foreground state machine. Used only after a synchronous Original-open failure has restored its
-/// HLS candidate; ordinary callers keep the coarser [`ReloadOutcome`].
-pub fn reload_transcode_tracked(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, offset_ns: i64) -> BufferfeedStartOutcome {
-    if crate::route::url(ps).is_empty() {
-        crate::player::abandon_seek();
-        log("reload_transcode_tracked: no url (ignored)");
-        settle_missing_route_start();
-        return BufferfeedStartOutcome::Failed;
-    }
-    reload_transcode_start(ps, pa, offset_ns).unwrap_or(BufferfeedStartOutcome::Failed)
-}
 
 /// Stop playback: unblock+join threads, unload+destruct the pipeline, release the
 /// video plane, reset all state so a fresh start_bufferfeed() can restart.
-pub fn stop_bufferfeed(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter) {
+pub fn stop_bufferfeed(ps: &mut crate::playback::PlaybackSession, pa: &mut super::adapter::PlayerAdapter) {
     teardown(ps, pa, false);
 }
 
-/// Suspend for an app-switch: tear the pipeline down (webOS reclaims the video plane while we're
-/// backgrounded) but PRESERVE the playback session — keep the URL + transcode session, and
-/// don't scrobble "stopped". This makes the foreground restore a clean same-item reload
+/// Suspend for an app-switch: tear the pipeline down but PRESERVE the playback session — keep the
+/// URL. This makes the foreground restore a clean same-item reload
 /// (begin_resume + start_bufferfeed), the known-good path, instead of resurrecting a stopped session.
-pub fn suspend_bufferfeed(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter) {
+pub fn suspend_bufferfeed(ps: &mut crate::playback::PlaybackSession, pa: &mut super::adapter::PlayerAdapter) {
     teardown(ps, pa, true);
 }
 
@@ -1937,9 +1352,9 @@ pub fn suspend_bufferfeed(ps: &mut crate::route::PlaybackSession, pa: &mut super
 /// observed. A later route action may have replaced it between `player::pump` and the app poll;
 /// tearing down unconditionally there would destroy the healthy replacement.
 pub fn suspend_bufferfeed_if_attempt(
-    ps: &mut crate::route::PlaybackSession,
+    ps: &mut crate::playback::PlaybackSession,
     pa: &mut super::adapter::PlayerAdapter,
-    attempt: crate::route::RouteStartAttempt,
+    attempt: crate::playback::RouteStartAttempt,
 ) -> bool {
     let owns_attempt = pa.engine()
         .map(|engine| engine.route_start == attempt)
@@ -1950,128 +1365,40 @@ pub fn suspend_bufferfeed_if_attempt(
     owns_attempt
 }
 
-/// The teardown body. `for_reload` = this is a direct-play seek reload (reload_at), NOT a real
-/// stop: preserve the playback session so start_bufferfeed can restart the SAME item — skip
-/// the "stopped" timeline scrobble, the server transcode stop, and the URL clear.
-fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, for_reload: bool) {
-    // A prepared route whose native start failed has no Engine but still owns its exact PMS
-    // resource and Session projection. A real stop must retire that ownership exactly once;
-    // returning here used to leak the candidate forever while the reducer remained Failed.
+/// The teardown body. `for_reload` = this is a seek reload (`reload_at`) or an app-switch
+/// suspend, NOT a real stop: preserve the playback session so `start_bufferfeed` can restart the
+/// SAME file, and keep the URL.
+fn teardown(ps: &mut crate::playback::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, for_reload: bool) {
+    // A start whose native half failed has no Engine; a real stop still retires its session.
     if !pa.is_live() {
-        // An Engine-less flight (a resume, or a rollback no Engine waits on) has no Engine to take down with it, and an app-switch suspend
-        // keeps the session for the foreground restore, which reserves its own start transaction:
-        // drop the flight as a live Engine's suspend would (`Stable`, landing discarded, only its
-        // replacement stopped). A full stop below clears it itself.
-        if for_reload && crate::route::engineless_flight_outstanding() {
-            crate::route::begin_engine_teardown(true);
-        }
         if !for_reload {
-            crate::route::scrobble_stop(ps, None, None);
-            crate::route::begin_engine_teardown(false);
-            crate::route::drop_original_recovery(ps);
-            crate::route::clear_url(ps);
+            crate::playback::begin_engine_teardown(false);
+            crate::playback::clear_url(ps);
             SHARED.reset_session();
             TX.reset();
-            super::claim_hold::clear();
             // Nothing here is asynchronous, so the fence `begin_engine_teardown` just raised is
-            // already spent. Publish the completed stop rather than latching `Stopping` — see
-            // `route::finish_engine_teardown`.
-            crate::route::finish_engine_teardown();
+            // already spent: publish the completed stop rather than latching `Stopping`.
+            crate::playback::finish_engine_teardown();
         }
         return;
     }
-    // A preview Load that has not returned yet must not be joined on this frame. Bind is skipped
-    // while the flag is set, so the picture never reaches the plane. The next halt joins once
-    // the thread has already finished.
-    if crate::route::is_preview(ps) {
-        if let Some(eng) = pa.engine() {
-            let loading = eng.stage == Stage::Loading;
-            let finished = eng.load_th.as_ref().is_none_or(|t| t.is_finished());
-            if crate::player::preview::defer_media_join(loading, finished) {
-                eng.preview_abandon = true;
-                return;
-            }
-        }
-    }
-    // Revoke every worker ticket before asking those workers to stop. This is the synchronization
-    // boundary that makes a late HLS candidate/fallback an ordinary stale event instead of a
-    // mutation of the route the next Load is about to own.
-    crate::route::begin_engine_teardown(for_reload);
-    SHARED.stop_hls_clock();
+    // Fence the reducer before asking the workers to stop.
+    crate::playback::begin_engine_teardown(for_reload);
     let mut eng = pa.take().expect("main-thread live check and take are one transaction");
-    let stream = matches!(eng.source, Source::Stream { .. });
 
-    // capture the final-position report BEFORE teardown zeroes playpos/duration (a reload is
-    // not a stop — don't scrobble "stopped", it would falsely pause/mark-watched the item)
-    // **The one place a playback really ENDS.** `for_reload` covers a direct-play seek reload, an
-    // ABR rung change and an app-switch suspend — each of which destroys an ENGINE and keeps the
-    // playback — so reporting an ending on any of them would turn the completion rate into a
-    // measure of how often people scrub. Read before the teardown below zeroes both values, for
-    // the same reason `final_report` is.
-    if !for_reload {
-        crate::player::report::ended(
-            ps,
-            SHARED.playpos_ns.load(Ordering::Relaxed),
-            SHARED.duration_ns.load(Ordering::Relaxed),
-        );
+    // 1. unblock the demuxer: abort BOTH lanes, in case it is parked in aq_push on a full one.
+    for q in [eng.aq_video.as_mut(), eng.aq_audio.as_mut()].into_iter().flatten() {
+        crate::aq::aq_abort(&mut **q);
     }
-    let final_report = if for_reload {
-        None
-    } else {
-        let rk = crate::route::cur_rk(ps);
-        let dur = SHARED.duration_ns.load(Ordering::Relaxed);
-        if !rk.is_empty() && dur > 0 {
-            Some((
-                rk,
-                SHARED.playpos_ns.load(Ordering::Relaxed) / 1_000_000,
-                dur / 1_000_000,
-            ))
-        } else {
-            None
-        }
-    };
-
-    // The side subtitle reader first: it reads the original Part over its own transport and must
-    // be gone (its socket shut, its cues cleared) before the demux it was paired with is joined.
-    super::subside::stop(if for_reload { "reload" } else { "stop" });
-    // 1. unblock every thread (abort queues, close the demux socket)
-    if let Some(st) = eng.report_stop.take() {
-        st.stop(); // this reporter's own signal — unaffected by the reset_session below
-    }
-    if stream {
-        // abort BOTH lanes: unblock the demux if it's parked in aq_push on a full lane
-        for q in [eng.aq_video.as_mut(), eng.aq_audio.as_mut()]
-            .into_iter()
-            .flatten()
-        {
-            crate::aq::aq_abort(&mut **q);
-        }
-        let p = SHARED.hs_ptr.load(Ordering::Acquire);
-        if !p.is_null() {
-            // shutdown, not close: the demux thread is still inside recv here and is joined
-            // below. Closing now would free the fd number for another thread to claim while
-            // this one is still reading it. The real close happens after the join.
-            plx_net::stream::http_shutdown(p);
-        }
-        // …and the same interrupt for the OTHER transport. An https demux is parked in
-        // `curl_multi_wait`, where no `shutdown(2)` of ours can reach it — this writes a byte to
-        // the wake pipe it is polling. A no-op when the live source is a plaintext socket, or when
-        // there is none; exactly one of these two lines ever has anything to do. `curlio`'s module
-        // doc explains why the handle lives in a registry rather than being passed up to here.
-        crate::curlio::abort_active();
-    }
-    // 2. JOIN every worker before freeing anything they hold raw ptrs into
-    // Through `task::join` so a stall leaves a number behind: this is the main thread, and every
-    // teardown freeze the engine has had was one of these three.
+    // 2. JOIN every worker before freeing anything they hold raw ptrs into. Through `task::join`
+    // so a stall leaves a number behind: this is the main thread.
     if let Some(t) = eng.stream_th.take() {
         plx_base::task::join("demux", t);
     }
-    // A Load the D.1.4 budget already gave up on, still inside `sf_load`: do NOT join it here.
-    // This is the main thread, and on the set where the budget fires the call may never return —
-    // BACK from the timeout read-out used to freeze the app on this line. The native object is
-    // parked instead and released by `reap_abandoned_load` once the thread has returned; nothing
-    // below may touch it before then (issue #74). Every other Load keeps the ordinary ordering:
-    // one that has returned joins at once, and one that is merely slow is still joined.
+    // A Load the budget already gave up on, still inside `sf_load`: do NOT join it here, or BACK
+    // from the timeout read-out would freeze the app on this line. The native object is parked
+    // instead and released by `reap_abandoned_load` once the thread has returned. Every other Load
+    // keeps the ordinary ordering: one that has returned joins at once, one merely slow is joined.
     let abandoned_load = match eng.load_th.take() {
         Some(t) if !t.is_finished() && SHARED.load_timed_out.load(Ordering::Acquire) => Some(t),
         Some(t) => {
@@ -2080,33 +1407,6 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
         }
         None => None,
     };
-    // 2b. every reader is now joined, so this thread is the sole owner: do the real close.
-    // (Before the join it could only shutdown — see step 1.)
-    if stream {
-        let p = SHARED.hs_ptr.load(Ordering::Acquire);
-        if !p.is_null() {
-            plx_net::stream::http_close(p);
-        }
-    }
-    // Final position report (state=stopped, so the server commits the resume point) + the
-    // server-side transcode stop, both dispatched to a worker. They used to run inline HERE and
-    // twelve lines below — two blocking PMS round trips on the SDL thread, ~17 s each worst case,
-    // on 100% of real stops. `scrobble_stop` reads and clears route's session statics on THIS
-    // thread and hands the worker owned copies; `plex_run` drains it at exit so the report still
-    // lands. Skipped for a reload, which is not a stop.
-    // The reporter is NOT joined here. Its handle rides out with the scrobble worker, which
-    // joins it before posting `stopped` — so the last `playing` report still lands first, but the
-    // MAIN thread stops paying for it. It parked the frame loop for the remainder of SO_RCVTIMEO
-    // whenever that POST had stalled (measured: `THREADJOIN timeline 6974ms`, tools/netcond.py in
-    // `stall@/:/timeline` — whose scope was broken until 2026-08-23, so that run stalled EVERY
-    // connection. The named `THREADJOIN` line is what keeps the attribution good, and step 1 above
-    // is why: demux and the AU lanes are woken before they are joined, so `timeline` was the only
-    // one that could park). Safe to outlive the Engine: the reporter owns `ReportStop` and a
-    // `TimelineLease`, samples only SHARED clock state, and the route reducer revalidates the lease
-    // before each network effect.
-    if !for_reload {
-        crate::route::scrobble_stop(ps, final_report, eng.report_th.take());
-    }
     // 3. Release the native object (see `release_native_object` for the proof chain), unless its
     // Load is still in flight — then hand it, its thread and its payload to the adapter.
     if let Some(load_th) = abandoned_load {
@@ -2131,62 +1431,27 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
         release_native_object(pa.mt(), eng.native_epoch);
     }
     // 4. drain + destroy both queues (drain_aq also clears both pendings)
-    if stream {
-        drain_aq(&mut eng);
-        for q in [eng.aq_video.as_mut(), eng.aq_audio.as_mut()]
-            .into_iter()
-            .flatten()
-        {
-            crate::aq::aq_destroy(&mut **q);
-        }
+    drain_aq(&mut eng);
+    for q in [eng.aq_video.as_mut(), eng.aq_audio.as_mut()].into_iter().flatten() {
+        crate::aq::aq_destroy(&mut **q);
     }
-    // 5. reset shared + transport. On a real stop also stop the server transcode + clear the
-    // URL; on a reload KEEP them so start_bufferfeed restarts the same item (a direct-play
-    // reload has no transcode session anyway, so the skip only matters for the URL).
-    // The DURATION is a fact about the FILE, and a reload plays the same file: keep it across
-    // the reset so the playbar has a denominator while the demuxer reopens. Without this every
-    // reload-based seek — which on webOS 5+ is EVERY seek, in-place being disabled there — drew
-    // the playhead at position ÷ 0, i.e. the far left, for the few hundred ms until `ff.rs`
-    // re-published it, while the clock beside it (position alone, seeded by `arm_seek`) read
-    // correctly. Reported on an LG C3 (webOS 23). A real stop still zeroes it: the next item is
-    // a new file.
+    // 5. reset shared + transport. The DURATION is a fact about the FILE, and a reload plays the
+    // same file: `reset_session_for_reload` keeps it, so the playbar has a denominator while the
+    // demuxer reopens. A real stop zeroes it and clears the URL: the next item is a new file.
     if for_reload {
         SHARED.reset_session_for_reload();
         TX.reset_for_reload();
     } else {
         SHARED.reset_session();
         TX.reset();
-        super::claim_hold::clear();
-    }
-    if !for_reload {
-        // **The carried link estimate dies with the PLAYBACK, not with the engine** (I8). A reload
-        // is the same item on the same link at a new position — a seek, a quality pick, an
-        // app-switch resume — and re-measuring the link from nothing across one is what made every
-        // skip re-ramp the ladder for ten to twenty seconds.
-        SHARED.clear_abr_seed();
-        // The failure is retained across the rollback reload only; a new playback must not carry
-        // another item's PMS response into its diagnostics.
-        SHARED.clear_abr_failure();
-        // A deferred Original recovery outlives nothing: the playback it belonged to is over, so
-        // there is no frame left that could confirm it and no route left to roll back to. The
-        // encoder it was holding is still running on the server, which is why this RETIRES rather
-        // than forgets — see `route::drop_original_recovery`.
-        crate::route::drop_original_recovery(ps);
-        crate::route::clear_url(ps); // the transcode stop rode out with `scrobble_stop` above
-    } else if let Some(t) = eng.report_th.take() {
-        // A reload posts no `stopped`, so there is nothing to order against: detach. Its own
-        // ReportStop is already set, so it exits after its current POST and cannot be revived by
-        // the next session — which is exactly what the shared flag could not guarantee.
-        drop(t);
-    }
-    // Every worker `begin_engine_teardown` fenced is joined, the native object is retired and the
-    // URL is gone: the stop is COMPLETE, so retire the fence too. A reload keeps its own phase
-    // (`Prepared`/`OriginalTrial`), which is the transaction the caller is about to start.
-    if !for_reload {
-        crate::route::finish_engine_teardown();
+        crate::playback::clear_url(ps);
+        // Every worker is joined, the native object is retired and the URL is gone: the stop is
+        // COMPLETE, so retire the fence too. A reload keeps its own phase, which is the
+        // transaction the caller is about to start.
+        crate::playback::finish_engine_teardown();
     }
     log("stop_bufferfeed: torn down");
-    // Engine (hs/aq boxes, payload) drops here — after all joins
+    // Engine (aq boxes, payload) drops here — after all joins
 }
 
 /// free every queued AU + the held pending one, BOTH lanes (seek + teardown).
@@ -3033,34 +2298,6 @@ fn feed_audio_lane(mt: &MainThread, eng: &mut Engine) {
     }
 }
 
-/// feed the looped `sample.h264` validation sample from the install's runtime root
-/// (continuous PTS @ 23.976).
-pub fn feed_sample(mt: &MainThread, eng: &mut Engine) {
-    let s = match &mut eng.source {
-        Source::Sample(s) => s,
-        _ => return,
-    };
-    let naus = s.au.len();
-    if naus < 2 {
-        return;
-    }
-    let mut fed = 0;
-    while fed < 60 {
-        if s.next >= naus - 1 {
-            s.next = 0;
-            s.loops += 1;
-        }
-        let off = s.au[s.next];
-        let end = s.au[s.next + 1];
-        let pts = (s.loops * (naus as i64 - 1) + s.next as i64) * 41708333;
-        let r = unsafe { sink().feed(mt, s.data[off..].as_ptr(), (end - off) as u32, pts, 1) };
-        if (r as u8) != b'O' {
-            break;
-        }
-        s.next += 1;
-        fed += 1;
-    }
-}
 
 /// Whether the decompiled StarfishMediaAPIs offsets (see the NOR comment in `start_bufferfeed_inner`)
 /// may be trusted for in-place seek. The old-ABI `Feed` is the primary gate: it proves
@@ -3455,131 +2692,7 @@ mod native_lifecycle_host_seam_tests {
 
 #[cfg(test)]
 mod payload_tests {
-    use super::{build_av_payload, with_dolby_hdr_info, with_immersive, SinkEnvelope, PAYLOAD_AV, PAYLOAD_H265, PAYLOAD_V};
-    use plx_data::metadata::Dovi;
-
-    fn p5() -> Dovi {
-        Dovi {
-            present: true,
-            profile: 5,
-            bl_compat: 0,
-            el_present: false,
-            ..Dovi::NONE
-        }
-    }
-
-    fn p8() -> Dovi {
-        Dovi {
-            present: true,
-            profile: 8,
-            bl_compat: 1,
-            el_present: false,
-            ..Dovi::NONE
-        }
-    }
-
-    #[test]
-    fn dv_payload_matches_frozen_route_decision() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
-        assert!(crate::route::set_stream_declaration_for_test(
-            &mut ps,
-            "hevc",
-            "eac3",
-            23.976,
-            p8(),
-            false,
-            plx_platform::devcaps::dv::DvCapability::Supported,
-        ));
-        let payload = build_av_payload(
-            &ps,
-            "H265",
-            "AC3 PLUS",
-            SinkEnvelope { w: 3840, h: 2160, fps: 60 },
-        );
-        assert!(payload.contains("DolbyHdrInfo"), "{payload}");
-        assert!(payload.contains(r#""profileId":8"#), "{payload}");
-
-        assert!(crate::route::set_stream_declaration_for_test(
-            &mut ps,
-            "hevc",
-            "eac3",
-            23.976,
-            p8(),
-            false,
-            plx_platform::devcaps::dv::DvCapability::Unsupported,
-        ));
-        let payload = build_av_payload(
-            &ps,
-            "H265",
-            "AC3 PLUS",
-            SinkEnvelope { w: 3840, h: 2160, fps: 60 },
-        );
-        assert!(!payload.contains("DolbyHdrInfo"), "{payload}");
-    }
-
-    #[test]
-    fn late_capability_result_does_not_change_installed_decision() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
-        assert!(crate::route::set_stream_declaration_for_test(
-            &mut ps,
-            "hevc",
-            "eac3",
-            23.976,
-            p8(),
-            false,
-            plx_platform::devcaps::dv::DvCapability::Unknown,
-        ));
-        let fresh = p8().presentation(
-            true,
-            plx_platform::devcaps::dv::DvCapability::Supported,
-            true,
-        );
-        assert!(fresh.declared().is_some(), "a subsequent decision sees Supported");
-        assert_eq!(
-            crate::route::stream_dv_presentation(&ps),
-            plx_data::metadata::DvPresentation::NotDv,
-        );
-        let payload = build_av_payload(
-            &ps,
-            "H265",
-            "AC3 PLUS",
-            SinkEnvelope { w: 3840, h: 2160, fps: 60 },
-        );
-        assert!(!payload.contains("DolbyHdrInfo"), "{payload}");
-    }
-
-    #[test]
-    fn refused_synthetic_p5_start_cannot_be_retried_past_validation() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
-        let play = crate::player::playurl::PlayUrl {
-            url: "http://192.0.2.1/refused-p5.mkv".into(),
-            vcodec: "hevc".into(),
-            acodec: "eac3".into(),
-            fps: 23.976,
-            dovi: crate::player::playurl::PlayDovi {
-                profile: 5,
-                bl_compat: 0,
-                el_present: false,
-            },
-            atmos: false,
-            auto_source_kbps: 0,
-            auto_hls_base: String::new(),
-            auto_start_hls: false,
-            source_raster: None,
-        };
-
-        for retry in 0..2 {
-            assert_eq!(
-                super::install_synthetic_playurl(&mut ps, &play),
-                Err(crate::route::RouteStartResult::StartFailed),
-                "retry {retry} must stop before Load",
-            );
-            assert!(
-                !crate::route::has_url(&ps),
-                "retry {retry} left the rejected URL installed",
-            );
-        }
-    }
+    use super::{build_av_payload, SinkEnvelope, PAYLOAD_AV, PAYLOAD_H265, PAYLOAD_V};
 
     /// **Every Load payload must carry the `appId` placeholder, exactly once**, because that key
     /// is what `with_window_id` splices the webOS 5+ `option.windowId` onto — without it the
@@ -3655,200 +2768,6 @@ mod payload_tests {
         assert!(PAYLOAD_AV.contains(r#""provider":"plxnative"},"streamQualityInfo""#));
     }
 
-    /// **What we actually send for a Profile 5 direct play.** The three fields at the path the
-    /// television's own parser reads, `profileId` as a bare JSON integer (`getInt` — a quoted "5"
-    /// would leave the pipeline's -1 sentinel), and the whole node inside `contents`.
-    #[test]
-    fn a_declared_profile_5_splices_the_node_into_contents() {
-        // what `build_av_payload` hands it: the AV template with the codec already set to H265,
-        // which is what a native HEVC direct play — the only kind that can be Dolby Vision — sends
-        let base = PAYLOAD_AV.replace(r#""video":"H264""#, r#""video":"H265""#);
-        let out = with_dolby_hdr_info(&base, "H265", p5().presentation(true, plx_platform::devcaps::dv::DvCapability::Supported, true));
-        assert!(
-            out.contains(r#""provider":"plxnative","DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":5}}"#),
-            "{out}"
-        );
-        // the trailing `}` above is `contents` closing: the node is the last key INSIDE it, not a
-        // sibling of `contents` in `externalStreamingInfo`
-        assert!(out.contains(r#""DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":5}},"streamQualityInfo""#));
-        assert!(
-            !out.contains(r#""profileId":"5""#),
-            "getInt wants an integer, not a string"
-        );
-        // the codec string stays `H265` — `getVideoCaps` maps it to `video/x-h265` and falls
-        // THROUGH into its Dolby Vision tail; there is no DVHE/DVH1 entry in that table, and
-        // inventing one would describe a stream the pipeline has no decoder row for
-        assert!(out.contains(r#""video":"H265""#), "{out}");
-        assert!(!out.contains("DVHE") && !out.contains("dvh1"), "{out}");
-        // and NOTHING else moved: take the node back out and the payload is what came in
-        const NODE: &str =
-            r#","DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":5}"#;
-        assert_eq!(out.replace(NODE, ""), base);
-    }
-
-    /// The three ways the node is NOT sent, each of which must leave the payload byte-identical:
-    /// a file with no Dolby Vision, a Dolby Vision file we refuse (the dual-layer P7 — declaring a
-    /// layer we cannot feed is worse than refusing it), and the disarmed trigger, which is what a
-    /// `RELEASE=1` build compiles in and what every boot without `/tmp/plxnative-dv` does today.
-    #[test]
-    fn nothing_is_spliced_unless_the_stream_is_declared() {
-        let p7 = Dovi {
-            present: true,
-            profile: 7,
-            bl_compat: 6,
-            el_present: true,
-            ..Dovi::NONE
-        };
-        for dv in [
-            Dovi::NONE.presentation(true, plx_platform::devcaps::dv::DvCapability::Supported, true),
-            p7.presentation(true, plx_platform::devcaps::dv::DvCapability::Supported, true),
-            p5().presentation(false, plx_platform::devcaps::dv::DvCapability::Supported, true),
-        ] {
-            assert_eq!(with_dolby_hdr_info(PAYLOAD_AV, "H265", dv), PAYLOAD_AV);
-        }
-    }
-
-    /// **What we actually send for a Dolby Atmos track**, at the key path `libpf` reads
-    /// (`option.externalStreamingInfo.contents.immersive`) and with the value `libcbe` — the
-    /// television's own working client — puts there. Same anchor and same shape as the Dolby
-    /// Vision node, which is the point: they are one envelope with two statements in it.
-    #[test]
-    fn an_atmos_track_splices_immersive_into_contents() {
-        let out = with_immersive(PAYLOAD_AV, "AC3 PLUS", true);
-        assert!(
-            out.contains(r#""provider":"plxnative","immersive":"ATMOS"}"#),
-            "{out}"
-        );
-        // the trailing `}` is `contents` closing — the node is INSIDE it, not a sibling of
-        // `contents` in `externalStreamingInfo`, which is where libpf would never look
-        assert!(
-            out.contains(r#""immersive":"ATMOS"},"streamQualityInfo""#),
-            "{out}"
-        );
-        // and nothing else moved
-        assert_eq!(out.replace(r#","immersive":"ATMOS""#, ""), PAYLOAD_AV);
-    }
-
-    /// The other side of it, and the one that matters for the whole library: a track with no
-    /// Atmos leaves the payload byte-identical. Every ordinary AAC/AC3 film takes this path, so a
-    /// splice that fired unconditionally would tell the television that all of them are immersive.
-    #[test]
-    fn a_plain_track_splices_nothing() {
-        assert_eq!(with_immersive(PAYLOAD_AV, "AC3 PLUS", false), PAYLOAD_AV);
-    }
-
-    /// A source Atmos flag that accidentally survives a full transcode must still be rejected at
-    /// the final payload seam.  HLS carries AAC and ordinary AC3 carries no E-AC3 JOC extension;
-    /// telling the system player either is immersive is a false stream declaration.
-    #[test]
-    fn an_atmos_declaration_never_rides_a_non_eac3_payload() {
-        for audio in ["AAC", "AC3"] {
-            assert_eq!(
-                with_immersive(PAYLOAD_AV, audio, true),
-                PAYLOAD_AV,
-                "{audio}"
-            );
-        }
-    }
-
-    /// **Both nodes at once**, which is the real case — the Profile 5 test item is Dolby Vision
-    /// AND Dolby Atmos, and it is what the television shows two read-outs for. They are spliced by
-    /// two independent functions at ONE anchor, so this is the test that says the second does not
-    /// land inside the first: `immersive` must be a sibling KEY of `DolbyHdrInfo` inside
-    /// `contents`, never a fourth field of the `DolbyHdrInfo` object.
-    #[test]
-    fn dolby_vision_and_atmos_are_siblings_inside_contents() {
-        let base = PAYLOAD_AV.replace(r#""video":"H264""#, r#""video":"H265""#);
-        let out = with_immersive(
-            &with_dolby_hdr_info(&base, "H265", p5().presentation(true, plx_platform::devcaps::dv::DvCapability::Supported, true)),
-            "AC3 PLUS",
-            true,
-        );
-        assert!(
-            out.contains(
-                r#""provider":"plxnative","immersive":"ATMOS","DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":5}}"#
-            ),
-            "{out}"
-        );
-        // the DolbyHdrInfo object still has exactly its three fields — `immersive` did not get
-        // swept inside it by an anchor both functions matched
-        assert!(!out.contains(r#""profileId":5,"immersive""#), "{out}");
-        assert_eq!(out.matches(r#""immersive":"ATMOS""#).count(), 1);
-        assert_eq!(out.matches("DolbyHdrInfo").count(), 1);
-    }
-
-    /// The consistency guard: a Dolby Vision declaration only ever rides an HEVC elementary
-    /// stream, so a payload built for H264 must not carry one. Unreachable by construction — the
-    /// route records the DV record on the direct-play branch, whose codec is the file's own hevc —
-    /// which is exactly why it is asserted rather than trusted: the `sourceInfo` envelope is
-    /// parsed before anything decodes, and a malformed one wedges the sink instead of failing.
-    #[test]
-    fn a_declaration_never_rides_a_non_hevc_payload() {
-        assert_eq!(
-            with_dolby_hdr_info(PAYLOAD_AV, "H264", p5().presentation(true, plx_platform::devcaps::dv::DvCapability::Supported, true)),
-            PAYLOAD_AV
-        );
-    }
-}
-
-/// A cropped diagnostic line cannot report what it never wrote down. `op_audio_enhancement_burn`
-/// in `tests/run.py` proves a Burn actually happened by grepping the app's own
-/// `stream: <origin> path=...` line for `subtitleStreamID=` and `subtitles=burn` — the only
-/// on-device evidence of the query PMS actually received. Device runs of
-/// `audio_enhancement_burns_embedded_subtitle` (rk 1804, 2026-09) show the grader failing even
-/// though [`crate::route::decision`]'s own tests prove the Burn route is chosen correctly: the
-/// line was cut to 80 characters, which lands inside `mediaIndex=`/`partIndex=`/`protocol=...`
-/// for a realistic transcode URL, well before either marker.
-#[cfg(test)]
-mod stream_open_log_line_tests {
-    use super::stream_open_log_line;
-
-    /// A transcode URL shaped like the one PMS returns for this project's Burn route: video
-    /// re-encode params, then `audioStreamID`, then `boostDialog`/`normalizeLoudness`, then
-    /// `subtitleStreamID`/`subtitles=burn` last — matching `transcoder::transcode_query`'s actual
-    /// build order — followed by the `X-Plex-Token` `Client::with_token` always appends last.
-    fn burn_path() -> String {
-        "/video/:/transcode/universal/start.mkv?path=%2Flibrary%2Fmetadata%2F1804&mediaIndex=0&\
-         partIndex=0&protocol=http&directPlay=0&directStream=0&videoResolution=3840x2160&\
-         maxVideoBitrate=40000&videoCodec=hevc&audioCodec=eac3&audioStreamID=10976&\
-         boostDialog=0&normalizeLoudness=1&subtitleStreamID=10980&subtitleSize=100&\
-         subtitles=burn"
-            .to_string()
-    }
-
-    #[test]
-    fn logged_line_carries_the_burn_evidence_the_grader_looks_for() {
-        let path = burn_path();
-        let line = stream_open_log_line("plex.direct:32400", &path);
-        assert!(
-            line.contains("subtitleStreamID=10980"),
-            "log line dropped subtitleStreamID before the grader could see it: {line}"
-        );
-        assert!(
-            line.contains("subtitles=burn"),
-            "log line dropped subtitles=burn before the grader could see it: {line}"
-        );
-    }
-
-    /// The un-truncated path still passes through `plx_base::eventlog::log`'s `scrub_local` pass, which is
-    /// the ONLY place a token may be redacted — so leaving the full path in is safe precisely
-    /// because `Client::with_token` always appends `X-Plex-Token=` last and `scrub_local` already
-    /// redacts it by value. This is the end-to-end check that removing the truncation did not
-    /// also remove the credential backstop.
-    #[test]
-    fn full_path_still_has_its_token_redacted_by_the_existing_scrub_pass() {
-        let path = format!("{}&X-Plex-Token=aBcD1234xyzQ", burn_path());
-        let line = stream_open_log_line("plex.direct:32400", &path);
-        let scrubbed = plx_base::eventlog::scrub::scrub_local(&line);
-        assert!(
-            !scrubbed.contains("aBcD1234xyzQ"),
-            "token leaked into the event log: {scrubbed}"
-        );
-        assert!(
-            scrubbed.contains("subtitleStreamID=10980") && scrubbed.contains("subtitles=burn"),
-            "scrub pass ate the burn evidence along with the token: {scrubbed}"
-        );
-    }
 }
 
 /// **The 94-second freeze of 2026-08-29, reduced to the mechanism that caused it.**
@@ -3892,7 +2811,7 @@ mod prime_livelock_tests {
     pub(super) fn engine_after_reload() -> Engine {
         SHARED.ensure_initial_clock_hold_for_test();
         Engine {
-            route_start: crate::route::RouteStartAttempt::fixture(),
+            route_start: crate::playback::RouteStartAttempt::fixture(),
             native_epoch: 0,
             stage: Stage::Streaming,
             video_info_sent: true,
@@ -4675,7 +3594,7 @@ mod lifecycle_clock_tests {
 
     #[test]
     fn stop_without_an_engine_cannot_poison_the_next_initial_hold() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let _serial = plx_base::testlock::serial();
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
             plx_base::task::MainThread::assume()
@@ -4717,12 +3636,12 @@ mod replay_after_stop_tests {
     /// no live Engine to preserve.
     #[test]
     fn a_completed_stop_grants_the_next_start_a_route_owner() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let _serial = plx_base::testlock::serial();
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
             plx_base::task::MainThread::assume()
         });
-        crate::route::reset_player_control_for_test(&ps);
+        crate::playback::reset_player_control_for_test(&ps);
         assert!(
             !pa.is_live(),
             "test requires an empty native-session slot"
@@ -4730,20 +3649,20 @@ mod replay_after_stop_tests {
 
         stop_bufferfeed(&mut ps, &mut pa);
 
-        let start = crate::route::begin_route_start()
+        let start = crate::playback::begin_route_start()
             .expect("a completed stop must grant the replay a start owner");
         assert!(
-            crate::route::prepare_route_start(start),
+            crate::playback::prepare_route_start(start),
             "the replay owns the transaction it was just granted"
         );
-        let attempt = crate::route::claim_route_start_attempt(start)
+        let attempt = crate::playback::claim_route_start_attempt(start)
             .expect("a granted transaction must mint one physical Load attempt");
-        assert!(crate::route::settle_route_start(&mut ps, 
+        assert!(crate::playback::settle_route_start(&mut ps, 
             attempt,
-            crate::route::RouteStartResult::Started
+            crate::playback::RouteStartResult::Started
         ));
 
-        crate::route::reset_player_control_for_test(&ps);
+        crate::playback::reset_player_control_for_test(&ps);
     }
 }
 
@@ -4778,7 +3697,7 @@ mod load_in_flight_tests {
             crate::player::ffi_host::set_load_in_flight_for_test(false);
             SHARED.test_force_native_idle();
             SHARED.reset_session();
-            crate::route::reset_player_control_for_test(crate::route::idle_session_for_test());
+            crate::playback::reset_player_control_for_test(crate::playback::idle_session_for_test());
         }
     }
 
@@ -4825,10 +3744,10 @@ mod load_in_flight_tests {
     /// a real held `sf_load`.
     #[test]
     fn nothing_reaches_the_seam_while_load_is_still_in_flight() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let _serial = plx_base::testlock::serial();
         SHARED.reset_session();
-        crate::route::reset_player_control_for_test(&ps);
+        crate::playback::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         let _cleanup = Cleanup;
@@ -4939,10 +3858,10 @@ mod load_in_flight_tests {
     /// to make impossible, on the one path where the gate can never open again.
     #[test]
     fn losing_the_active_phase_while_still_deferred_fires_the_budget_instead_of_hanging() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let _serial = plx_base::testlock::serial();
         SHARED.reset_session();
-        crate::route::reset_player_control_for_test(&ps);
+        crate::playback::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         let _cleanup = Cleanup;
@@ -5012,10 +3931,10 @@ mod load_in_flight_tests {
     /// without a sleep.
     #[test]
     fn native_load_budget_expiry_fires_load_failed() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let _serial = plx_base::testlock::serial();
         SHARED.reset_session();
-        crate::route::reset_player_control_for_test(&ps);
+        crate::playback::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         let _cleanup = Cleanup;
@@ -5080,10 +3999,10 @@ mod load_in_flight_tests {
     /// pipeline" this fix is about.
     #[test]
     fn native_load_returned_loadcompleted_never_arrives_fires_load_failed() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let _serial = plx_base::testlock::serial();
         SHARED.reset_session();
-        crate::route::reset_player_control_for_test(&ps);
+        crate::playback::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         crate::player::ffi_host::force_object_ready_for_test(true);
@@ -5159,10 +4078,10 @@ mod load_in_flight_tests {
     /// real-concurrency test that this one deliberately does not attempt to replace.
     #[test]
     fn the_gate_is_epoch_scoped() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let _serial = plx_base::testlock::serial();
         SHARED.reset_session();
-        crate::route::reset_player_control_for_test(&ps);
+        crate::playback::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         let _cleanup = Cleanup;
@@ -5227,12 +4146,12 @@ mod load_in_flight_tests {
     fn native_source_correction_ctor_wait_has_an_issued_budget() {
         let _serial = plx_base::testlock::serial();
         SHARED.reset_session();
-        crate::route::reset_player_control_for_test(&crate::route::PlaybackSession::IDLE);
+        crate::playback::reset_player_control_for_test(&crate::playback::PlaybackSession::IDLE);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         let _cleanup = Cleanup;
         let mut pa = super::super::adapter::PlayerAdapter::new(unsafe { plx_base::task::MainThread::assume() });
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let epoch = SHARED.begin_native_session().unwrap();
         pa.install(engine_loading(epoch));
         assert_eq!(unsafe { crate::player::sink().ready(pa.mt()) }, 0);
@@ -5265,13 +4184,13 @@ mod load_in_flight_tests {
     fn native_ready_demux_failure_keeps_precedence_over_the_load_wait() {
         let _serial = plx_base::testlock::serial();
         SHARED.reset_session();
-        crate::route::reset_player_control_for_test(&crate::route::PlaybackSession::IDLE);
+        crate::playback::reset_player_control_for_test(&crate::playback::PlaybackSession::IDLE);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         crate::player::ffi_host::force_object_ready_for_test(true);
         let _cleanup = Cleanup;
         let mut pa = super::super::adapter::PlayerAdapter::new(unsafe { plx_base::task::MainThread::assume() });
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let epoch = SHARED.begin_native_session().unwrap();
         pa.install(engine_loading(epoch));
         crate::player::pump::pump(&mut ps, &mut pa, 1000);
@@ -5291,10 +4210,10 @@ mod load_in_flight_tests {
     #[test]
     fn teardown_after_a_load_timeout_does_not_block_on_the_hung_load() {
         const WATCHDOG: std::time::Duration = std::time::Duration::from_secs(3);
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let _serial = plx_base::testlock::serial();
         SHARED.reset_session();
-        crate::route::reset_player_control_for_test(&ps);
+        crate::playback::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         let _cleanup = Cleanup;
@@ -5377,14 +4296,14 @@ mod load_in_flight_tests {
             assert!(!reap_abandoned_load(&mut pa));
         }
         assert!(pa.has_abandoned_load());
-        let start = crate::route::begin_route_start().expect("a completed stop grants a start owner");
+        let start = crate::playback::begin_route_start().expect("a completed stop grants a start owner");
         // No URL is set, so an unguarded start would answer `NoRoute`; `StartFailed` is the refusal.
         assert_eq!(
             start_bufferfeed_inner(&mut ps, &mut pa, start).err(),
-            Some(crate::route::RouteStartResult::StartFailed),
+            Some(crate::playback::RouteStartResult::StartFailed),
             "a later playback must not be handed the object an abandoned Load still owns"
         );
-        let _ = crate::route::abort_route_start(start, crate::route::RouteStartResult::StartFailed);
+        let _ = crate::playback::abort_route_start(start, crate::playback::RouteStartResult::StartFailed);
         assert_eq!(crate::player::ffi_host::in_flight_calls_for_test(), 0, "{:?}", crate::player::ffi_host::in_flight_verb_for_test());
 
         // Now the Load returns. The next reap releases the object with full evidence (D1, not a
@@ -5418,7 +4337,7 @@ mod load_in_flight_tests {
     /// (`load_failed` + `load_timed_out`), the Load thread is still inside `sf_load`, and the
     /// Engine is installed in `pa`. The state the Auto Original's recovery starts from.
     fn install_engine_with_timed_out_load(
-        ps: &mut crate::route::PlaybackSession,
+        ps: &mut crate::playback::PlaybackSession,
         pa: &mut crate::player::adapter::PlayerAdapter,
     ) {
         let epoch = SHARED.begin_native_session().expect("native session");
@@ -5450,10 +4369,10 @@ mod load_in_flight_tests {
     /// published with no cause, so the report said `unspecified`; the cause is the timeout.
     #[test]
     fn a_recovery_reload_refused_for_an_abandoned_load_still_reports_the_timeout() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let _serial = plx_base::testlock::serial();
         SHARED.reset_session();
-        crate::route::reset_player_control_for_test(&ps);
+        crate::playback::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         let _cleanup = Cleanup;
@@ -5461,7 +4380,7 @@ mod load_in_flight_tests {
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
             plx_base::task::MainThread::assume()
         });
-        crate::route::set_url(&mut ps, "http://127.0.0.1:1/hls/start.m3u8");
+        crate::playback::set_url(&mut ps, "http://127.0.0.1:1/hls/start.m3u8");
         install_engine_with_timed_out_load(&mut ps, &mut pa);
 
         // `land_recovery_flight`'s own two calls: the reload (whose teardown parks the
@@ -5486,10 +4405,10 @@ mod load_in_flight_tests {
     /// object must not be started), but the viewer is told why.
     #[test]
     fn a_fresh_start_refused_for_an_abandoned_load_shows_an_error_with_try_again() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let _serial = plx_base::testlock::serial();
         SHARED.reset_session();
-        crate::route::reset_player_control_for_test(&ps);
+        crate::playback::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         let _cleanup = Cleanup;
@@ -5546,10 +4465,10 @@ mod load_in_flight_tests {
     /// over playing video and `report::tick` sent a bogus `load_timeout`.
     #[test]
     fn a_reload_that_starts_after_a_refused_fresh_start_does_not_keep_the_refusals_error() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let _serial = plx_base::testlock::serial();
         SHARED.reset_session();
-        crate::route::reset_player_control_for_test(&ps);
+        crate::playback::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         let _cleanup = Cleanup;
@@ -5560,8 +4479,8 @@ mod load_in_flight_tests {
         install_engine_with_timed_out_load(&mut ps, &mut pa);
         stop_bufferfeed(&mut ps, &mut pa);
         assert!(pa.has_abandoned_load(), "PRECONDITION FAILED: the Load must be parked");
-        crate::route::set_url(&mut ps, "http://127.0.0.1:1/hls/start.m3u8");
-        crate::route::set_stream_acodec(&mut ps, "aac");
+        crate::playback::set_url(&mut ps, "http://127.0.0.1:1/hls/start.m3u8");
+        crate::playback::set_stream_acodec(&mut ps, "aac");
 
         // The resumed foreground's `PlayerForegroundActuator::start_load`.
         assert_eq!(
@@ -5628,7 +4547,7 @@ mod sink_envelope_tests {
                 assert_eq!(audio_payload_codec(codec), None);
             }
         }
-        let ps = crate::route::PlaybackSession::IDLE;
+        let ps = crate::playback::PlaybackSession::IDLE;
         let payload = build_av_payload(&ps, "H264", "DTS", ENVELOPE_FHD60);
         assert!(payload.contains(r#""audio":"DTS""#));
     }
@@ -5700,7 +4619,7 @@ mod sink_envelope_tests {
 
     #[test]
     fn the_payload_carries_all_three_envelope_numbers() {
-        let ps = crate::route::PlaybackSession::IDLE;
+        let ps = crate::playback::PlaybackSession::IDLE;
         let p = build_av_payload(&ps, "H264", "AAC", ENVELOPE_FHD60);
         assert!(p.contains(r#""maxWidth":1920"#), "{p}");
         assert!(p.contains(r#""maxHeight":1080"#), "{p}");
@@ -5855,16 +4774,16 @@ mod load_refusal_tests {
             SHARED.reset_session();
             // A `Drop` takes no arguments and this test's own session is being dropped beside it;
             // the reducer only needs SOME idle projection to be put back.
-            crate::route::reset_player_control_for_test(crate::route::idle_session_for_test());
+            crate::playback::reset_player_control_for_test(crate::playback::idle_session_for_test());
         }
     }
 
     #[test]
     fn an_asynchronous_load_refusal_is_a_verdict_not_a_black_screen() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let _serial = plx_base::testlock::serial();
         SHARED.reset_session();
-        crate::route::reset_player_control_for_test(&ps);
+        crate::playback::reset_player_control_for_test(&ps);
         let _cleanup = Cleanup;
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
             plx_base::task::MainThread::assume()

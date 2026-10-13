@@ -109,7 +109,7 @@ impl ChaptersState {
 
     pub fn draw(
         &mut self,
-        ps: &plx_media::route::PlaybackSession,
+        ps: &plx_media::playback::PlaybackSession,
         appear: f32,
         measure: &dyn plx_machine::machine::Measure,
         meta: metadata::MetadataView<'_>,
@@ -142,7 +142,7 @@ impl ChaptersState {
             plx_ui::widgets::draw_card(
                 p,
                 card,
-                plx_media::route::item_sid(plx_media::route::cur_sid(ps)).raw(),
+                plx_media::playback::item_sid(plx_media::playback::cur_sid(ps)).raw(),
                 &ch.thumb,
                 (480, 270),
                 CH_RAD,

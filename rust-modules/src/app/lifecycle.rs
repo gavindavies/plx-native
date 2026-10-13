@@ -31,7 +31,7 @@ pub(crate) struct PlayerForegroundActuator<'a> {
 /// (`Pending`), or — once it landed and reloaded — the exact attempt to follow.
 fn foreground_load_start(
     recovery: plx_media::player::ForegroundOriginalRecovery,
-) -> ForegroundLoadStart<plx_media::route::RouteStartAttempt> {
+) -> ForegroundLoadStart<plx_media::playback::RouteStartAttempt> {
     use plx_media::player::ForegroundOriginalRecovery as Recovery;
     match recovery {
         Recovery::NotOriginal | Recovery::RetryPrepared => ForegroundLoadStart::Failed,
@@ -42,23 +42,23 @@ fn foreground_load_start(
 }
 
 impl ForegroundActuator for PlayerForegroundActuator<'_> {
-    type Attempt = plx_media::route::RouteStartAttempt;
+    type Attempt = plx_media::playback::RouteStartAttempt;
 
-    fn prepare_resume(&mut self, ps: &mut plx_media::route::PlaybackSession, resume_ns: i64) -> plx_media::player::ResumeStart {
+    fn prepare_resume(&mut self, ps: &mut plx_media::playback::PlaybackSession, resume_ns: i64) -> plx_media::player::ResumeStart {
         plx_media::player::begin_resume(ps, resume_ns)
     }
 
-    fn land_prepare(&mut self, ps: &mut plx_media::route::PlaybackSession) -> FlightLanding<plx_media::player::ResumeOutcome> {
+    fn land_prepare(&mut self, ps: &mut plx_media::playback::PlaybackSession) -> FlightLanding<plx_media::player::ResumeOutcome> {
         match plx_media::player::land_resume(ps) {
             Some(outcome) => FlightLanding::Landed(outcome),
             // `land_resume` reaped a stale landing first: nothing outstanding means the flight
             // ended (a Back, a newer request) and its ender owns what comes next.
-            None if plx_media::route::resume_flight_outstanding() => FlightLanding::Waiting,
+            None if plx_media::playback::resume_flight_outstanding() => FlightLanding::Waiting,
             None => FlightLanding::Stale,
         }
     }
 
-    fn land_recovery(&mut self, ps: &mut plx_media::route::PlaybackSession) -> FlightLanding<ForegroundLoadStart<Self::Attempt>> {
+    fn land_recovery(&mut self, ps: &mut plx_media::playback::PlaybackSession) -> FlightLanding<ForegroundLoadStart<Self::Attempt>> {
         use plx_media::player::RollbackLanding;
         match plx_media::player::land_engineless_rollback(ps, self.pa) {
             RollbackLanding::Waiting => FlightLanding::Waiting,
@@ -75,7 +75,7 @@ impl ForegroundActuator for PlayerForegroundActuator<'_> {
         }
     }
 
-    fn start_load(&mut self, ps: &mut plx_media::route::PlaybackSession) -> ForegroundLoadStart<Self::Attempt> {
+    fn start_load(&mut self, ps: &mut plx_media::playback::PlaybackSession) -> ForegroundLoadStart<Self::Attempt> {
         let first = plx_media::player::start_bufferfeed_tracked(ps, self.pa);
         if matches!(first, plx_media::player::BufferfeedStartOutcome::Failed) {
             // A synchronous failure inside an Original trial has no Engine for player::pump to
@@ -94,20 +94,20 @@ impl ForegroundActuator for PlayerForegroundActuator<'_> {
     }
 
     fn load_status(&mut self, attempt: Self::Attempt) -> ForegroundLoadStatus<Self::Attempt> {
-        match plx_media::route::route_start_status(attempt) {
-            plx_media::route::RouteStartStatus::Pending => ForegroundLoadStatus::Pending,
-            plx_media::route::RouteStartStatus::Started => ForegroundLoadStatus::Started,
-            plx_media::route::RouteStartStatus::Failed => ForegroundLoadStatus::Failed,
-            plx_media::route::RouteStartStatus::Superseded(replacement) => {
+        match plx_media::playback::route_start_status(attempt) {
+            plx_media::playback::RouteStartStatus::Pending => ForegroundLoadStatus::Pending,
+            plx_media::playback::RouteStartStatus::Started => ForegroundLoadStatus::Started,
+            plx_media::playback::RouteStartStatus::Failed => ForegroundLoadStatus::Failed,
+            plx_media::playback::RouteStartStatus::Superseded(replacement) => {
                 ForegroundLoadStatus::Superseded(replacement)
             }
-            plx_media::route::RouteStartStatus::Stale => ForegroundLoadStatus::Stale,
+            plx_media::playback::RouteStartStatus::Stale => ForegroundLoadStatus::Stale,
         }
     }
 
     fn after_load(
         &mut self,
-        ps: &mut plx_media::route::PlaybackSession,
+        ps: &mut plx_media::playback::PlaybackSession,
         attempt: Option<Self::Attempt>,
         clock: ForegroundClock,
         started: bool,

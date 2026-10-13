@@ -154,7 +154,7 @@ pub(crate) fn on_auto_repeat(sym: c_uint, ok_armed: bool, press: &mut plx_ui::pr
 /// stamp is a local read only by arms that run in the same iteration, so an unbound press cannot
 /// carry it anywhere.
 pub(crate) unsafe fn begin_fresh_press(
-    ps: &plx_media::route::PlaybackSession,
+    ps: &plx_media::playback::PlaybackSession,
     key: Key,
     sym: c_uint,
     wcode: c_uint,
@@ -186,7 +186,7 @@ pub(crate) unsafe fn begin_fresh_press(
 /// because nothing reachable from a test calls it and the linker dead-strips it). This half touches
 /// no SDL at all, so the invariant is gradeable by `make check` instead of only by a television.
 pub(crate) fn note_global_press(
-    ps: &plx_media::route::PlaybackSession,
+    ps: &plx_media::playback::PlaybackSession,
     sym: c_uint,
     wcode: c_uint,
     now: u32,
@@ -224,7 +224,7 @@ mod unsupported_key_tests {
     /// `(a click is still armed, the HUD is still dismissed)`. `press::*`, `hud_until()` and
     /// `hud_until()` and `paused()` are crate globals, so every caller holds `testlock::serial()`;
     /// the press is the test's own `Press`.
-    fn press(ps: &plx_media::route::PlaybackSession, sym: c_uint, wcode: c_uint) -> (bool, bool) {
+    fn press(ps: &plx_media::playback::PlaybackSession, sym: c_uint, wcode: c_uint) -> (bool, bool) {
         let mut hud = HudState::IDLE;
         let mut ok_armed = true; // a click is in flight, as if OK were still down on a card
         hud.dismissed = true; // …and the transport was hidden by hand (UP from the control row)
@@ -240,7 +240,7 @@ mod unsupported_key_tests {
     /// click it slid off. BACK is the case to use — it is not OK, so it takes the abort branch.
     #[test]
     fn a_bound_key_still_wakes_the_hud_and_aborts_the_click() {
-        let ps = plx_media::route::PlaybackSession::IDLE;
+        let ps = plx_media::playback::PlaybackSession::IDLE;
         let _g = plx_base::testlock::serial();
         let (armed, dismissed) = press(&ps, SDLK_ESCAPE, 0);
         assert!(
@@ -256,7 +256,7 @@ mod unsupported_key_tests {
     /// scancode takes the same branch.
     #[test]
     fn an_unsupported_key_wakes_nothing_and_abandons_nothing() {
-        let ps = plx_media::route::PlaybackSession::IDLE;
+        let ps = plx_media::playback::PlaybackSession::IDLE;
         let _g = plx_base::testlock::serial();
         for (sym, wcode, what) in [
             (0, 269, "HOME"),
@@ -274,7 +274,7 @@ mod unsupported_key_tests {
     /// rather than something a reader finds.
     #[test]
     fn a_number_key_counts_as_bound() {
-        let ps = plx_media::route::PlaybackSession::IDLE;
+        let ps = plx_media::playback::PlaybackSession::IDLE;
         let _g = plx_base::testlock::serial();
         let (armed, dismissed) = press(&ps, b'5' as c_uint, 34);
         assert!(!armed);
@@ -295,7 +295,7 @@ mod unsupported_key_tests {
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) unsafe fn key_ok(
-    ps: &plx_media::route::PlaybackSession,
+    ps: &plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     now: u32,
     _ptr: &mut Pointer,
@@ -355,7 +355,7 @@ pub(crate) unsafe fn key_ok(
 /// an ordinary BACK on the NEW screen — the press is never dropped, only ever spent on exactly one
 /// of the two.
 pub(crate) fn key_back(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
 ) {

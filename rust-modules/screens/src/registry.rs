@@ -12,9 +12,9 @@ use plx_ui::screen::{Mounter, ReturnState, Screen};
 
 /// The application's effects.
 pub enum AppFx {
-    /// One live player setting's pick (`plx_media::route::Choice`): the app writes it through the
+    /// One live player setting's pick (`plx_media::playback::Choice`): the app writes it through the
     /// media door, and the sender learns whether the write was durable.
-    Preferences(plx_media::route::Choice, std::sync::mpsc::Sender<bool>),
+    Preferences(plx_media::playback::Choice, std::sync::mpsc::Sender<bool>),
     /// Library-page requests, executed by the navigation bridge.
     Content(ContentReq),
     /// Player-route requests — what an overlay panel on the player's own `ModalStack` asks of the
@@ -184,7 +184,7 @@ pub trait MetadataLike: AppLike + Sized {
 /// Player machine's decisions through it; a change is asked for as an effect (`AppFx::Player`),
 /// because the publication is a copy and there is no `&mut` on this path by construction.
 pub trait PlayerLike: AppLike<Memory = PageMemory> + Sized {
-    fn session<'a>(cx: &Cx<'a, Self>) -> &'a plx_media::route::PlaybackSession;
+    fn session<'a>(cx: &Cx<'a, Self>) -> &'a plx_media::playback::PlaybackSession;
 }
 
 /// The application's messages.
@@ -522,7 +522,7 @@ where
                 crate::player::overlay::PlayerOverlayScreen::new_with(
                     H::session(cx), H::metadata(cx), entry, arg.kind,
                     // The search asks the playing item's SERVER; a local file has none.
-                    H::subtitle_search(cx).is_some() && !plx_media::localfile::is_file_url(&plx_media::route::url(H::session(cx)))),
+                    H::subtitle_search(cx).is_some() && !plx_media::localfile::is_file_url(&plx_media::playback::url(H::session(cx)))),
             ),
             AppArg::Player => {
                 let mut page = crate::player::PlayerScreen::new(entry);

@@ -923,10 +923,7 @@ dependencies = [
  "plx_base",
  "plx_data",
  "plx_machine",
- "plx_net",
  "plx_platform",
- "plx_plex",
- "plx_telemetry",
  "serde",
  "serde_json",
 ]
@@ -960,10 +957,7 @@ dependencies = [
  "plx_gfx",
  "plx_machine",
  "plx_media",
- "plx_net",
  "plx_platform",
- "plx_plex",
- "plx_telemetry",
  "serde",
  "serde_json",
 ]

@@ -249,21 +249,21 @@ pub struct PlayerOverlayScreen {
 /// preference this play resolved under (the show's own, else the account's —
 /// `route::cur_sub_pref_lang`), then the playing audio's language, then the current subtitle's
 /// own — each only if it names one. `ui/` never sees a Plex account type, only these codes.
-fn subtitle_yours_langs(ps: &plx_media::route::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>) -> Vec<String> {
+fn subtitle_yours_langs(ps: &plx_media::playback::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>) -> Vec<String> {
     let mut yours = Vec::new();
-    if let Some(pref) = plx_media::route::cur_sub_pref_lang(ps) {
+    if let Some(pref) = plx_media::playback::cur_sub_pref_lang(ps) {
         if !pref.trim().is_empty() {
             yours.push(pref.to_string());
         }
     }
     if let Some(item) = meta.playing() {
-        let asid = plx_media::route::cur_audio_sid(ps);
+        let asid = plx_media::playback::cur_audio_sid(ps);
         if let Some(a) = item.audio.iter().find(|s| s.id == asid) {
             if !a.lang_code.trim().is_empty() {
                 yours.push(a.lang_code.clone());
             }
         }
-        let ssid = plx_media::route::cur_sub_sid(ps);
+        let ssid = plx_media::playback::cur_sub_sid(ps);
         if let Some(s) = item.subs.iter().find(|s| s.id == ssid) {
             if !s.lang_code.trim().is_empty() {
                 yours.push(s.lang_code.clone());
@@ -276,8 +276,8 @@ fn subtitle_yours_langs(ps: &plx_media::route::PlaybackSession, meta: plx_data::
 /// The language the Search page opens on: the account's subtitle language, else the menu's own
 /// "your languages" (the playing audio's, the current subtitle's), else English — the first that
 /// can be searched (`subsearch::default_language`). The store folds it onto the two-letter code.
-fn search_default_lang(ps: &plx_media::route::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>) -> String {
-    plx_data::subsearch::default_language(plx_media::route::cur_sub_pref_lang(ps), subtitle_yours_langs(ps, meta))
+fn search_default_lang(ps: &plx_media::playback::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>) -> String {
+    plx_data::subsearch::default_language(plx_media::playback::cur_sub_pref_lang(ps), subtitle_yours_langs(ps, meta))
 }
 
 impl PlayerOverlayScreen {
@@ -289,13 +289,13 @@ impl PlayerOverlayScreen {
     /// [`Self::new_with`] without a search offer — the tests' host; the app mounts through
     /// `new_with`, asking its host.
     #[cfg(test)]
-    pub fn new(ps: &plx_media::route::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>, entry: EntryId, kind: OverlayKind) -> Self {
+    pub fn new(ps: &plx_media::playback::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>, entry: EntryId, kind: OverlayKind) -> Self {
         Self::new_with(ps, meta, entry, kind, false)
     }
 
     /// [`Self::new`] for a host that can run a subtitle search (`MetadataLike::subtitle_search`):
     /// the Tracks panel is built offering it, never offered it later (`TrackMenuState::new_with`).
-    pub fn new_with(ps: &plx_media::route::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>, entry: EntryId, kind: OverlayKind, offer_search: bool) -> Self {
+    pub fn new_with(ps: &plx_media::playback::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>, entry: EntryId, kind: OverlayKind, offer_search: bool) -> Self {
         let panel = match kind {
             OverlayKind::Tracks { tab } => Panel::Tracks(plx_base::diag::spans::span("tmnew", || {
                 plx_appkit::track_menu::TrackMenuState::new_with(ps, meta, tab, subtitle_yours_langs(ps, meta), offer_search)
@@ -309,7 +309,7 @@ impl PlayerOverlayScreen {
             }
             // Force Direct Play offers no Quality section, so there is no rung to land on: a
             // quality entry is the ordinary menu then (`more_menu::rows_for`).
-            OverlayKind::More { quality: true } if plx_media::route::forced_direct_play(ps) => {
+            OverlayKind::More { quality: true } if plx_media::playback::forced_direct_play(ps) => {
                 Panel::More(plx_appkit::more_menu::MoreMenuState::new(ps))
             }
             OverlayKind::More { quality: true } => {
@@ -338,7 +338,7 @@ impl PlayerOverlayScreen {
     /// their own tab, so the second press has to move the tab of the entry that exists rather than
     /// present a second one — `same_instance` says they ARE the same instance, and this is the
     /// other half of that: what "the same instance, at a different address" does.
-    pub fn retarget(&mut self, ps: &plx_media::route::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>, kind: OverlayKind) {
+    pub fn retarget(&mut self, ps: &plx_media::playback::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>, kind: OverlayKind) {
         if kind.slot() != self.kind.slot() {
             return;
         }
@@ -518,7 +518,7 @@ impl PlayerOverlayScreen {
     /// old ladder's `Key::Ok` arms did.
     fn activate<H: AppLike + crate::registry::MetadataLike>(
         &mut self,
-        ps: &plx_media::route::PlaybackSession,
+        ps: &plx_media::playback::PlaybackSession,
         cx: &Cx<'_, H>,
         fx: &mut Effects<'_, H>,
     ) {
@@ -605,7 +605,7 @@ impl PlayerOverlayScreen {
     /// and either does nothing otherwise (no tabs to switch).
     fn edge_key<H: AppLike + crate::registry::MetadataLike>(
         &mut self,
-        ps: &plx_media::route::PlaybackSession,
+        ps: &plx_media::playback::PlaybackSession,
         cx: &Cx<'_, H>,
         key: consts::Key,
         fx: &mut Effects<'_, H>,
@@ -652,7 +652,7 @@ impl PlayerOverlayScreen {
     /// and Chapters also hand the transport the ordinary linger.
     fn key<H: AppLike + crate::registry::MetadataLike>(
         &mut self,
-        ps: &plx_media::route::PlaybackSession,
+        ps: &plx_media::playback::PlaybackSession,
         cx: &Cx<'_, H>,
         key: consts::Key,
         edge: Edge,
@@ -860,7 +860,7 @@ impl<H: crate::registry::PlayerLike + crate::registry::MetadataLike> Machine<H> 
                 match &mut self.panel {
                     Panel::Tracks(p) => {
                         if let Some(view) = H::subtitle_search(cx) {
-                            let (sid, rk) = (plx_media::route::cur_sid(ps), plx_media::route::cur_rk(ps));
+                            let (sid, rk) = (plx_media::playback::cur_sid(ps), plx_media::playback::cur_rk(ps));
                             // opened LAZILY: only once the viewer is on the Search pages, so opening
                             // the menu never puts a query to the server's subtitle agent. `Open` is
                             // idempotent for the same item, so re-sending it until the store's view

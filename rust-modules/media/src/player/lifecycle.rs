@@ -147,7 +147,7 @@ pub enum ForegroundClaim {
 /// The attempt type is opaque to the reducer. Production uses `RouteStartAttempt`, while pure
 /// tests can prove exact-attempt handling with an ordinary integer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ForegroundState<Attempt = crate::route::RouteStartAttempt> {
+pub enum ForegroundState<Attempt = crate::playback::RouteStartAttempt> {
     Idle,
     Suspended {
         id: u64,
@@ -192,7 +192,7 @@ pub enum ForegroundState<Attempt = crate::route::RouteStartAttempt> {
 }
 
 #[derive(Debug)]
-pub struct ForegroundLifecycle<Attempt = crate::route::RouteStartAttempt> {
+pub struct ForegroundLifecycle<Attempt = crate::playback::RouteStartAttempt> {
     pub state: ForegroundState<Attempt>,
     pub next_id: u64,
 }
@@ -662,25 +662,25 @@ pub trait ForegroundActuator {
     /// ([`Self::land_prepare`]).
     fn prepare_resume(
         &mut self,
-        ps: &mut crate::route::PlaybackSession,
+        ps: &mut crate::playback::PlaybackSession,
         resume_ns: i64,
     ) -> crate::player::ResumeStart;
     /// Drain the pending resume's landing, once a frame.
-    fn land_prepare(&mut self, ps: &mut crate::route::PlaybackSession) -> FlightLanding<crate::player::ResumeOutcome>;
+    fn land_prepare(&mut self, ps: &mut crate::playback::PlaybackSession) -> FlightLanding<crate::player::ResumeOutcome>;
     /// Drain the pending Original rollback's landing, once a frame.
     fn land_recovery(
         &mut self,
-        ps: &mut crate::route::PlaybackSession,
+        ps: &mut crate::playback::PlaybackSession,
     ) -> FlightLanding<ForegroundLoadStart<Self::Attempt>>;
     fn before_load(&mut self, resume_ns: i64, clock: ForegroundClock);
     fn start_load(
         &mut self,
-        ps: &mut crate::route::PlaybackSession,
+        ps: &mut crate::playback::PlaybackSession,
     ) -> ForegroundLoadStart<Self::Attempt>;
     fn load_status(&mut self, attempt: Self::Attempt) -> ForegroundLoadStatus<Self::Attempt>;
     fn after_load(
         &mut self,
-        ps: &mut crate::route::PlaybackSession,
+        ps: &mut crate::playback::PlaybackSession,
         attempt: Option<Self::Attempt>,
         clock: ForegroundClock,
         started: bool,
@@ -743,12 +743,10 @@ pub enum ForegroundPollOutcome {
 /// [`poll_foreground_flight`]'s.
 pub fn drive_foreground<A: ForegroundActuator>(
     lifecycle: &mut ForegroundLifecycle<A::Attempt>,
-    ps: &mut crate::route::PlaybackSession,
+    ps: &mut crate::playback::PlaybackSession,
     input: ForegroundInput,
     actuator: &mut A,
 ) -> ForegroundActivation {
-    // The restoring Load's window create is a step of the foreground cycle (`window::CycleScope`).
-    let _cycle = plx_telemetry::telemetry::window::CycleScope::enter();
     let effect = match lifecycle.claim(input) {
         ForegroundClaimResult::Ordinary => return ForegroundActivation::Ordinary,
         ForegroundClaimResult::Suppressed => return ForegroundActivation::Handled,
@@ -759,7 +757,7 @@ pub fn drive_foreground<A: ForegroundActuator>(
 
 fn run_foreground_effects<A: ForegroundActuator>(
     lifecycle: &mut ForegroundLifecycle<A::Attempt>,
-    ps: &mut crate::route::PlaybackSession,
+    ps: &mut crate::playback::PlaybackSession,
     actuator: &mut A,
     mut effect: Option<ForegroundEffect>,
 ) -> ForegroundActivation {
@@ -804,7 +802,7 @@ fn run_foreground_effects<A: ForegroundActuator>(
 /// Settle the claimed `Load` with what starting it answered. True when an exact attempt launched.
 fn settle_load_start<A: ForegroundActuator>(
     lifecycle: &mut ForegroundLifecycle<A::Attempt>,
-    ps: &mut crate::route::PlaybackSession,
+    ps: &mut crate::playback::PlaybackSession,
     actuator: &mut A,
     id: u64,
     clock: ForegroundClock,
@@ -840,12 +838,9 @@ fn settle_load_start<A: ForegroundActuator>(
 /// tells the caller to mount Player, as [`drive_foreground`]'s does.
 pub fn poll_foreground_flight<A: ForegroundActuator>(
     lifecycle: &mut ForegroundLifecycle<A::Attempt>,
-    ps: &mut crate::route::PlaybackSession,
+    ps: &mut crate::playback::PlaybackSession,
     actuator: &mut A,
 ) -> ForegroundActivation {
-    // A restore whose Load waited for a flight starts it here, frames after `foreground_done`;
-    // its exported-window create is still the foreground cycle's.
-    let _cycle = plx_telemetry::telemetry::window::CycleScope::enter();
     match lifecycle.state {
         ForegroundState::PreparePending { .. } => match actuator.land_prepare(ps) {
             FlightLanding::Waiting => ForegroundActivation::Handled,
@@ -889,7 +884,7 @@ pub fn poll_foreground_flight<A: ForegroundActuator>(
 /// suspended, so the next foreground restores it from the start. False when no flight was pending.
 pub fn park_pending_foreground_flight<Attempt: Copy + PartialEq>(
     lifecycle: &mut ForegroundLifecycle<Attempt>,
-    ps: &mut crate::route::PlaybackSession,
+    ps: &mut crate::playback::PlaybackSession,
     pa: &mut crate::player::adapter::PlayerAdapter,
 ) -> bool {
     if !lifecycle.flight_pending() {
@@ -904,7 +899,7 @@ pub fn park_pending_foreground_flight<Attempt: Copy + PartialEq>(
 /// prepared route so a Play retry never repeats PMS preparation or `begin_resume`.
 pub fn poll_foreground_load<A: ForegroundActuator>(
     lifecycle: &mut ForegroundLifecycle<A::Attempt>,
-    ps: &mut crate::route::PlaybackSession,
+    ps: &mut crate::playback::PlaybackSession,
     actuator: &mut A,
 ) -> ForegroundPollOutcome {
     let Some(attempt) = lifecycle.pending_load_attempt() else {
@@ -993,7 +988,7 @@ mod foreground_resume_tests {
 
         fn prepare_resume(
             &mut self,
-            _ps: &mut crate::route::PlaybackSession,
+            _ps: &mut crate::playback::PlaybackSession,
             resume_ns: i64,
         ) -> crate::player::ResumeStart {
             self.prepare_calls.push(resume_ns);
@@ -1006,14 +1001,14 @@ mod foreground_resume_tests {
 
         fn land_prepare(
             &mut self,
-            _ps: &mut crate::route::PlaybackSession,
+            _ps: &mut crate::playback::PlaybackSession,
         ) -> FlightLanding<crate::player::ResumeOutcome> {
             Self::answer(&mut self.land_prepares)
         }
 
         fn land_recovery(
             &mut self,
-            _ps: &mut crate::route::PlaybackSession,
+            _ps: &mut crate::playback::PlaybackSession,
         ) -> FlightLanding<ForegroundLoadStart<Self::Attempt>> {
             Self::answer(&mut self.land_recoveries)
         }
@@ -1024,7 +1019,7 @@ mod foreground_resume_tests {
 
         fn start_load(
             &mut self,
-            _ps: &mut crate::route::PlaybackSession,
+            _ps: &mut crate::playback::PlaybackSession,
         ) -> ForegroundLoadStart<Self::Attempt> {
             self.load_calls += 1;
             Self::answer(&mut self.loads)
@@ -1037,7 +1032,7 @@ mod foreground_resume_tests {
 
         fn after_load(
             &mut self,
-            _ps: &mut crate::route::PlaybackSession,
+            _ps: &mut crate::playback::PlaybackSession,
             attempt: Option<Self::Attempt>,
             clock: ForegroundClock,
             started: bool,
@@ -1078,7 +1073,7 @@ mod foreground_resume_tests {
 
     #[test]
     fn refused_resume_preparation_rearms_the_exact_suspended_snapshot() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         for refused in [
             crate::player::ResumeOutcome::NoRoute,
             crate::player::ResumeOutcome::RebuildRejected,
@@ -1102,7 +1097,7 @@ mod foreground_resume_tests {
 
     #[test]
     fn did_foreground_preserves_a_paused_snapshot_without_issuing_play() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let mut lifecycle = ForegroundLifecycle::IDLE;
         lifecycle.suspend(73_000_000_000, ForegroundClock::Paused);
         let mut actuator = FakeActuator {
@@ -1161,7 +1156,7 @@ mod foreground_resume_tests {
     /// snapshot; a flight that ended without landing releases the machine instead of hanging it.
     #[test]
     fn a_pending_resume_parks_the_machine_until_its_landing_and_settles_like_the_synchronous_answer() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let mut lifecycle = ForegroundLifecycle::IDLE;
         lifecycle.suspend(63_000_000_000, ForegroundClock::Playing);
         let suspended = lifecycle.state;
@@ -1236,7 +1231,7 @@ mod foreground_resume_tests {
             (FlightLanding::Landed(ForegroundLoadStart::Failed), ForegroundActivation::Handled),
             (FlightLanding::Stale, ForegroundActivation::Handled),
         ] {
-            let mut ps = crate::route::PlaybackSession::IDLE;
+            let mut ps = crate::playback::PlaybackSession::IDLE;
             let mut lifecycle = ForegroundLifecycle::IDLE;
             lifecycle.suspend(63_000_000_000, ForegroundClock::Playing);
             let mut actuator = FakeActuator {
@@ -1277,7 +1272,7 @@ mod foreground_resume_tests {
         let mut lifecycle = ForegroundLifecycle::<u64>::IDLE;
         lifecycle.suspend(63_000_000_000, ForegroundClock::Playing);
         let suspended = lifecycle.state;
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let mut actuator = FakeActuator { pending_prepares: 1, ..FakeActuator::default() };
         let _ = drive_foreground(&mut lifecycle, &mut ps, ForegroundInput::DidForeground, &mut actuator);
         assert!(lifecycle.flight_pending());
@@ -1301,7 +1296,7 @@ mod foreground_resume_tests {
 
     #[test]
     fn pending_load_failure_retains_prepared_route_and_retry_skips_resume_preparation() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let mut lifecycle = ForegroundLifecycle::IDLE;
         lifecycle.suspend(63_000_000_000, ForegroundClock::Playing);
         let mut actuator = FakeActuator {
@@ -1410,7 +1405,7 @@ mod foreground_resume_tests {
 
     #[test]
     fn async_failure_tears_down_once_so_retry_does_not_loop_on_already_running() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         #[derive(Default)]
         struct EngineSpy {
             engine_live: bool,
@@ -1424,7 +1419,7 @@ mod foreground_resume_tests {
 
             fn prepare_resume(
                 &mut self,
-                _ps: &mut crate::route::PlaybackSession,
+                _ps: &mut crate::playback::PlaybackSession,
                 _resume_ns: i64,
             ) -> crate::player::ResumeStart {
                 self.prepares += 1;
@@ -1433,14 +1428,14 @@ mod foreground_resume_tests {
 
             fn land_prepare(
                 &mut self,
-                _ps: &mut crate::route::PlaybackSession,
+                _ps: &mut crate::playback::PlaybackSession,
             ) -> FlightLanding<crate::player::ResumeOutcome> {
                 unreachable!("this actuator never goes pending")
             }
 
             fn land_recovery(
                 &mut self,
-                _ps: &mut crate::route::PlaybackSession,
+                _ps: &mut crate::playback::PlaybackSession,
             ) -> FlightLanding<ForegroundLoadStart<Self::Attempt>> {
                 unreachable!("this actuator never goes pending")
             }
@@ -1449,7 +1444,7 @@ mod foreground_resume_tests {
 
             fn start_load(
             &mut self,
-            _ps: &mut crate::route::PlaybackSession,
+            _ps: &mut crate::playback::PlaybackSession,
         ) -> ForegroundLoadStart<Self::Attempt> {
                 if self.engine_live {
                     return ForegroundLoadStart::AlreadyRunning;
@@ -1472,7 +1467,7 @@ mod foreground_resume_tests {
 
             fn after_load(
                 &mut self,
-                _ps: &mut crate::route::PlaybackSession,
+                _ps: &mut crate::playback::PlaybackSession,
                 attempt: Option<Self::Attempt>,
                 _clock: ForegroundClock,
                 started: bool,
@@ -1523,7 +1518,7 @@ mod foreground_resume_tests {
 
     #[test]
     fn synchronous_load_refusal_retains_the_prepared_route() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let mut lifecycle = ForegroundLifecycle::IDLE;
         lifecycle.suspend(41_000_000_000, ForegroundClock::Playing);
         let mut actuator = FakeActuator {
@@ -1558,7 +1553,7 @@ mod foreground_resume_tests {
 
     #[test]
     fn unowned_or_terminal_load_releases_foreground_instead_of_retrying_forever() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         for refused in [
             ForegroundLoadStart::AlreadyRunning,
             ForegroundLoadStart::Terminal,
@@ -1586,7 +1581,7 @@ mod foreground_resume_tests {
 
     #[test]
     fn stale_load_attempt_releases_foreground_without_touching_an_unknown_engine() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let mut lifecycle = ForegroundLifecycle::IDLE;
         lifecycle.suspend(22_000_000_000, ForegroundClock::Paused);
         let mut actuator = FakeActuator {
@@ -1619,7 +1614,7 @@ mod foreground_resume_tests {
 
     #[test]
     fn foreground_follows_every_tokened_replacement_without_failure_cleanup() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let mut lifecycle = ForegroundLifecycle::IDLE;
         lifecycle.suspend(31_000_000_000, ForegroundClock::Playing);
         let mut actuator = FakeActuator {
@@ -1670,7 +1665,7 @@ mod foreground_resume_tests {
 
     #[test]
     fn refused_play_after_load_retries_only_the_clock() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let mut lifecycle = ForegroundLifecycle::IDLE;
         lifecycle.suspend(73_000_000_000, ForegroundClock::Paused);
         let mut actuator = FakeActuator {
@@ -1773,7 +1768,7 @@ mod transport_pause_contract_tests {
 
     #[test]
     fn refused_foreground_play_retries_the_native_clock_without_a_second_load() {
-        let mut ps = crate::route::PlaybackSession::IDLE;
+        let mut ps = crate::playback::PlaybackSession::IDLE;
         let _guard = plx_base::testlock::serial();
         let old_paused = crate::player::TX.paused.load(Ordering::Acquire);
         struct Restore(bool);
@@ -1804,7 +1799,7 @@ mod transport_pause_contract_tests {
 
             fn prepare_resume(
                 &mut self,
-                _ps: &mut crate::route::PlaybackSession,
+                _ps: &mut crate::playback::PlaybackSession,
                 _resume_ns: i64,
             ) -> crate::player::ResumeStart {
                 self.prepares += 1;
@@ -1813,14 +1808,14 @@ mod transport_pause_contract_tests {
 
             fn land_prepare(
                 &mut self,
-                _ps: &mut crate::route::PlaybackSession,
+                _ps: &mut crate::playback::PlaybackSession,
             ) -> FlightLanding<crate::player::ResumeOutcome> {
                 unreachable!("this actuator never goes pending")
             }
 
             fn land_recovery(
                 &mut self,
-                _ps: &mut crate::route::PlaybackSession,
+                _ps: &mut crate::playback::PlaybackSession,
             ) -> FlightLanding<ForegroundLoadStart<Self::Attempt>> {
                 unreachable!("this actuator never goes pending")
             }
@@ -1829,7 +1824,7 @@ mod transport_pause_contract_tests {
 
             fn start_load(
             &mut self,
-            _ps: &mut crate::route::PlaybackSession,
+            _ps: &mut crate::playback::PlaybackSession,
         ) -> ForegroundLoadStart<Self::Attempt> {
                 self.loads += 1;
                 ForegroundLoadStart::Launched(1)
@@ -1845,7 +1840,7 @@ mod transport_pause_contract_tests {
 
             fn after_load(
                 &mut self,
-                _ps: &mut crate::route::PlaybackSession,
+                _ps: &mut crate::playback::PlaybackSession,
                 _attempt: Option<Self::Attempt>,
                 _clock: ForegroundClock,
                 _started: bool,

@@ -40,7 +40,7 @@ pub(crate) struct Frame {
 }
 
 impl Frame {
-    fn begin(ps: &plx_media::route::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>) -> Frame {
+    fn begin(ps: &plx_media::playback::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>) -> Frame {
         Frame {
             ctrl: plx_appkit::player_hud::slot(ps, meta),
             now: 0,
@@ -545,9 +545,9 @@ unsafe fn ingest_sdl_event(app: &mut App, _fr: &mut Frame) {
         }
         // Playback owns its resolve and Engine before the queued Player page mounts. Page
         // presence only governs the screen-local cleanup below, never resource suspension.
-        if (plx_media::route::play_pending()
+        if (plx_media::playback::play_pending()
                 || app.adapters.player.is_live()
-                || plx_media::route::has_url(&app.player.session))
+                || plx_media::playback::has_url(&app.player.session))
             && !app.player.lifecycle.awaiting_load()
         {
             // INTENDED, not published: this snapshot is the only thing the foreground
@@ -572,7 +572,7 @@ unsafe fn ingest_sdl_event(app: &mut App, _fr: &mut Frame) {
             plx_media::player::suspend_bufferfeed(&mut app.player.session, &mut app.adapters.player);
             // Also retire the resolve generation: its worker may finish after backgrounding,
             // including before the accepted start's Player page has ever mounted.
-            plx_media::route::cancel_play(&mut app.player.session);
+            plx_media::playback::cancel_play(&mut app.player.session);
             // **The PAGE STACK is deliberately not touched**, which is the whole of what a park
             // is: the OS is taking the screen away, not the user navigating, and the foreground
             // arm below reloads straight back into the player. It USED to write
@@ -1090,7 +1090,7 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
         // A late landing of a flight nobody waits on any more (a Back, a suspend, a newer request
         // ended it while its worker ran) is reaped here, every frame: a flight with no Engine has no
         // pump to do it, and the landing's replacement encoder runs on the server until it is.
-        plx_media::route::discard_stale_flight_landing();
+        plx_media::playback::discard_stale_flight_landing();
         if app.window_activity.allow_present(true) && app.player.lifecycle.flight_pending() {
             // The foreground restore waits on a flight (its resume's rebuild or an Original
             // rollback): the lifecycle machine drains it, not the pump (there is no Engine) and not
@@ -1365,7 +1365,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // A fresh accepted resolve owns a different playback from any parked foreground retry.
         // Retire that old owner at this transaction boundary; a same-session Prepared retry does
         // not set play_pending and remains owned by drive_foreground.
-        if app.window_activity.allow_present(true) && plx_media::route::play_pending() {
+        if app.window_activity.allow_present(true) && plx_media::playback::play_pending() {
             app.player.lifecycle.replace_with_new_playback();
         }
         land_play_then_observe(
@@ -1380,7 +1380,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
                     plx_machine::idle::invalidate();
                     finish_landed_play(app, matches!(outcome, plx_media::player::ResumeOutcome::Prepared));
                 }
-                if let Some(r) = plx_media::route::pump_play(&mut app.player.session, app.bridge.metadata_mut()) {
+                if let Some(r) = plx_media::playback::pump_play(&mut app.player.session, app.bridge.metadata_mut()) {
                     plx_machine::idle::invalidate();
                     // A transcode with a saved position rebuilds at that offset on a worker (`begin_resume`):
                     // the play stays pending, the spinner stays up, and the drain at the top of this landing
@@ -1410,8 +1410,8 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
 /// a cold resume's flight (`player::land_resume`) — the same step, taken after the rebuild landed.
 fn finish_landed_play(app: &mut App, resume_prepared: bool) {
     if !resume_prepared {
-        if let Some(transaction) = plx_media::route::pending_route_start() {
-            let _ = plx_media::route::reject_route_start_preparation(transaction);
+        if let Some(transaction) = plx_media::playback::pending_route_start() {
+            let _ = plx_media::playback::reject_route_start_preparation(transaction);
         }
     }
     // A live engine with the route anywhere but Player is unrecoverable BY THE USER —
@@ -1836,7 +1836,7 @@ pub(crate) unsafe fn heartbeat(app: &mut App, fr: &mut Frame) {
 /// Teardown after the loop: abandon the pending report, stop the feed, wait for the stop
 /// scrobble, close the capture stream and the poster workers, quit SDL.
 pub(crate) unsafe fn shutdown(
-    ps: &mut plx_media::route::PlaybackSession,
+    ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
 ) {
     plx_media::player::report::abandon_pending(ps);
@@ -1847,7 +1847,7 @@ pub(crate) unsafe fn shutdown(
     // worker still running — so THIS is the one place its result has to be waited for, or the
     // resume point the user just earned is silently dropped. Same cost the old inline call
     // paid, except now it is paid once at exit instead of on every BACK out of a movie.
-    plx_media::route::drain_scrobble();
+    plx_media::playback::drain_scrobble();
     crate::app::adapters::poster::shutdown();
     SDL_Quit();
 }

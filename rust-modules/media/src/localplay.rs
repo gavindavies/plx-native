@@ -1,11 +1,10 @@
-//! **Playing a file on this machine's own disk**, with no server behind it.
+//! **Playing a file on this machine's own disk.**
 //!
-//! A Plex playback learns what it is about to play from the server's decision: the codecs the
-//! Load payload declares, the frame rate, the source raster. A local file has no server, so the
-//! file is asked instead ([`crate::ff::probe_local`]) and the same declaration is installed on the
-//! [`PlaybackSession`](crate::route::PlaybackSession) the engine reads, together with the file's
-//! `file://` URL ([`crate::localfile`]). From there the playback is the ordinary engine path:
-//! `start_bufferfeed` finds a URL on the route and a declaration to Load it with.
+//! The file is asked what it holds ([`crate::ff::probe_local`]): the codecs the Load declares, the
+//! frame rate, the source raster, its tracks. That declaration is installed on the
+//! [`PlaybackSession`](crate::playback::PlaybackSession) the engine reads, together with the
+//! file's `file://` URL ([`crate::localfile`]). From there `start_bufferfeed` finds a URL on the
+//! session and a declaration to Load it with.
 //!
 //! Refusals are made here, before any Load, and say why in words a viewer can act on.
 
@@ -81,7 +80,7 @@ pub fn title_of(path: &Path) -> String {
 
 /// Probe `path` and, if it can play, install it on `ps` as the next thing the engine Loads.
 /// Blocking (it opens and reads the file's headers); the caller decides which thread pays.
-pub fn prepare(ps: &mut crate::route::PlaybackSession, path: &Path) -> Result<crate::ff::LocalProbe, LocalPlayError> {
+pub fn prepare(ps: &mut crate::playback::PlaybackSession, path: &Path) -> Result<crate::ff::LocalProbe, LocalPlayError> {
     let probe = crate::ff::probe_local(path).map_err(LocalPlayError::Unreadable)?;
     // The Linux build asks this machine's GStreamer, so an AV1 or VP9 file on a machine without
     // that decoder is refused here, with a reason, rather than by a Load that never shows a frame.
@@ -111,19 +110,17 @@ fn context_line(path: &Path) -> String {
 /// Install an already-probed file on `ps`: the declaration, the source raster, the HUD title and
 /// the `file://` URL — in that order, so a refused declaration never leaves a URL behind for a
 /// later Play to pick up without it.
-pub fn install(ps: &mut crate::route::PlaybackSession, path: &Path, probe: &crate::ff::LocalProbe) -> Result<(), LocalPlayError> {
+pub fn install(ps: &mut crate::playback::PlaybackSession, path: &Path, probe: &crate::ff::LocalProbe) -> Result<(), LocalPlayError> {
     admit(probe)?;
-    if !crate::route::set_stream_declaration(ps, &probe.vcodec, &probe.acodec, probe.fps, plx_data::metadata::Dovi::NONE, false) {
-        return Err(LocalPlayError::Unreadable("the declaration was refused".into()));
-    }
+    crate::playback::set_stream_declaration(ps, &probe.vcodec, &probe.acodec, probe.fps);
     if probe.width > 0 && probe.height > 0 {
-        crate::route::set_stream_source_raster(ps, probe.width, probe.height);
+        crate::playback::set_stream_source_raster(ps, probe.width, probe.height);
     }
     let folder = context_line(path);
-    crate::route::set_hud_title(ps, &title_of(path), &folder);
+    crate::playback::set_hud_title(ps, &title_of(path), &folder);
     // No account to say which subtitles are the viewer's: the interface's language leads the menu.
-    crate::route::set_sub_pref_lang(ps, plx_platform::i18n::current().language().tag());
-    crate::route::set_url(ps, &crate::localfile::file_url(path));
+    crate::playback::set_sub_pref_lang(ps, plx_platform::i18n::current().language().tag());
+    crate::playback::set_url(ps, &crate::localfile::file_url(path));
     crate::player::log(&format!(
         "localplay: {} v={} {}x{} fps={:.3} a={} (tracks: {})",
         title_of(path),
@@ -137,17 +134,14 @@ pub fn install(ps: &mut crate::route::PlaybackSession, path: &Path, probe: &crat
     Ok(())
 }
 
-/// The track store the player's menus read for a local file (`metadata::PlayingItem`, which a
-/// Plex playback fills from the server): its embedded subtitle tracks, in file order, then the
-/// subtitle files beside it ([`plx_data::local::sidecars`]). The item's server is
-/// `local::ART_SRV` and its key the file's path.
-///
-/// Its audio tracks carry FFmpeg's codec names, which is what the Load payload and the route's
-/// direct-play test read on this build (`route::plan::audio_direct_plays`).
+/// The track store the player's menus read for a local file (`metadata::PlayingItem`): its audio
+/// tracks, its embedded subtitle tracks in file order, then the subtitle files beside it
+/// ([`plx_data::local::sidecars`]). Its key is the file's path, and its tracks carry FFmpeg's
+/// codec names, which is what the Load payload reads.
 pub fn playing_item(path: &Path, probe: &crate::ff::LocalProbe, sidecars: &[plx_data::local::SidecarFile]) -> plx_data::metadata::PlayingItem {
     use plx_data::metadata::Stream;
     let named = |tag: &str| {
-        plx_data::metadata::two_letter_code(tag).map_or_else(String::new, |c| plx_plex::plex::languages::label(&c).to_owned())
+        plx_data::metadata::two_letter_code(tag).map_or_else(String::new, |c| plx_data::metadata::languages::label(&c).to_owned())
     };
     let audio = probe
         .audio
@@ -196,28 +190,21 @@ pub fn playing_item(path: &Path, probe: &crate::ff::LocalProbe, sidecars: &[plx_
         ..Stream::default()
     }));
     plx_data::metadata::PlayingItem {
-        sid: plx_plex::plex::ServerId::from_raw(plx_data::local::ART_SRV),
         rk: path.to_string_lossy().into_owned(),
-        show_rk: String::new(),
-        kind: "movie".into(),
         audio,
         subs,
         video_fps: probe.fps,
         width: i64::from(probe.width),
         height: i64::from(probe.height),
-        bitrate: 0,
-        dovi: Default::default(),
-        markers: Vec::new(),
         chapters: Vec::new(),
-        blur: None,
     }
 }
 
 /// The track a local file starts on: the first in file order the sink decodes (the probe's
-/// `acodec`, which the demuxer feeds by default), as the route records a pick.
-pub fn starting_audio(item: &plx_data::metadata::PlayingItem, probe: &crate::ff::LocalProbe) -> Option<crate::route::CarriedAudio> {
+/// `acodec`, which the demuxer feeds by default), as the session records a pick.
+pub fn starting_audio(item: &plx_data::metadata::PlayingItem, probe: &crate::ff::LocalProbe) -> Option<crate::playback::CarriedAudio> {
     let i = item.audio.iter().position(|s| s.codec == probe.acodec)?;
-    Some(crate::route::CarriedAudio::from_stream(&item.audio[i], plx_data::metadata::audio_ordinal(&item.audio, i)))
+    Some(crate::playback::CarriedAudio::from_stream(&item.audio[i], plx_data::metadata::audio_ordinal(&item.audio, i)))
 }
 
 /// Audio stream ids for a local file, from 500 (any non-zero id names a track).
@@ -229,7 +216,7 @@ const AUDIO_ID: i64 = 500;
 const EMBEDDED_SUB_ID: i64 = 1;
 const SIDECAR_ID: i64 = 1000;
 
-/// FFmpeg's subtitle codec name in the spelling the track menu reads (PMS's).
+/// FFmpeg's subtitle codec name in the spelling the track menu reads.
 fn sub_codec(ffmpeg: &str) -> &str {
     match ffmpeg {
         "subrip" => "srt",
@@ -265,7 +252,6 @@ mod tests {
         };
         let item = playing_item(Path::new("/m/Film.mkv"), &p, &[side]);
         assert_eq!(item.rk, "/m/Film.mkv");
-        assert_eq!(item.sid.raw(), plx_data::local::ART_SRV);
         assert_eq!(item.audio.len(), 0, "the fixture's probe lists no audio tracks");
         let (embedded, file) = (&item.subs[0], &item.subs[1]);
         assert_eq!((embedded.codec.as_str(), embedded.lang_code.as_str(), embedded.forced, embedded.external), ("srt", "eng", true, false));

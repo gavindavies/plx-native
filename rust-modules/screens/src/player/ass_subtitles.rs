@@ -19,8 +19,8 @@ pub struct AssSubtitles {
 }
 
 impl AssSubtitles {
-    pub fn update(&mut self, ps: &plx_media::route::PlaybackSession, now: u32) {
-        let source = if plx_media::route::subtitles_burned(ps) || plx_media::player::loading(ps) {
+    pub fn update(&mut self, ps: &plx_media::playback::PlaybackSession, now: u32) {
+        let source = if plx_media::playback::subtitles_burned(ps) || plx_media::player::loading(ps) {
             None
         } else {
             sidecar::ass_source(false)

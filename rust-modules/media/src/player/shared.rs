@@ -6,7 +6,6 @@
 //! retirement drains an event already inside that epoch and rejects every later event, so stable
 //! storage is not mistaken for permission to mutate the next playback.
 use plx_data::metadata::track_names::TrackNames;
-use plx_net::stream::HttpStream;
 use std::ffi::CString;
 use std::sync::atomic::{
     AtomicBool, AtomicI32, AtomicI64, AtomicPtr, AtomicU32, AtomicU64, AtomicU8, Ordering,
@@ -340,11 +339,6 @@ pub enum HlsPlayCompletion {
     Stale,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct AbrSeed {
-    estimate: crate::abr::CapacityEstimate,
-    observed_at: Instant,
-}
 
 /// one client-rendered subtitle cue (content-time ns). `track` is the 0-based subtitle-stream
 /// index it belongs to; the demuxer pushes cues for ALL text tracks and the render filters by
@@ -655,13 +649,6 @@ pub struct Shared {
     pub ass_renderer: super::ass::Runtime,
     pub sub_bitmaps: Mutex<Vec<SubBitmap>>, // image-sub cues (every image track while subs are on)
 
-    /// The main demuxer's FIRST video keyframe of this engine run (stream time + a payload
-    /// fingerprint), published once for the side subtitle reader's clock mapping and cleared when
-    /// the demuxer starts. `None` until that packet is read.
-    pub side_anchor: Mutex<Option<crate::ff::subside::Anchor>>,
-    /// The side subtitle reader owns this playback's subtitles: `ff::demux` then neither enumerates
-    /// the stream's own subtitle tracks nor begins an ASS source, which the reader's would replace.
-    pub side_subs_owner: AtomicBool,
 
     // demux (D) -> main (M)
     pub file_size: AtomicI64, // g_file_size
@@ -736,11 +723,6 @@ pub struct Shared {
     // set once the pipeline has drained to true end-of-stream (EOS pushed AND the last fed frame
     // has been presented). app.rs polls player::ended() to tear the player down at the credits.
     pub ended: AtomicBool,
-
-    // close-to-interrupt handle: raw ptr to the Engine-owned HttpStream box, so
-    // the pump/teardown can close(fd) to unblock a blocked recv. The box outlives
-    // the worker threads (Engine drops after join), so the ptr stays valid.
-    pub hs_ptr: AtomicPtr<HttpStream>,
 
     // ---- diagnostics mirror (`app::diagnostics`) -------------------------------------------------
     // Values the render path (and the opted-in handled-error snapshot) need that live on the
@@ -874,30 +856,6 @@ pub struct Shared {
     /// Wall milliseconds an unsafe Original deficit has held (N13). Was a COUNT of
     /// 750 ms active-read windows, on a clock that stops under backpressure.
     pub dg_abr_unsafe_deficit_ms: AtomicI64,
-    /// **The controller's own model state**, published beside the measurements above so the
-    /// read-out shows what the DECISION was made on rather than what a reader can infer. Every
-    /// one is `-1` until the controller has produced it; `crate::abr::ControllerTelemetry` is the
-    /// single struct they are all taken from, in one go, so the panel can never show a budget
-    /// from one sample beside an uncertainty from the next.
-    ///
-    /// Safe budget (what selection may actually spend), the operating point the model would pick
-    /// for this link ignoring hysteresis, the delivery estimate's own dispersion and sample count,
-    /// the buffer's slope, its starvation horizon in seconds (`-1` = no deficit, so no horizon),
-    /// the predicted production cost of the current candidate, and the risk score.
-    /// **The live link estimate, carried ACROSS A SEEK** (I8) — and deliberately not a `dg_`
-    /// field, because this coherent posterior decides something. An HLS seek tears the engine
-    /// down and builds a fresh `Controller`, so before this the only survivor was
-    /// `session().auto_prior_kbps`, whose
-    /// writer on the fallback path is the rate measured at the moment Original FAILED. Every seek
-    /// therefore re-seeded from the worst rate the playback had ever measured, at maximum
-    /// uncertainty with one sample, and the ladder re-ramped for five to ten segments: ten to
-    /// twenty seconds of visibly softer picture after every skip.
-    ///
-    /// One coherent estimate plus the wall instant it was last observed. Cleared by
-    /// [`Shared::clear_abr_seed`] and **deliberately NOT by [`Shared::reset_session`]**. The time
-    /// is load-bearing: a pause, app background or reload gap with no segment observations must
-    /// age the carried evidence before a new controller may use it.
-    abr_seed: Mutex<Option<AbrSeed>>,
     pub dg_abr_safe_kbps: AtomicI64,
     pub dg_abr_optimal_kbps: AtomicI64,
     pub dg_abr_unc_pm: AtomicI64,
@@ -931,8 +889,6 @@ impl Shared {
             dg_transport_age_ms: AtomicI64::new(-1),
             dg_transport_reopen_failed: AtomicBool::new(false),
             dg_net_rx: AtomicI64::new(0),
-            side_anchor: Mutex::new(None),
-            side_subs_owner: AtomicBool::new(false),
             dg_load_at: AtomicU32::new(0),
             dg_frame_at: AtomicU32::new(0),
             dg_vpres_ct: AtomicU32::new(0),
@@ -956,7 +912,6 @@ impl Shared {
             abr_failure_kind: AtomicU8::new(0),
             abr_failure_status: AtomicI32::new(0),
             dg_abr_unsafe_deficit_ms: AtomicI64::new(0),
-            abr_seed: Mutex::new(None),
             dg_abr_safe_kbps: AtomicI64::new(-1),
             dg_abr_optimal_kbps: AtomicI64::new(-1),
             dg_abr_unc_pm: AtomicI64::new(-1),
@@ -1022,7 +977,6 @@ impl Shared {
             hls_trial_reserve_ms: AtomicI64::new(-1),
             hls_candidate_generation: AtomicU64::new(0),
             ended: AtomicBool::new(false),
-            hs_ptr: AtomicPtr::new(std::ptr::null_mut()),
         }
     }
 
@@ -1440,38 +1394,9 @@ impl Shared {
         }
         Some(result)
     }
-    /// reset per-file state on stop (mirrors the tail of stop_bufferfeed).
-    /// **Drop the carried link estimate.** Called from `engine::teardown` on a real STOP only —
-    /// `reset_session` runs on a reload too, and a reload is the same item on the same link at a
-    /// new position, which is exactly the case I8 exists to preserve. Splitting it out rather than
-    /// making `reset_session` caller-conditional keeps "clear everything about this session" a
-    /// method with no exceptions in it.
-    pub fn clear_abr_seed(&self) {
-        *self.abr_seed.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    }
 
-    pub fn publish_abr_seed(&self, estimate: crate::abr::CapacityEstimate) {
-        self.publish_abr_seed_at(estimate, Instant::now());
-    }
 
-    fn publish_abr_seed_at(&self, estimate: crate::abr::CapacityEstimate, observed_at: Instant) {
-        let mut seed = self.abr_seed.lock().unwrap_or_else(|e| e.into_inner());
-        *seed = (estimate.samples > 0).then_some(AbrSeed {
-            estimate,
-            observed_at,
-        });
-    }
 
-    /// Delivery evidence carried across an engine reload, aged by every wall interval for which
-    /// no segment could refresh it. This includes accepted Pause, app background and teardown —
-    /// all three are the same epistemic fact: the old link observation was not repeated.
-    pub fn abr_seed(&self) -> Option<crate::abr::CapacityEstimate> {
-        let seed = (*self.abr_seed.lock().unwrap_or_else(|e| e.into_inner()))?;
-        let mut estimate = seed.estimate;
-        let elapsed_ms = u64::try_from(seed.observed_at.elapsed().as_millis()).unwrap_or(u64::MAX);
-        estimate.age_ms(elapsed_ms, &crate::abr::AbrPolicy::measured());
-        Some(estimate)
-    }
 
     /// Clear a playback's sticky Original failure. Kept separate from [`Shared::reset_session`]
     /// for the same lifetime reason as the ABR seed: an engine reload is not a new playback.
@@ -1648,7 +1573,6 @@ impl Shared {
             .store(-1, Ordering::Relaxed);
         self.reset_hls_clock();
         self.ended.store(false, Ordering::Relaxed);
-        self.hs_ptr.store(std::ptr::null_mut(), Ordering::Release);
     }
 
     /// Start (or restart after a rung commit) the proof for the media that will release this hold.
