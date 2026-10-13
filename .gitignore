@@ -199,3 +199,4 @@ tests/fixtures/softfloat/arm.tbl
 
 # `make linux` output: the staged Linux app directory.
 /dist/
+design/demo-library/library/

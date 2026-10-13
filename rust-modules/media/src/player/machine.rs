@@ -27,16 +27,8 @@ use crate::playback::PlaybackSession;
 
 /// The playback state `App` owns (§2.2).
 pub struct Player {
-    /// One accepted sandbox repair for the entire app lifetime, including screen recreation.
-    pub repair: RepairAttempt,
-    /// The resolved route, the stream URL, the transcode session, the HUD strings and the Up Next
-    /// queue — what `route::decision::SESSION` was.
+    /// The playback session: the stream URL, its declaration, the tracks and the HUD strings.
     pub session: PlaybackSession,
-    /// The webOS app-switch lifecycle (`player::lifecycle`, which `app::lifecycle` re-exports):
-    /// suspend on background, the exact-attempt Load on foreground. Already a machine before
-    /// phase 9; this moves the `App` field in beside the session it drives, because every one of
-    /// its transitions is about this playback.
-    pub lifecycle: super::lifecycle::ForegroundLifecycle,
     /// This frame's millisecond stamp — see the module doc. Zero before the first frame.
     pub now_ms: u32,
     /// **Is the hardware video plane bound to our sink?** (spec §9, §4.4, §16 risk 10.)
@@ -60,8 +52,7 @@ pub struct Player {
 impl Player {
     pub fn new() -> Self {
         Self {
-            repair: RepairAttempt::new(),            session: PlaybackSession::IDLE,
-            lifecycle: super::lifecycle::ForegroundLifecycle::IDLE,
+            session: PlaybackSession::IDLE,
             now_ms: 0,
             video_plane_bound: false,
             clock_fp: 0,
@@ -127,46 +118,3 @@ impl Default for Player {
     }
 }
 
-/// Logical repair authority; resource handles live in PlayerAdapter. No reset-on-playback API.
-pub struct RepairAttempt {
-    state: plx_platform::tv::sandbox::State,
-}
-impl RepairAttempt {
-    pub const fn new() -> Self { Self { state: plx_platform::tv::sandbox::State::Idle } }
-    pub fn state(&self) -> plx_platform::tv::sandbox::State { self.state }
-    pub fn begin(&mut self, supported: bool) -> Option<u64> {
-        use plx_platform::tv::sandbox::{State, Failure};
-        if self.state != State::Idle { return None; }
-        if !supported { self.state = State::Failed(Failure::Unsupported); return None; }
-        self.state = State::Running;
-        Some(1)
-    }
-    /// The single issued token can land only once. Wrong/duplicate completions cannot rewrite it.
-    pub fn complete(&mut self, token: u64, result: Result<(), plx_platform::tv::sandbox::Failure>) -> bool {
-        use plx_platform::tv::sandbox::State;
-        if token != 1 || self.state != State::Running { return false; }
-        self.state = match result { Ok(()) => State::Repaired, Err(e) => State::Failed(e) };
-        true
-    }
-}
-
-#[cfg(test)]
-mod repair_tests {
-    use super::*;
-    use plx_platform::tv::sandbox::Failure;
-    // `repair_survives_screen_and_session_recreation_and_rejects_stale_completions` builds a
-    // `PlayerScreen`, which `player` may not name: it lives in `screens::player`'s
-    // `repair_confirmation_tests`, beside the screen it recreates.
-    #[test]
-    fn every_terminal_result_spends_the_process_attempt() {
-        for result in [Ok(()), Err(Failure::StartFailed), Err(Failure::HbcUnavailable), Err(Failure::NotRoot), Err(Failure::CommandFailed), Err(Failure::Timeout), Err(Failure::Unreadable)] {
-            let mut owner = RepairAttempt::new();
-            let token = owner.begin(true).unwrap();
-            assert!(owner.complete(token, result));
-            assert_eq!(owner.begin(true), None);
-        }
-        let mut owner = RepairAttempt::new();
-        assert_eq!(owner.begin(false), None);
-        assert_eq!(owner.begin(true), None);
-    }
-}

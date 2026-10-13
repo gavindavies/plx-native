@@ -15,7 +15,7 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
     // dispatcher and before the frame's own arms (`playback::player_requests`).
     let player_reqs = app.bridge.take_player_reqs();
     if !player_reqs.is_empty() {
-        super::playback::player_requests(&mut app.player.repair, &mut app.player.session,
+        super::playback::player_requests(&mut app.player.session,
             &mut app.adapters.player,
             player_reqs,
             fr.now,

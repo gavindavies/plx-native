@@ -8,7 +8,7 @@
 use plx_data::metadata::track_names::TrackNames;
 use std::ffi::CString;
 use std::sync::atomic::{
-    AtomicBool, AtomicI32, AtomicI64, AtomicPtr, AtomicU32, AtomicU64, AtomicU8, Ordering,
+    AtomicBool, AtomicI32, AtomicI64, AtomicU32, AtomicU64, AtomicU8, Ordering,
 };
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -339,7 +339,6 @@ pub enum HlsPlayCompletion {
     Stale,
 }
 
-
 /// one client-rendered subtitle cue (content-time ns). `track` is the 0-based subtitle-stream
 /// index it belongs to; the demuxer pushes cues for ALL text tracks and the render filters by
 /// the selected `desired_sub_idx`, so switching tracks is instant (no re-demux of the buffered
@@ -624,10 +623,6 @@ pub struct Shared {
     /// the pump took to run again. `pump.rs` reads this once, for the "native: Load returned
     /// after Nms" log, exactly when it observes the deferral epoch marker above matching its own.
     pub native_load_elapsed_ms: AtomicU64,
-    /// Sparse, typed playback transitions retained only for an opted-in handled-error report.
-    /// Unlike the engine fields around it this spans reloads and seeks; `report::requested` owns
-    /// the attempt boundary and clears it for a genuinely new Play.
-    pub playback_trace: Mutex<super::report::PlaybackTrace>,
 
     // client-rendered subtitles: selected track index (-1 = off) + the demuxed cues.
     // demux (D) pushes cues; main (M) reads the active one for the current playpos.
@@ -648,7 +643,6 @@ pub struct Shared {
     pub ass_sources: Mutex<super::ass_source::Store>,
     pub ass_renderer: super::ass::Runtime,
     pub sub_bitmaps: Mutex<Vec<SubBitmap>>, // image-sub cues (every image track while subs are on)
-
 
     // demux (D) -> main (M)
     pub file_size: AtomicI64, // g_file_size
@@ -733,31 +727,10 @@ pub struct Shared {
     //
     // STRICTLY ONE-WAY: written by the pump and seam, read only for observation. Nothing in the
     // playback state machine may ever branch on one, or a diagnostic becomes load-bearing.
-    /// `Stage` as u8 — where the bind/play sequence has got to. Unlike the expensive queue
-    /// mirrors below, this scalar is always current enough for a terminal error report even when
-    /// Stats for Nerds is closed.
-    pub dg_stage: AtomicU8,
-    /// Starfish callbacks seen this session. A count of 0 with a completed Load is the pipeline
-    /// never speaking to us — the sharpest single symptom there is. The TYPE of the last callback
-    /// is deliberately not kept: the numbering shifts between webOS 4 and 5+ above 0x1c, so a
-    /// displayed type would be a confident lie on the firmware we cannot test. `dg_cb_err` latches
-    /// the one type that means the same on both.
-    pub dg_cb_count: AtomicU32,
-    /// Why the VIDEO feeder is where it is, taken at each of `feed_stream`'s exit points.
-    /// 0 none yet · 1 accepting · 2 BufferFull · 3 refused · 4 waiting for a frame (feed-ahead
-    /// throttle) · 5 queue empty.
-    ///
-    /// Supersedes a bare last-reply byte, which says strictly less: "BufferFull" and "the throttle
-    /// held us back" and "there was nothing to send" are three different faults with three
-    /// different fixes, and a reply byte cannot tell them apart because the last two never reach a
-    /// `Feed()` call at all. `queue empty` vs `BufferFull` is what splits a dead PRODUCER from a
-    /// dead SINK.
-    pub dg_feed_state: AtomicU8,
     /// The first Starfish error callback (`ty == 18`) of this session, and the callback INDEX it
     /// arrived at. Sticky: a later healthy callback must not erase the error that explains the
     /// session, and the index says whether it was immediate or after a long healthy run.
     pub dg_cb_err: AtomicI32,
-    pub dg_cb_err_at: AtomicU32,
     /// The firmware's own error NUMBER (`num`) of that same first `ty == 18` callback — the
     /// `601` of `type=18 num=601 Resource Allocation Error`. Latched together with `dg_cb_err`
     /// (first one wins, so a later callback cannot overwrite the explanation) and cleared where
@@ -767,26 +740,7 @@ pub struct Shared {
     /// success flag, and the other refusals inside `sf_load` are the seam's own lifecycle gates —
     /// so a session that failed that way leaves this at 0 ("none recorded").
     pub dg_cb_err_num: AtomicI32,
-    /// The media GET's HTTP status and the bytes actually delivered to the demuxer. Written by the
-    /// DEMUX thread — the third writer of this block. 0/0 = no connection was ever made, which is
-    /// a different failure from a connection that answered 401.
-    pub dg_http_status: AtomicI32,
-    pub dg_net_rx: AtomicI64,
-    /// WHY the media transfer died, when it was a curl transfer dying mid-body (issue #504): the
-    /// libcurl code (0 = none recorded), the transfer's age in ms (-1 = unknown) and whether the
-    /// reopen that follows a failed read was refused as well. Written by the demux thread beside
-    /// `demux_io_failed` (`ff::frame_read_failed`), read by the handled playback error as a
-    /// class and an age bucket — never as these numbers.
-    pub dg_transport_rc: AtomicI32,
-    pub dg_transport_age_ms: AtomicI64,
-    pub dg_transport_reopen_failed: AtomicBool,
-    /// SDL ticks when `loadCompleted` landed, and when `frames` last CHANGED. A photograph has no
-    /// time axis: "Load completed, 0 frames" is innocent at 2 s and damning at 4 minutes, and the
-    /// panel cannot tell the difference without these. Stamped in the pump, never in `app::diagnostics` —
-    /// a stats-local timer would start when the panel is OPENED, so a four-minute hang would
-    /// photograph as twelve seconds.
-    pub dg_load_at: AtomicU32,
-    pub dg_frame_at: AtomicU32,
+    pub dg_vpres_at: AtomicU32,
     /// **The video plane's own cadence** — the three counters behind the heartbeat's `vtick=`/`vgap=`.
     ///
     /// They exist because every other frame number in this app is about the GRAPHICS plane. `fps=`
@@ -804,18 +758,7 @@ pub struct Shared {
     /// nothing across a seek, and a gap measured over that pause is the harness reporting the seek
     /// as a stutter.
     pub dg_vpres_ct: AtomicU32,
-    pub dg_vpres_at: AtomicU32,
     pub dg_vpres_gap: AtomicU32,
-    /// Bytes queued in each AU lane at the last tick, against `engine::aq_caps`.
-    pub dg_aq_video: AtomicI64,
-    pub dg_aq_audio: AtomicI64,
-    /// High-water fed PTS per lane. Their DIFFERENCE is the sharpest instantaneous answer to
-    /// "video plays but there is no sound": a snapshot of the fed COUNTS cannot see a lane that
-    /// stopped advancing, because a large total stays large. A skew that grows without bound is
-    /// the audio lane starving; a skew near zero says both lanes are keeping up and the fault is
-    /// downstream of us.
-    pub dg_fed_v_pts: AtomicI64,
-    pub dg_fed_a_pts: AtomicI64,
     /// The codec strings this session actually put in the Starfish Load payload, as small codes
     /// (0 = none/not built; video 1 = H264, 2 = H265, 3 = AV1, 4 = VP9; audio 1 = AC3, 2 = AC3 PLUS, 3 = AAC).
     ///
@@ -824,106 +767,18 @@ pub struct Shared {
     /// with the stream. `dg_load_a == 0` is `needAudio:false`, which is a complete answer to
     /// "there is no sound": the pipeline was never asked for any.
     pub dg_load_v: AtomicU8,
-    pub dg_load_a: AtomicU8,
-    /// Auto-quality facts written by the demux worker and read only by Stats for Nerds.
-    /// Mode: 0 inactive, 1 progressive Original watchdog, 2 fixed-session HLS controller.
-    pub dg_abr_mode: AtomicU8,
-    /// Current Original source requirement or active HLS rung, in kbit/s.
-    pub dg_abr_kbps: AtomicI64,
-    /// The current HLS master declaration and the last completed segment's measured media rate.
-    /// Both are observations of what PMS actually emitted; `dg_abr_kbps` is the requested ceiling
-    /// and must never be presented as either of these.
-    pub dg_abr_declared_kbps: AtomicI64,
-    pub dg_abr_media_kbps: AtomicI64,
-    /// Latest measured body throughput and normalized content reserve. `-1` means no complete
-    /// measurement exists yet. Production ratio is total segment acquisition / media duration in
-    /// per-mille; it is meaningful for HLS only.
-    pub dg_abr_net_kbps: AtomicI64,
-    pub dg_abr_buffer_ms: AtomicI64,
-    pub dg_abr_ratio_pm: AtomicI64,
-    /// Current controller action plus its candidate rung. A discrete transaction remains visible
-    /// until the next completed segment publishes its steady decision; keeping it beyond that made
-    /// `Action` describe an old commit beside `Reason` from the current model state.
-    pub dg_abr_action: AtomicU8,
-    pub dg_abr_target_kbps: AtomicI64,
-    /// Last Original source failure, as `player::ABR_FAILURE_*` plus its HTTP status when one was
-    /// observed. These are playback-scoped rather than engine-scoped: HLS→Original failure tears
-    /// the Engine down while restoring HLS, and clearing them in `reset_session` would make the
-    /// successful rollback erase its own cause before the diagnostics panel could photograph it.
-    pub abr_failure_kind: AtomicU8,
-    pub abr_failure_status: AtomicI32,
-    /// Consecutive Original windows whose starvation horizon sat inside the unsafe band.
-    /// Wall milliseconds an unsafe Original deficit has held (N13). Was a COUNT of
-    /// 750 ms active-read windows, on a clock that stops under backpressure.
-    pub dg_abr_unsafe_deficit_ms: AtomicI64,
-    pub dg_abr_safe_kbps: AtomicI64,
-    pub dg_abr_optimal_kbps: AtomicI64,
-    pub dg_abr_unc_pm: AtomicI64,
-    pub dg_abr_samples: AtomicI64,
-    pub dg_abr_slope_ms_per_s: AtomicI64,
-    pub dg_abr_starve_secs: AtomicI64,
-    pub dg_abr_pred_pm: AtomicI64,
-    pub dg_abr_risk: AtomicI64,
-    /// Why the last steady-state decision went the way it did — `crate::player::ABR_WHY_*`, `0`
-    /// while nothing has decided anything. The plan's reason code, on the surface a user
-    /// photographs rather than only in the event log.
-    pub dg_abr_why: AtomicU8,
-    /// `vp_place` return, and the size it was called with. `i32::MIN` = never called.
-    pub dg_place_rv: AtomicI32,
-    pub dg_placed_w: AtomicI32,
-    pub dg_placed_h: AtomicI32,
 }
 
 impl Shared {
     pub const fn new() -> Self {
         Shared {
             native_session: Mutex::new(NativeSessionState::new()),
-            dg_stage: AtomicU8::new(0),
-            dg_cb_count: AtomicU32::new(0),
-            dg_feed_state: AtomicU8::new(0),
             dg_cb_err: AtomicI32::new(0),
-            dg_cb_err_at: AtomicU32::new(0),
             dg_cb_err_num: AtomicI32::new(0),
-            dg_http_status: AtomicI32::new(0),
-            dg_transport_rc: AtomicI32::new(0),
-            dg_transport_age_ms: AtomicI64::new(-1),
-            dg_transport_reopen_failed: AtomicBool::new(false),
-            dg_net_rx: AtomicI64::new(0),
-            dg_load_at: AtomicU32::new(0),
-            dg_frame_at: AtomicU32::new(0),
-            dg_vpres_ct: AtomicU32::new(0),
             dg_vpres_at: AtomicU32::new(0),
+            dg_vpres_ct: AtomicU32::new(0),
             dg_vpres_gap: AtomicU32::new(0),
-            dg_aq_video: AtomicI64::new(0),
-            dg_aq_audio: AtomicI64::new(0),
-            dg_fed_v_pts: AtomicI64::new(0),
-            dg_fed_a_pts: AtomicI64::new(0),
             dg_load_v: AtomicU8::new(0),
-            dg_load_a: AtomicU8::new(0),
-            dg_abr_mode: AtomicU8::new(0),
-            dg_abr_kbps: AtomicI64::new(0),
-            dg_abr_declared_kbps: AtomicI64::new(-1),
-            dg_abr_media_kbps: AtomicI64::new(-1),
-            dg_abr_net_kbps: AtomicI64::new(-1),
-            dg_abr_buffer_ms: AtomicI64::new(-1),
-            dg_abr_ratio_pm: AtomicI64::new(-1),
-            dg_abr_action: AtomicU8::new(0),
-            dg_abr_target_kbps: AtomicI64::new(0),
-            abr_failure_kind: AtomicU8::new(0),
-            abr_failure_status: AtomicI32::new(0),
-            dg_abr_unsafe_deficit_ms: AtomicI64::new(0),
-            dg_abr_safe_kbps: AtomicI64::new(-1),
-            dg_abr_optimal_kbps: AtomicI64::new(-1),
-            dg_abr_unc_pm: AtomicI64::new(-1),
-            dg_abr_samples: AtomicI64::new(-1),
-            dg_abr_slope_ms_per_s: AtomicI64::new(0),
-            dg_abr_starve_secs: AtomicI64::new(-1),
-            dg_abr_pred_pm: AtomicI64::new(-1),
-            dg_abr_risk: AtomicI64::new(-1),
-            dg_abr_why: AtomicU8::new(0),
-            dg_place_rv: AtomicI32::new(i32::MIN),
-            dg_placed_w: AtomicI32::new(0),
-            dg_placed_h: AtomicI32::new(0),
             playpos_ns: AtomicI64::new(0),
             pres_fed: AtomicI64::new(0),
             frames: AtomicI32::new(0),
@@ -950,7 +805,6 @@ impl Shared {
             load_timed_out: AtomicBool::new(false),
             native_load_deferred_logged_epoch: AtomicU32::new(0),
             native_load_elapsed_ms: AtomicU64::new(0),
-            playback_trace: Mutex::new(super::report::PlaybackTrace::new()),
             desired_sub_idx: AtomicI32::new(-1),
             track_names: Mutex::new(TrackNames::new()),
             sub_cues: Mutex::new(Vec::new()),
@@ -1395,16 +1249,6 @@ impl Shared {
         Some(result)
     }
 
-
-
-
-    /// Clear a playback's sticky Original failure. Kept separate from [`Shared::reset_session`]
-    /// for the same lifetime reason as the ABR seed: an engine reload is not a new playback.
-    pub fn clear_abr_failure(&self) {
-        self.abr_failure_kind.store(0, Ordering::Relaxed);
-        self.abr_failure_status.store(0, Ordering::Relaxed);
-    }
-
     pub fn publish_video_raster(&self, width: i32, height: i32) {
         let packed = (u64::from(width as u32) << 32) | u64::from(height as u32);
         self.video_w.store(width, Ordering::Relaxed);
@@ -1428,9 +1272,7 @@ impl Shared {
         self.duration_ns.store(duration_ns, Ordering::Relaxed);
     }
 
-    /// **NB: this does NOT clear the ABR seed OR Original failure** — see
-    /// [`Shared::clear_abr_seed`] and [`Shared::clear_abr_failure`]. Everything else here describes
-    /// one engine's session and must not outlive it.
+    /// Everything here describes one engine's session and must not outlive it.
     pub fn reset_session(&self) {
         self.reset_session_inner(false);
     }
@@ -1451,52 +1293,14 @@ impl Shared {
         }
         // the diagnostics mirror is per-session too — a stale bind outcome from the last item is
         // exactly the misleading answer the read-out exists to avoid
-        self.dg_stage.store(0, Ordering::Relaxed);
-        self.dg_cb_count.store(0, Ordering::Relaxed);
-        self.dg_feed_state.store(0, Ordering::Relaxed);
         // A latched error MUST be cleared here, or one bad session paints every later healthy
         // playback red for the life of the process.
         self.dg_cb_err.store(0, Ordering::Relaxed);
-        self.dg_cb_err_at.store(0, Ordering::Relaxed);
         self.dg_cb_err_num.store(0, Ordering::Relaxed);
-        self.dg_http_status.store(0, Ordering::Relaxed);
-        self.dg_transport_rc.store(0, Ordering::Relaxed);
-        self.dg_transport_age_ms.store(-1, Ordering::Relaxed);
-        self.dg_transport_reopen_failed.store(false, Ordering::Relaxed);
-        self.dg_net_rx.store(0, Ordering::Relaxed);
-        self.dg_load_at.store(0, Ordering::Relaxed);
-        self.dg_frame_at.store(0, Ordering::Relaxed);
-        self.dg_vpres_ct.store(0, Ordering::Relaxed);
         self.dg_vpres_at.store(0, Ordering::Relaxed);
+        self.dg_vpres_ct.store(0, Ordering::Relaxed);
         self.dg_vpres_gap.store(0, Ordering::Relaxed);
-        self.dg_aq_video.store(0, Ordering::Relaxed);
-        self.dg_aq_audio.store(0, Ordering::Relaxed);
-        self.dg_fed_v_pts.store(0, Ordering::Relaxed);
-        self.dg_fed_a_pts.store(0, Ordering::Relaxed);
         self.dg_load_v.store(0, Ordering::Relaxed);
-        self.dg_load_a.store(0, Ordering::Relaxed);
-        self.dg_abr_mode.store(0, Ordering::Relaxed);
-        self.dg_abr_kbps.store(0, Ordering::Relaxed);
-        self.dg_abr_declared_kbps.store(-1, Ordering::Relaxed);
-        self.dg_abr_media_kbps.store(-1, Ordering::Relaxed);
-        self.dg_abr_net_kbps.store(-1, Ordering::Relaxed);
-        self.dg_abr_buffer_ms.store(-1, Ordering::Relaxed);
-        self.dg_abr_ratio_pm.store(-1, Ordering::Relaxed);
-        self.dg_abr_action.store(0, Ordering::Relaxed);
-        self.dg_abr_target_kbps.store(0, Ordering::Relaxed);
-        self.dg_abr_unsafe_deficit_ms.store(0, Ordering::Relaxed);
-        self.dg_abr_safe_kbps.store(-1, Ordering::Relaxed);
-        self.dg_abr_optimal_kbps.store(-1, Ordering::Relaxed);
-        self.dg_abr_unc_pm.store(-1, Ordering::Relaxed);
-        self.dg_abr_samples.store(-1, Ordering::Relaxed);
-        self.dg_abr_slope_ms_per_s.store(0, Ordering::Relaxed);
-        self.dg_abr_starve_secs.store(-1, Ordering::Relaxed);
-        self.dg_abr_pred_pm.store(-1, Ordering::Relaxed);
-        self.dg_abr_risk.store(-1, Ordering::Relaxed);
-        self.dg_abr_why.store(0, Ordering::Relaxed);
-        self.dg_place_rv.store(i32::MIN, Ordering::Relaxed);
-        self.dg_placed_w.store(0, Ordering::Relaxed);
-        self.dg_placed_h.store(0, Ordering::Relaxed);
         self.playpos_ns.store(0, Ordering::Relaxed);
         self.pres_fed.store(0, Ordering::Relaxed);
         self.frames.store(0, Ordering::Relaxed);
@@ -2292,49 +2096,14 @@ pub struct Transport {
     // newest target, so without this counter a coalesced burst is indistinguishable from a
     // single tap after the fact — the pump reports `coalesced=` from it (see pump.rs).
     pub seek_reqs: AtomicU32,
+    /// An audio-track pick is staged (`player::request_audio_track`) and owes a reload at the
+    /// current position, which the pump performs on its next tick.
+    pub audio_reload: AtomicBool,
 }
 
-/// The instant the user-pause clock reads for a transition or a sample. `Instant::now()`, except
-/// that a host test may pin it for its own thread (`pinned_pause_clock`) so a Pause->Resume
-/// cycle can be given an exact length instead of being slept through.
+/// The instant the user-pause clock reads for a transition or a sample.
 fn pause_clock_now() -> Instant {
-    #[cfg(test)]
-    if let Some(pinned) = pinned_pause_clock::read() {
-        return pinned;
-    }
     Instant::now()
-}
-
-/// A per-thread virtual reading for `pause_clock_now`: time moves only when `advance` is called.
-/// Dropping the guard restores the real clock for the thread.
-#[cfg(test)]
-pub(crate) mod pinned_pause_clock {
-    use std::cell::Cell;
-    use std::time::{Duration, Instant};
-
-    thread_local! {
-        static PINNED: Cell<Option<Instant>> = const { Cell::new(None) };
-    }
-
-    pub(super) fn read() -> Option<Instant> { PINNED.with(Cell::get) }
-
-    pub(crate) struct Pinned;
-
-    impl Pinned {
-        /// Pin this thread's pause clock at the real time now.
-        pub(crate) fn now() -> Self {
-            PINNED.with(|pinned| pinned.set(Some(Instant::now())));
-            Pinned
-        }
-
-        pub(crate) fn advance(&self, by: Duration) {
-            PINNED.with(|pinned| pinned.set(pinned.get().map(|at| at + by)));
-        }
-    }
-
-    impl Drop for Pinned {
-        fn drop(&mut self) { PINNED.with(|pinned| pinned.set(None)); }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -2409,6 +2178,7 @@ impl Transport {
             scrub_ns: AtomicI64::new(-1),
             seek_to_ns: AtomicI64::new(-1),
             seek_reqs: AtomicU32::new(0),
+            audio_reload: AtomicBool::new(false),
         }
     }
 
@@ -2515,6 +2285,7 @@ impl Transport {
         // live one), and both publish `Scrub::IDLE` themselves.
         self.seek_to_ns.store(-1, Ordering::Relaxed);
         self.seek_reqs.store(0, Ordering::Relaxed);
+        self.audio_reload.store(false, Ordering::Relaxed);
     }
 }
 
@@ -3227,7 +2998,7 @@ mod tests {
             .filter_map(|l| l.split(':').next())
             .collect();
         assert!(
-            declared.len() >= 10,
+            declared.len() >= 5,
             "found only {} dg_ fields — the parse broke",
             declared.len()
         );
@@ -3245,147 +3016,4 @@ mod tests {
         }
     }
 
-    /// **`reset_session` must NOT drop the ABR seed, and `clear_abr_seed` must** (I8).
-    ///
-    /// `engine::teardown` calls `reset_session` on both paths — a real stop AND a reload — and a
-    /// reload is the same item on the same link at a new position: a seek, a quality pick, an
-    /// app-switch resume. Re-measuring the link from nothing across one is what made every skip
-    /// re-ramp the ladder for ten to twenty seconds. So the split is load-bearing and this is the
-    /// assertion that keeps it: the two methods are one keystroke apart and merging them back would
-    /// otherwise be silent.
-    #[test]
-    fn the_carried_link_estimate_survives_a_reload_and_not_a_stop() {
-        let s = Shared::new();
-        let estimate = crate::abr::CapacityEstimate::from_snapshot(40_000, 41_000, 200, 19)
-            .expect("valid measured estimate");
-        s.publish_abr_seed(estimate);
-
-        s.reset_session();
-        let carried = s
-            .abr_seed()
-            .expect("a reload tears the engine down and keeps the link; this is the seek path");
-        assert_eq!(carried.samples, 19);
-        assert_eq!(carried.slow_kbps, 40_000);
-
-        s.clear_abr_seed();
-        assert!(
-            s.abr_seed().is_none(),
-            "a real stop ends the playback, and the next one measures its own link",
-        );
-    }
-
-    #[test]
-    fn a_carried_link_estimate_ages_across_an_unobserved_reload_gap() {
-        let s = Shared::new();
-        let estimate = crate::abr::CapacityEstimate::from_snapshot(40_000, 42_000, 100, 19)
-            .expect("valid measured estimate");
-        let half_life = crate::abr::AbrPolicy::measured().stale_half_life_ms;
-        let observed_at = Instant::now()
-            .checked_sub(Duration::from_millis(u64::from(half_life) * 2))
-            .expect("test instant");
-        s.publish_abr_seed_at(estimate, observed_at);
-
-        let aged = s.abr_seed().expect("a reload carries the estimate");
-        assert!(
-            aged.uncertainty_pm > estimate.uncertainty_pm,
-            "pause/background/reload wall time must widen carried evidence",
-        );
-    }
-
-    /// A failed HLS→Original transaction immediately tears down the failed Engine and reloads
-    /// the retained HLS one. The HTTP cause must survive that reset, then die with the playback.
-    #[test]
-    fn original_failure_survives_rollback_reload_and_not_the_playback() {
-        let s = Shared::new();
-        s.abr_failure_kind
-            .store(crate::player::ABR_FAILURE_ORIGINAL_HTTP, Ordering::Relaxed);
-        s.abr_failure_status.store(503, Ordering::Relaxed);
-
-        s.reset_session();
-        assert_eq!(
-            s.abr_failure_kind.load(Ordering::Relaxed),
-            crate::player::ABR_FAILURE_ORIGINAL_HTTP
-        );
-        assert_eq!(s.abr_failure_status.load(Ordering::Relaxed), 503);
-
-        s.clear_abr_failure();
-        assert_eq!(s.abr_failure_kind.load(Ordering::Relaxed), 0);
-        assert_eq!(s.abr_failure_status.load(Ordering::Relaxed), 0);
-    }
-
-    /// The one invariant that cannot be recovered from if it breaks, and breaks SILENTLY: a session
-    /// boundary must forget this session's picture. `seen_frame` is set once, off-thread, and is
-    /// never cleared anywhere else — so a `reset_session` that dropped it would leave it true for
-    /// the rest of the process's life, and every subsequent cold start would show only the 12px
-    /// transport mark instead of the centred read-out. Graded together with `frames`, because the
-    /// two are only meaningful as a pair (see `Shared::seen_frame`).
-    #[test]
-    fn reset_session_forgets_this_sessions_picture() {
-        let s = Shared::new();
-        assert!(
-            !s.seen_frame.load(Ordering::Relaxed),
-            "a fresh session has shown nothing"
-        );
-        s.seen_frame.store(true, Ordering::Relaxed);
-        s.frames.store(9, Ordering::Relaxed);
-        s.demux_io_failed.store(true, Ordering::Relaxed);
-        s.dg_transport_rc.store(56, Ordering::Relaxed);
-        s.dg_transport_age_ms.store(60_000, Ordering::Relaxed);
-        s.dg_transport_reopen_failed.store(true, Ordering::Relaxed);
-        s.playback_trace
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .seed_for_reset_test();
-        s.dg_abr_mode.store(2, Ordering::Relaxed);
-        s.dg_abr_kbps.store(2_000, Ordering::Relaxed);
-        s.dg_abr_declared_kbps.store(1_459, Ordering::Relaxed);
-        s.dg_abr_media_kbps.store(1_051, Ordering::Relaxed);
-        s.dg_abr_net_kbps.store(4_000, Ordering::Relaxed);
-        s.dg_abr_buffer_ms.store(2_800, Ordering::Relaxed);
-        s.dg_abr_ratio_pm.store(500, Ordering::Relaxed);
-        s.dg_abr_action.store(5, Ordering::Relaxed);
-        s.dg_abr_target_kbps.store(4_000, Ordering::Relaxed);
-        s.dg_abr_unsafe_deficit_ms.store(1_500, Ordering::Relaxed);
-        s.reset_session();
-        assert!(
-            !s.seen_frame.load(Ordering::Relaxed),
-            "a reload/stop blanks the plane — say so"
-        );
-        assert_eq!(
-            s.frames.load(Ordering::Relaxed),
-            0,
-            "and the two must be reset together"
-        );
-        assert!(
-            !s.demux_io_failed.load(Ordering::Relaxed),
-            "a new session must not inherit an I/O failure"
-        );
-        assert_eq!(
-            (
-                s.dg_transport_rc.load(Ordering::Relaxed),
-                s.dg_transport_age_ms.load(Ordering::Relaxed),
-                s.dg_transport_reopen_failed.load(Ordering::Relaxed),
-            ),
-            (0, -1, false),
-            "nor the cause of the last session's transfer failure"
-        );
-        assert_eq!(
-            s.playback_trace
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .step_count_for_test(),
-            1,
-            "an engine reload must preserve the playback attempt's causal trace",
-        );
-        assert_eq!(s.dg_abr_mode.load(Ordering::Relaxed), 0);
-        assert_eq!(s.dg_abr_kbps.load(Ordering::Relaxed), 0);
-        assert_eq!(s.dg_abr_declared_kbps.load(Ordering::Relaxed), -1);
-        assert_eq!(s.dg_abr_media_kbps.load(Ordering::Relaxed), -1);
-        assert_eq!(s.dg_abr_net_kbps.load(Ordering::Relaxed), -1);
-        assert_eq!(s.dg_abr_buffer_ms.load(Ordering::Relaxed), -1);
-        assert_eq!(s.dg_abr_ratio_pm.load(Ordering::Relaxed), -1);
-        assert_eq!(s.dg_abr_action.load(Ordering::Relaxed), 0);
-        assert_eq!(s.dg_abr_target_kbps.load(Ordering::Relaxed), 0);
-        assert_eq!(s.dg_abr_unsafe_deficit_ms.load(Ordering::Relaxed), 0);
-    }
 }

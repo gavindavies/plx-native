@@ -191,7 +191,7 @@ pub(crate) fn play(
     let saved = local_progress::choices(path, size);
     let audio = stage_audio(ps, &item, &probe, saved.as_ref());
     super::playback::start_playback(ps, pa, resume_ms.saturating_mul(1_000_000) as i64,
-        super::playback::Origin::Here, plx_appkit::player_hud::LINGER_MS, ret, pages, bridge);
+        plx_appkit::player_hud::LINGER_MS, ret, pages, bridge);
     // After the start, which retires the previous item's store as it begins.
     if let Some(audio) = audio {
         plx_media::playback::set_cur_audio(ps, audio);

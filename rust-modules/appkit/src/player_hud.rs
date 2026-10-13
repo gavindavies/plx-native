@@ -137,14 +137,12 @@ fn wrap(s: &str, max: usize) -> Vec<String> {
 ///
 /// TWO producers, one renderer: an external (sidecar) selection is asked first — it is no
 /// demuxer track, so `desired_sub_idx` is -1 while one is up and the embedded store answers
-/// nothing — then the embedded cue store. `burned` (`route::subtitles_burned`) silences the sidecar, because
-/// a server that BURNS the selection into the picture (a re-encode, or a remux the app may not
-/// draw over) would otherwise show the line twice.
+/// nothing — then the embedded cue store.
 ///
 /// A cue too tall for the area below the Timing capsule is shown a page at a time
 /// ([`CaptionPlan`]); `pager` holds its layout so the wrap and fit run once per cue, not per frame.
-pub fn draw_subtitles(pager: &CaptionPager, hud_up: bool, burned: bool) {
-    let Some(page) = pager.refresh(hud_up, burned) else { return };
+pub fn draw_subtitles(pager: &CaptionPager, hud_up: bool) {
+    let Some(page) = pager.refresh(hud_up) else { return };
     let slot = pager.slot.borrow();
     if let Some((_, plan)) = slot.as_ref() {
         draw_caption_block(plan.page_lines(page), &plan.page_layout(page));
@@ -154,8 +152,8 @@ pub fn draw_subtitles(pager: &CaptionPager, hud_up: bool, burned: bool) {
 /// Which page of the active cue is showing (0 for a cue that fits whole, and for no cue), so the
 /// player's frame fingerprint can owe a frame at the instant a long cue turns its page: nothing
 /// else on the screen changes then.
-pub fn caption_page(pager: &CaptionPager, hud_up: bool, burned: bool) -> u32 {
-    pager.refresh(hud_up, burned).unwrap_or(0) as u32
+pub fn caption_page(pager: &CaptionPager, hud_up: bool) -> u32 {
+    pager.refresh(hud_up).unwrap_or(0) as u32
 }
 
 /// Shared caption placement for plain text and a styled-renderer failure message. Text size and
@@ -178,9 +176,9 @@ pub fn draw_subtitle_message(text: &str, hud_up: bool) {
 /// same direction, on top of that. The third value is the lowest y the block may reach — with the
 /// HUD up that is the transport's ceiling, so a block that grows down cannot run into the scrubber.
 fn caption_geometry(hud_up: bool) -> (f32, f32, f32) {
-    let scale = subtitle_size_scale(plx_media::playback::subtitle_size());
+    let scale = subtitle_size_scale(plx_data::settings::subtitle_size());
     let baseline = (if hud_up { SUB_CEIL_Y } else { SUB_BASE_Y })
-        - subtitle_position_lift(plx_media::playback::subtitle_position());
+        - subtitle_position_lift(plx_data::settings::subtitle_position());
     let floor = if hud_up { SUB_CEIL_Y } else { CAPTION_FLOOR_Y };
     (scale, baseline, floor)
 }
@@ -274,12 +272,12 @@ pub struct CaptionPager {
 impl CaptionPager {
     /// Look the active cue up, re-plan it if it is not the one planned, and return the page to
     /// show. `None` for no caption.
-    fn refresh(&self, hud_up: bool, burned: bool) -> Option<usize> {
+    fn refresh(&self, hud_up: bool) -> Option<usize> {
         let now_ns = plx_media::player::playpos_ns();
         // the sidecar is looked up on the SUBTITLE clock (the playhead less the viewer's timing
         // offset); the embedded store applies the same subtraction inside `active_subtitle_span`
         let clock = plx_media::player::subtitle_clock_ns(now_ns);
-        let (text, start, end) = plx_media::player::sidecar::active_span(clock, burned)
+        let (text, start, end) = plx_media::player::sidecar::active_span(clock)
             .or_else(|| plx_media::player::active_subtitle_span(now_ns))?;
         if text.trim().is_empty() {
             return None;
@@ -385,7 +383,7 @@ pub fn subtitle_ink() -> [f32; 4] {
     subtitle_ink_for(plx_media::player::subtitle_tone())
 }
 
-fn subtitle_ink_for(tone: plx_plex::plex::session::SubtitleTone) -> [f32; 4] {
+fn subtitle_ink_for(tone: plx_data::settings::SubtitleTone) -> [f32; 4] {
     theme::SUBTITLE_INKS
         .get(tone.index() as usize)
         .copied()
@@ -395,8 +393,8 @@ fn subtitle_ink_for(tone: plx_plex::plex::session::SubtitleTone) -> [f32; 4] {
 /// The face-size multiplier for the viewer's Settings > Playback pick, applied to the plain-text
 /// caption's 36 px base face ([`draw_subtitle_message`]) and its line pitch/wrap width together,
 /// so a larger caption still wraps before it runs off either edge.
-fn subtitle_size_scale(size: plx_plex::plex::session::SubtitleSize) -> f32 {
-    use plx_plex::plex::session::SubtitleSize;
+fn subtitle_size_scale(size: plx_data::settings::SubtitleSize) -> f32 {
+    use plx_data::settings::SubtitleSize;
     match size {
         SubtitleSize::Small => 0.78,
         SubtitleSize::Medium => 1.0,
@@ -408,8 +406,8 @@ fn subtitle_size_scale(size: plx_plex::plex::session::SubtitleSize) -> f32 {
 /// How far ABOVE [`SUB_BASE_Y`]/[`SUB_CEIL_Y`] the viewer's Position pick lifts the plain-text
 /// caption ([`draw_subtitle_message`]) — Low is the baseline every build before this preference
 /// drew, so it lifts nothing.
-fn subtitle_position_lift(position: plx_plex::plex::session::SubtitlePosition) -> f32 {
-    use plx_plex::plex::session::SubtitlePosition;
+fn subtitle_position_lift(position: plx_data::settings::SubtitlePosition) -> f32 {
+    use plx_data::settings::SubtitlePosition;
     match position {
         SubtitlePosition::Low => 0.0,
         SubtitlePosition::Middle => 160.0,
@@ -645,30 +643,19 @@ const BTN_S: f32 = 64.0; // right-side control button size (mockup ≈ 68)
 const BTN_GAP: f32 = 22.0;
 const BTN_Y: f32 = SCR_H - 288.0;
 
-// The control row, exported for `skip_pill` — while a marker is under the playhead the Skip button
-// STANDS IN for the two discs, and it has to land on exactly their row and right edge or the
-// transport visibly jumps when a segment begins.
 /// control-row height (one disc's diameter)
 pub const CTRL_H: f32 = BTN_S;
 /// control-row top
 pub const CTRL_Y: f32 = BTN_Y;
 /// control-row right edge — the app's side margin, matching the track-menu panel.
 ///
-/// The mock's `right: 80` put the Subtitles/Audio/`…` discs 16px past the 5% overscan frame, and the
-/// track and `…` panels were aligned to the same 80 (`track_menu`/`more_menu`). All three moved onto
-/// `MARGIN_X` together on 2026-08-23 — they are one right edge by design, so they take one number.
+/// The discs and the track panel share this one right edge, so they take one number.
 pub const CTRL_RIGHT: f32 = SCR_W - plx_ui::consts::MARGIN_X;
-/// how many control discs the row holds: Subtitles, Audio, More
-const BTN_N: i32 = 3;
+/// how many control discs the row holds: Subtitles, Audio
+pub const BTN_N: i32 = 2;
 
 /// The CONTROL ROW's focus pop — one spring per item ([`plx_ui::widgets::CtlPop`]), so the
 /// control being left shrinks while the arriving one grows instead of both snapping.
-///
-/// **One array for all three slot occupants**, not one per module. The transport discs, the Skip
-/// pill and the Up Next pair are the same row at the same right edge, only ever one at a time, and
-/// the cursor walking them is `hud_nav.btn` for all three ([`ControlSlot::items`]) — so the pop is a
-/// property of that row and not of whichever module happens to draw it this frame. `BTN_N` 3 is the
-/// widest occupant. `up_next` and `skip_pill` read theirs through [`row_pop`].
 ///
 /// A field of [`TransportRow`], which the player's instance owns: the HUD keeps no view struct
 /// — it is drawn entirely from the caller's arguments — so this and the resume clock beside it are
@@ -685,14 +672,6 @@ pub type RowPop = plx_ui::widgets::CtlPop<{ BTN_N as usize }>;
 /// exactly where [`step`](Self::step)'s doc says they must be.
 pub struct TransportRow {
     pop: RowPop,
-    /// **The measured width of every control-row stand-in label seen so far** — a RENDER memo, the
-    /// one half of this struct that is not logical state.
-    ///
-    /// Native font metrics share a cache; this local memo also avoids repeated capability calls
-    /// and string preparation for the fixed control labels. It rides here rather than in a struct of its own
-    /// because `ctrl_slot` is reached from the same three places the springs are — `draw_hud`,
-    /// `up_next` and `skip_pill` — and one borrow through those paths is one borrow.
-    widths: Vec<(String, f32)>,
     /// The paused→playing EDGE, as an `SDL_GetTicks` stamp — the clock behind
     /// [`TransportMark::Play`]. `None` until this session has been resumed at least once.
     play_at: Option<u32>,
@@ -713,7 +692,6 @@ impl TransportRow {
     pub fn new() -> Self {
         Self {
             pop: RowPop::new(),
-            widths: Vec::new(),
             play_at: None,
             pause_seen: None,
         }
@@ -729,20 +707,17 @@ impl TransportRow {
     /// overlay was open, and a resume pressed with the Info card open would stamp its 2 s from the
     /// moment the card CLOSED, or never.
     ///
-    /// `focus == 1` is the control column; anything else closes every pop. The index is bounded by
-    /// the CURRENT occupant's item count, so a stale `btn` left over from a wider slot cannot pop a
-    /// control the narrower one does not have.
-    pub fn step(&mut self, slot: ControlSlot, focus: i32, btn: i32, dt: f32, now: u32) {
+    /// `focus == 1` is the control column; anything else closes every pop.
+    pub fn step(&mut self, focus: i32, btn: i32, dt: f32, now: u32) {
         self.note_transport(now);
         let f = (focus == 1)
             .then(|| usize::try_from(btn).ok())
             .flatten()
-            .filter(|&i| i < slot.items().max(0) as usize);
+            .filter(|&i| i < BTN_N as usize);
         self.pop.step(f, dt);
     }
 
-    /// Control `i`'s focus pop this frame — the read half of the row's springs, for the two
-    /// stand-ins that draw into this row from their own modules (`up_next`, `skip_pill`).
+    /// Control `i`'s focus pop this frame — the read half of the row's springs.
     pub fn scale(&self, i: c_int) -> f32 {
         self.pop.scale(i.max(0) as usize)
     }
@@ -788,194 +763,9 @@ impl TransportRow {
     }
 }
 
-/// Index of the `…` overflow disc within the row — the LAST one. Exported because `app.rs` routes
-/// its OK and its click, and a second literal `2` over there is exactly the drift `ControlSlot`
-/// was introduced to stop.
-pub const BTN_MORE: i32 = BTN_N - 1;
-/// width the disc row occupies, the floor for anything replacing it
-pub const CTRL_ROW_W: f32 = 3.0 * BTN_S + 2.0 * BTN_GAP;
+/// width the disc row occupies
+pub const CTRL_ROW_W: f32 = BTN_N as f32 * BTN_S + (BTN_N - 1) as f32 * BTN_GAP;
 
-/// The shared control-row slot for anything that STANDS IN for the disc pair: right-aligned to the
-/// discs' own edge, and never narrower than the pair it replaces so the row does not visibly shrink
-/// when it appears. ONE geometry for both stand-ins and for the pointer hit-test.
-///
-/// The measured width is memoised per label, avoiding repeated capability calls and string
-/// preparation for fixed labels in addition to the native font-metric cache.
-pub fn ctrl_slot(row: &mut TransportRow, label: &str, measure: &dyn plx_machine::machine::Measure) -> Rect {
-    let memo = &mut row.widths;
-    let w = match memo.iter().find(|(l, _)| l == label) {
-        Some((_, w)) => *w,
-        None => {
-            let measured = ctrl_slot_measure(label, measure);
-            // `text_width` reads 0 until `init_text` has run — don't cache a pre-init measurement
-            if measured > CTRL_ROW_W {
-                memo.push((label.to_string(), measured));
-            }
-            measured
-        }
-    };
-    Rect::new(CTRL_RIGHT - w, CTRL_Y, w, CTRL_H)
-}
-
-/// [`ctrl_slot`]'s width without writing the memo — the cached width when the draw has measured
-/// `label`, else the same measurement it would cache.
-pub fn ctrl_slot_w(row: &TransportRow, label: &str, measure: &dyn plx_machine::machine::Measure) -> f32 {
-    row.widths.iter().find(|(l, _)| l == label).map_or_else(|| ctrl_slot_measure(label, measure), |(_, w)| *w)
-}
-
-fn ctrl_slot_measure(label: &str, measure: &dyn plx_machine::machine::Measure) -> f32 {
-    const PAD_X: f32 = 34.0;
-    (measure.width_str(label, theme::size::BODY, true) + 2.0 * PAD_X).max(CTRL_ROW_W)
-}
-
-/// What currently occupies the transport's right-hand control row.
-///
-/// This is the one concept the skip / Up Next feature introduces, and it exists as a TYPE because
-/// the alternative — re-deriving the three-way choice at each of the draw, the OK handler, the
-/// pointer handler, the LEFT/RIGHT pin and `icon_hit` — encodes its precedence in the order of five
-/// separate if-chains, with nothing to keep them agreeing and nothing to test.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ControlSlot {
-    /// the ordinary Subtitles + Audio pair
-    Discs,
-    /// a marker segment is under the playhead
-    Skip(crate::skip_pill::Prompt),
-    /// …and the show has another episode queued, which outranks skipping the credits. Carries the
-    /// segment for the same reason `Skip` does — so the row has a stable IDENTITY.
-    UpNext(plx_data::metadata::Marker),
-}
-
-impl ControlSlot {
-    /// How many focusable items the row holds — what the LEFT/RIGHT clamp needs, as DATA instead of
-    /// a hand-written `btn = 0` pin beside a `clamp(0, 1)`.
-    pub fn items(self) -> c_int {
-        match self {
-            ControlSlot::Discs => BTN_N,
-            // Watch Credits + Next Episode — the one stand-in with a pair
-            ControlSlot::UpNext(_) => 2,
-            ControlSlot::Skip(_) => 1,
-        }
-    }
-    /// Where the focus ring parks when this row APPEARS. It is 0 everywhere except Up Next, whose
-    /// primary is drawn on the RIGHT — and getting that wrong is not cosmetic: the countdown's
-    /// cancel rule is a steady state (`up_next::countdown_may_run`), so parking on item 0 there
-    /// would disarm the timer on the frame after it armed.
-    pub fn primary_btn(self) -> c_int {
-        match self {
-            ControlSlot::UpNext(_) => crate::up_next::PRIMARY_BTN,
-            _ => 0,
-        }
-    }
-    /// whether the Subtitles/Audio discs are the current occupant
-    pub fn is_discs(self) -> bool {
-        matches!(self, ControlSlot::Discs)
-    }
-    /// Which SEGMENT this row is offering, if any — the row's identity for "have I already offered
-    /// this?". Deliberately not the `ControlSlot` itself: `active_marker` is gated on `is_playing`,
-    /// so a momentary drop out of Playing mid-segment reads as "no segment" and flips the slot to
-    /// `Discs` and back. Keyed on the segment, that round trip is not a new offer; keyed on the
-    /// slot, it was — and every flicker re-raised the HUD over an intro the user was just watching.
-    pub fn offer(self) -> Option<(plx_data::metadata::MarkerKind, i64)> {
-        match self {
-            ControlSlot::Discs => None,
-            ControlSlot::Skip(pr) => Some((pr.marker.kind, pr.marker.start_ms)),
-            ControlSlot::UpNext(m) => Some((m.kind, m.start_ms)),
-        }
-    }
-    /// **Item `idx` of whatever occupies the row, at the rect it is DRAWN at** — the one
-    /// geometry `PlayerScreen`'s `Focusable::place` answers with, and therefore the rect its stop
-    /// is registered at, for all three occupants and every item of each (`0..items()`). `None`
-    /// past the occupant's last item.
-    ///
-    /// Read-only over `row`'s label-width memo ([`ctrl_slot_w`]): `place` is `&self`, and a width
-    /// the draw has not cached yet is measured the same way the draw measures it.
-    pub fn item_rect(self, row: &TransportRow, idx: c_int, measure: &dyn plx_machine::machine::Measure) -> Option<Rect> {
-        if idx < 0 || idx >= self.items() {
-            return None;
-        }
-        Some(match self {
-            ControlSlot::Discs => disc_hit_rect(idx),
-            ControlSlot::Skip(pr) => {
-                let w = ctrl_slot_w(row, pr.label(), measure);
-                Rect::new(CTRL_RIGHT - w, CTRL_Y, w, CTRL_H)
-            }
-            ControlSlot::UpNext(_) => {
-                let l = crate::up_next::layout_peek(row, measure);
-                if idx == crate::up_next::BTN_NEXT { l.next } else { l.credits }
-            }
-        })
-    }
-}
-
-/// PURE precedence: given the segment under the playhead and whether the queue has a successor,
-/// which control owns the row. Host-testable, and the ONLY place the ordering is written down.
-///
-/// Up Next outranks Skip Credits deliberately: with somewhere to go, "next episode" is the better
-/// offer, and Skip Credits stays for the last episode of a show, where there is nowhere to go.
-/// Only a `final` credits marker (one that runs to the end of the item) qualifies: a mid-item
-/// credits segment is followed by more of the episode, so it keeps the Skip Credits pill.
-///
-/// The Next episode preference only changes the offer for that final-credits-with-a-successor
-/// case: `AfterCredits` and `Off` offer nothing there (the discs stay), because the successor is
-/// not announced until the stream ends, if then. The last episode and films keep Skip Credits.
-pub fn slot_for(marker: Option<plx_data::metadata::Marker>, has_next: bool, mode: plx_media::playback::NextEpisodeMode) -> ControlSlot {
-    match marker {
-        Some(m) => {
-            let pr = crate::skip_pill::prompt_for(m);
-            if has_next && m.kind == plx_data::metadata::MarkerKind::Credits && m.final_seg {
-                match mode {
-                    plx_media::playback::NextEpisodeMode::Countdown => ControlSlot::UpNext(m),
-                    plx_media::playback::NextEpisodeMode::AfterCredits | plx_media::playback::NextEpisodeMode::Off => ControlSlot::Discs,
-                }
-            } else {
-                ControlSlot::Skip(pr)
-            }
-        }
-        None => ControlSlot::Discs,
-    }
-}
-
-/// Sample the live globals ONCE and resolve the row. Call this once per frame and pass the result
-/// around: `playpos_ns` is written by LG's media thread and `player::pump` runs between the input
-/// handlers and the draw, so re-deriving per call site let a keypress dispatch to a control that
-/// the same frame then declined to draw.
-pub fn slot(ps: &plx_media::playback::PlaybackSession, meta: plx_data::metadata::MetadataView<'_>) -> ControlSlot {
-    let has_next = plx_media::playback::up_next(ps).is_some();
-    let mode = plx_media::playback::next_episode_mode();
-    // The data layer does not read the player: the playhead is sampled here, once, and handed in.
-    let head = plx_data::metadata::Playhead {
-        playing: plx_media::player::is_playing(ps),
-        pos_ns: plx_media::player::playpos_ns(),
-        dur_ns: plx_media::player::duration_ns(),
-    };
-    // Server marker first; the synthesized tail only exists where credits DETECTION does not
-    // (a Plex Pass server feature) — see `metadata::synthesized_tail_marker` — and only to feed
-    // the Up Next countdown, so it is not even computed in the other modes.
-    let m = meta.active_marker(head).or_else(|| {
-        (mode == plx_media::playback::NextEpisodeMode::Countdown)
-            .then(|| meta.synthesized_tail_marker(head, has_next))
-            .flatten()
-    });
-    slot_for(m, has_next, mode)
-}
-
-/// PURE edge: has a stand-in just vanished OUT FROM UNDER the focus ring, so the ring has to go
-/// back to the scrubber? `focused` is whether the control row currently holds focus. `was_standin`
-/// is the occupant on the last OVERLAY-FREE frame, not simply the last frame — the caller only
-/// samples it while the transport is bare, so an edge that happens behind an open track menu / Info
-/// card is held and fires on the frame the overlay closes, rather than being lost.
-///
-/// It exists because the row swapping from a Skip pill back to the discs leaves focus on the row
-/// with `btn` still 0, so the next OK opens the SUBTITLES menu instead of toggling pause.
-///
-/// **It is an EDGE, not a steady state**, and that is the whole reason it is a named function with
-/// a test. Written inline as `is_discs() && focused` it is also true on every frame of a user who
-/// deliberately walked UP to the Subtitles/Audio discs — the ring is then yanked back to the
-/// scrubber the same frame it arrives, so focus can never rest on a disc and OK on one is
-/// unreachable by remote. The pointer path never saw it, which is why the on-device suite did not.
-pub fn standin_left_the_ring(was_standin: bool, now: ControlSlot, focused: bool) -> bool {
-    was_standin && now.is_discs() && focused
-}
 
 /// The bottom scrim's height — the transport's dark ground, transparent at its top edge and
 /// `theme::scrim_black(0.86)` at the panel bottom. Named because the read-out's placement is graded
@@ -1255,7 +1045,6 @@ pub fn draw_readout(
 
 /// The subscription's name in the one note that states it ("This server has no Plex Pass"). A
 /// product name, so it is not translated.
-const PLEX_PASS: &str = "Plex Pass";
 
 /// The support line's cap top this far above the canvas bottom — inside the safe area's
 /// bottom margin band's upper edge, clear of the row by construction, and
@@ -1280,10 +1069,7 @@ pub fn failure_action_label(a: plx_media::player::FailureAction) -> &'static std
     use plx_platform::i18n::msg;
     use plx_media::player::FailureAction as A;
     match a {
-        A::PlayAutomatically => msg::widgets_failure_play_auto_c(),
         A::TryAgain => msg::browse_action_retry_c(),
-        A::ChangeQuality => msg::widgets_failure_change_quality_c(),
-        A::Repair => msg::widgets_repair_action_c(),
         A::Back => msg::settings_back_c(),
     }
 }
@@ -1294,8 +1080,6 @@ fn failure_glyph(kind: plx_media::player::FailureKind) -> plx_ui::icons::Icon {
     use plx_media::player::FailureKind as K;
     use plx_ui::icons::Icon;
     match kind {
-        K::DecisionRefused | K::NoVideoTranscodeTarget => Icon::ServerBadgeXmark,
-        K::JailMissingRtkmem => Icon::LockBadgeAlert,
         K::LoadTimeout => Icon::ClockBadgeAlert,
         _ => Icon::Alert,
     }
@@ -1304,49 +1088,22 @@ fn failure_glyph(kind: plx_media::player::FailureKind) -> plx_ui::icons::Icon {
 impl FailureReadout {
     /// The read-out for the failure on screen now (main thread).
     pub fn now(ps: &plx_media::playback::PlaybackSession) -> Self {
-        let mut e = plx_media::player::error_now(ps);
-        if e.kind == plx_media::player::FailureKind::JailMissingRtkmem {
-            use plx_platform::tv::sandbox::State;
-            match ps.repair_status {
-                State::Idle => {}
-                State::Running => {
-                    e.readout = plx_platform::i18n::msg::widgets_repair_running();
-                    e.detail = plx_platform::i18n::msg::widgets_repair_wait().into();
-                }
-                State::Repaired => {
-                    e.readout = plx_platform::i18n::msg::widgets_repair_completed();
-                    e.detail = plx_platform::i18n::msg::widgets_repair_reopen().into();
-                }
-                State::Failed(reason) => {
-                    e.readout = plx_platform::i18n::msg::widgets_repair_failed();
-                    e.detail = repair_failure_message(reason).into();
-                }
-            }
-        }
+        let e = plx_media::player::error_now(ps);
         let actions = plx_media::player::failure_actions(e.kind, plx_media::player::failure_context(ps));
         Self::of(&e, actions, plx_media::player::support_line(e.kind))
     }
 
     /// PURE: the read-out for one failure shape.
     ///
-    /// **Say it once.** The reason is ONE sentence: what happened and why. Under Force Direct
-    /// Play that is the route's own verdict ("Force Direct Play is on, and this video format can't
-    /// play without conversion"), which already names both — the old generic "Force Direct Play
-    /// could not play this stream" above it said the same thing a second time. The shape's
-    /// `detail` then goes to exactly one place, the note under the row (the server's own sentence,
-    /// the sandbox's remedy, a repair's progress) — unless it is the Force verdict already said as
-    /// the reason. The support facts are always the footer.
+    /// The reason is ONE sentence; the shape's `detail`, when there is one, is the note under the
+    /// row; the support facts are always the footer.
     pub fn of(
         e: &plx_media::player::ErrorShape,
         actions: Vec<plx_media::player::FailureAction>,
         support: String,
     ) -> Self {
-        use plx_media::player::FailureKind;
-        let policy = e.kind == FailureKind::PlaybackPolicy && !e.detail.is_empty();
-        let reason: &str = if policy { &e.detail } else { e.readout };
-        let note: Option<String> = if e.no_pass {
-            Some(plx_platform::i18n::msg::widgets_failure_no_pass(PLEX_PASS))
-        } else if policy || e.detail.is_empty() {
+        let reason: &str = e.readout;
+        let note: Option<String> = if e.detail.is_empty() {
             None
         } else {
             Some(e.detail.to_string())
@@ -1424,10 +1181,9 @@ impl FailureReadout {
 // not an enum, so `PlayerScreen` can address a control-row/tab-row ITEM by `BASE + index` exactly
 // as `icon_hit`'s `0..BTN_N` scan already did.
 pub const ELEM_SCRUB: u32 = 0;
-/// `+ 0..items()` for whatever occupies the row — the discs, the Skip pill, or both Up Next
-/// buttons, each at its own rect ([`ControlSlot::item_rect`]).
+/// `+ 0..BTN_N` — the Subtitles and Audio discs.
 pub const ELEM_ROW_BASE: u32 = 10;
-/// `+ 0..=1` — Info, then Chapters when the item has any.
+/// `+ 0` — Chapters, when the item has any.
 pub const ELEM_TAB_BASE: u32 = 20;
 /// `+ 0..actions().len()` — the failure read-out's row, one element per
 /// [`plx_media::player::FailureAction`] in [`FailureReadout::actions`] order: the only controls a
@@ -1449,33 +1205,20 @@ pub fn disc_hit_rect(idx: i32) -> Rect {
     Rect::new(btn_x(idx), BTN_Y, BTN_S, BTN_S)
 }
 
-/// **The control row's band at its floor width** ([`CTRL_ROW_W`]) — the row GROUP's extent only.
-///
-/// It is not any item's hit region: every item of whatever occupies the row — a disc, the Skip
-/// pill, either Up Next button — is placed and registered at its own drawn rect by
-/// [`ControlSlot::item_rect`]. This one region used to BE the stand-ins' registered stop, which
-/// left *Watch Credits* (drawn left of it) unclickable and made a click on *Next Episode* land on
-/// item 0, *Watch Credits* (issue #162's audit).
+/// **The control row's band** — the row GROUP's extent; each disc registers its own rect.
 pub fn ctrl_row_hit_rect() -> Rect {
     Rect::new(CTRL_RIGHT - CTRL_ROW_W, CTRL_Y, CTRL_ROW_W, CTRL_H)
 }
 
 /// One bottom tab's rect, matching the left-to-right layout [`draw_hud`] lays the pills out with.
 pub fn tab_hit_rect(idx: i32, has_chapters: bool, measure: &dyn plx_machine::machine::Measure) -> Option<Rect> {
-    let tabs: &[&str] = if has_chapters { &[plx_platform::i18n::msg::widgets_player_info(), plx_platform::i18n::msg::widgets_player_chapters()] } else { &[plx_platform::i18n::msg::widgets_player_info()] };
-    let label = *tabs.get(idx as usize)?;
+    if idx != 0 || !has_chapters {
+        return None;
+    }
+    let label = plx_platform::i18n::msg::widgets_player_chapters();
     let ph = BTN_S;
     let py = (SB_Y + SCR_H) * 0.5 - ph * 0.5;
-    let mut px = SB_X;
-    for (i, l) in tabs.iter().enumerate() {
-        let pw = TabPill::width_measured(l, theme::size::BODY, measure);
-        if i as i32 == idx {
-            return Some(Rect::new(px, py, pw, ph));
-        }
-        px += pw + 16.0;
-    }
-    let _ = label;
-    None
+    Some(Rect::new(SB_X, py, TabPill::width_measured(label, theme::size::BODY, measure), ph))
 }
 
 /// Is the failure read-out's row ON SCREEN — a failure owns the frame. The row always holds at
@@ -1484,19 +1227,6 @@ pub fn failure_row_drawn(busy: Busy) -> bool {
     readout_owns_frame(busy)
 }
 
-/// Product copy is resolved here; the worker's technical error identity stays unchanged.
-fn repair_failure_message(reason: plx_platform::tv::sandbox::Failure) -> &'static str {
-    use plx_platform::tv::sandbox::Failure;
-    match reason {
-        Failure::StartFailed => plx_platform::i18n::msg::widgets_repair_start_failed(),
-        Failure::HbcUnavailable => plx_platform::i18n::msg::widgets_repair_hbc_unavailable(),
-        Failure::NotRoot => plx_platform::i18n::msg::widgets_repair_not_root(),
-        Failure::CommandFailed => plx_platform::i18n::msg::widgets_repair_command_failed(),
-        Failure::Timeout => plx_platform::i18n::msg::widgets_repair_timeout(),
-        Failure::Unreadable => plx_platform::i18n::msg::widgets_repair_unreadable(),
-        Failure::Unsupported => plx_platform::i18n::msg::widgets_repair_unsupported(),
-    }
-}
 
 fn draw_failed_readout(
     ps: &plx_media::playback::PlaybackSession,
@@ -1514,22 +1244,16 @@ fn draw_failed_readout(
     FailureReadout::now(ps).draw(p, focus, measure);
 }
 
-/// x of control button `idx`, left to right: 0 = Subtitles, 1 = Audio, 2 = More.
-///
-/// The row is RIGHT-anchored — the LAST disc's edge is `CTRL_RIGHT` — so adding a button pushes
-/// the existing ones left instead of moving the row's right margin, which is what keeps the discs
-/// and every stand-in (`ctrl_slot`) sharing one edge.
+/// x of control button `idx`, left to right: 0 = Subtitles, 1 = Audio. The row is RIGHT-anchored:
+/// the LAST disc's edge is `CTRL_RIGHT`.
 fn btn_x(idx: i32) -> f32 {
     CTRL_RIGHT - BTN_S - (BTN_N - 1 - idx) as f32 * (BTN_S + BTN_GAP)
 }
 
-/// which control button a pointer at (cx,cy) is over: 0 = Subtitles, 1 = Audio, 2 = More, or None.
+/// which control button a pointer at (cx,cy) is over: 0 = Subtitles, 1 = Audio, or None.
 /// The single source of truth for the button rects, shared with draw_hud.
-///
-/// `slot` is passed in rather than re-derived: while a stand-in owns the row the discs are not on
-/// screen, and a click in that band must not open a track menu the user cannot see.
-pub fn icon_hit(slot: ControlSlot, cx: f32, cy: f32) -> Option<i32> {
-    if !slot.is_discs() || cy < BTN_Y || cy > BTN_Y + BTN_S {
+pub fn icon_hit(cx: f32, cy: f32) -> Option<i32> {
+    if cy < BTN_Y || cy > BTN_Y + BTN_S {
         return None;
     }
     (0..BTN_N).find(|&idx| {
@@ -1566,7 +1290,6 @@ pub fn scrub_frac_x(mx: f32) -> f32 {
 //     floating near the right end of an otherwise empty rail. Reviewed cold on a screenshot it
 //     read as a RENDERING ARTIFACT, not as information, which is a complete failure of the thing.
 //
-// Neither loses anything: the Skip Intro / Skip Credits pill (`appkit/skip_pill.rs`) is driven from
 // the very same `metadata::playing_markers()` and appears exactly when a marker is reachable, so
 // the band was decoration duplicating a control that already announces itself. Do not re-add
 // either as a "cheap win" — the marker data is already in memory, which is precisely what makes
@@ -1626,7 +1349,7 @@ pub const LINGER_MS: u32 = 4500;
 /// What one fresh press hops: the Skip interval preference (10 s unless Settings changed it),
 /// read per press so a pick takes effect in a film already playing.
 pub fn scrub_step_ns() -> i64 {
-    plx_media::playback::skip_interval().ns()
+    plx_data::settings::skip_interval().ns()
 }
 pub const SCRUB_BASE: f32 = 10.0;
 pub const SCRUB_ACCEL: f32 = 45.0; // added per second of hold
@@ -1639,19 +1362,19 @@ pub const SCRUB_LOST_MS: u32 = 400; // holding but no repeat this long → lost 
 /// Sets the Skip interval for one test and puts the prior value back on drop. The caller holds
 /// `testlock::serial()`: the live value is a process global, like every preference.
 #[cfg(any(test, feature = "test-support"))]
-pub struct SkipIntervalGuard(plx_media::playback::SkipInterval);
+pub struct SkipIntervalGuard(plx_data::settings::SkipInterval);
 #[cfg(any(test, feature = "test-support"))]
 impl SkipIntervalGuard {
-    pub fn set(interval: plx_media::playback::SkipInterval) -> Self {
-        let prior = plx_media::playback::skip_interval();
-        plx_media::playback::restore_skip_interval(interval);
+    pub fn set(interval: plx_data::settings::SkipInterval) -> Self {
+        let prior = plx_data::settings::skip_interval();
+        plx_data::settings::set_skip_interval(interval);
         Self(prior)
     }
 }
 #[cfg(any(test, feature = "test-support"))]
 impl Drop for SkipIntervalGuard {
     fn drop(&mut self) {
-        plx_media::playback::restore_skip_interval(self.0);
+        plx_data::settings::set_skip_interval(self.0);
     }
 }
 
@@ -1968,8 +1691,6 @@ pub fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn plx_machine::machine
 pub fn draw_hud(
     ps: &plx_media::playback::PlaybackSession,
     row: &mut TransportRow,
-    up: &crate::up_next::Countdown,
-    slot: ControlSlot,
     busy: Busy,
     focus: i32,
     btn: i32,
@@ -2004,70 +1725,34 @@ pub fn draw_hud(
     draw_scrim(p);
 
     if transport {
-        // title block under the playbar: for an episode, "S1, E1 · Episode Name" (white) sits above the
-        // SHOW title; for a movie (or any extra, trailers included), the route ctxline over the movie
-        // title. (Apple-TV layout.) Gated on `is_real_episode`, not `is_episode` — a show's trailer
-        // has `is_episode == true` (it still labels "Go to Show" elsewhere) but no real S#/E# address,
-        // so it takes this same "Trailer" ctxline + title treatment a movie trailer already gets,
-        // instead of a fabricated `S0 · E0` kicker.
-        if let Some(n) = meta.now_playing().filter(|n| n.is_real_episode) {
-            // `fmt::episode_kicker` outright — this line was a byte-identical hand-spelling of it, which
-            // is the drift that formatter exists to prevent (the pre-roll ctx line and the Up Next
-            // caption already read it, and the whole point is that all three say the same thing).
-            let kicker = CString::new(plx_ui::fmt::episode_kicker(
-                n.season,
-                n.index,
-                &n.ep_title,
-            ))
-            .unwrap_or_default();
-            // `if let Ok`, not `.unwrap_or_default()`: before this function was factored out, an
-            // interior-NUL title (the one CString::new can fail on) simply drew nothing — the
-            // refactor was supposed to be visual-no-op, and an `unwrap_or_default()` here draws an
-            // EMPTY title line instead of skipping it, which is a real (if rare) behavior change.
-            if let Ok(title) = CString::new(n.title.clone()) {
-                draw_title(p, Kicker::Episode(kicker.as_ptr()), title.as_ptr());
-            }
-        } else {
-            draw_title(
-                p,
-                Kicker::Context(plx_media::playback::ctxline_cptr(ps)),
-                plx_media::playback::title_cptr(ps),
-            );
-        }
+        draw_title(
+            p,
+            Kicker::Context(plx_media::playback::ctxline_cptr(ps)),
+            plx_media::playback::title_cptr(ps),
+        );
 
-        // The right control row, from the slot the CALLER resolved — so what is drawn and what a
-        // keypress activates are the same value, not two derivations of it.
-        match slot {
-            ControlSlot::UpNext(_) => {
-                crate::up_next::draw(ps, row, up, p, focus == 1, btn, now, measure);
-            }
-            ControlSlot::Skip(pr) => {
-                crate::skip_pill::draw(row, p, pr, focus == 1, measure);
-            }
-            ControlSlot::Discs => {
-                for i in 0..BTN_N {
-                    let pop = row.scale(i);
-                    TransportButton::new(i, Rect::new(btn_x(i), BTN_Y, BTN_S, BTN_S))
-                        .focused(focus == 1 && btn == i)
-                        // The whole control row stands on the VIDEO PLANE — see `ControlGround`. It is
-                        // the HUD's own bottom ramp (drawn at the top of this function) that makes the
-                        // unkeyed face legal: the picture is unreadable, but the ground under these
-                        // discs is known to be dark.
-                        .ground(ControlGround::Unkeyed)
-                        .scale(pop)
-                        .draw(&e, p);
-                }
-            }
+        // the right control row: the Subtitles and Audio discs
+        for i in 0..BTN_N {
+            let pop = row.scale(i);
+            TransportButton::new(i, Rect::new(btn_x(i), BTN_Y, BTN_S, BTN_S))
+                .focused(focus == 1 && btn == i)
+                // The whole control row stands on the VIDEO PLANE — see `ControlGround`. It is
+                // the HUD's own bottom ramp (drawn at the top of this function) that makes the
+                // unkeyed face legal: the picture is unreadable, but the ground under these
+                // discs is known to be dark.
+                .ground(ControlGround::Unkeyed)
+                .scale(pop)
+                .draw(&e, p);
         }
 
         draw_playbar(p, Playbar::live(ps, busy, focus, row.since_play_ms(now), now), measure);
     } // end `if transport`
 
-    // bottom tabs as pills — Chapters only appears when the item actually has chapters
+    // the bottom tab — Chapters, only when the item actually has chapters
     let tabs: &[&str] = if crate::chapters_panel::has_chapters(meta) {
-        &[plx_platform::i18n::msg::widgets_player_info(), plx_platform::i18n::msg::widgets_player_chapters()]
+        &[plx_platform::i18n::msg::widgets_player_chapters()]
     } else {
-        &[plx_platform::i18n::msg::widgets_player_info()]
+        &[]
     };
     // tabs match the transport control buttons' height (BTN_S), centred vertically between the
     // play bar (scrubber, at SB_Y) and the bottom edge of the screen
@@ -2094,8 +1779,8 @@ pub fn draw_hud(
 /// ([`plx_ui::consts::SAFE`]). Private geometry, so the rects are built where they are drawn
 /// rather than restated in the module that grades them.
 ///
-/// The bottom tab row is measured at its widest — `Info` + `Chapters`, the pair an item with
-/// chapters draws — because a pill's width is the label's and the audit has to grade the widest
+/// The bottom tab row is measured at its widest — `Chapters`, which an item with chapters draws —
+/// because a pill's width is the label's and the audit has to grade the widest
 /// state a screen can be in, not the one a screenshot happened to catch. That measurement needs a
 /// font, which the host suite cannot link, so it is bounded by the row's OWN height instead: what
 /// the audit is about here is the row's left edge and its BOTTOM, and both are font-independent.
@@ -2184,9 +1869,6 @@ mod tests {
         plx_gfx::text::reset_prewarm_for_test();
     }
 
-    use plx_data::metadata::{Marker, MarkerKind};
-    use plx_media::playback::NextEpisodeMode;
-    use crate::skip_pill::SkipAction;
 
     /// **The image-subtitle display set is a render, and it says how much of one** (§8.3 rule (c)):
     /// one texture per rect, the SOURCE pixels behind them, and nothing left claimed once the set
@@ -2206,23 +1888,7 @@ mod tests {
         );
     }
 
-    fn marker(kind: MarkerKind, final_seg: bool) -> Marker {
-        Marker {
-            kind,
-            start_ms: 1_000,
-            end_ms: 2_000,
-            final_seg,
-        }
-    }
 
-    fn seg(start_ms: i64, end_ms: i64, final_seg: bool) -> Marker {
-        Marker {
-            kind: MarkerKind::Credits,
-            start_ms,
-            end_ms,
-            final_seg,
-        }
-    }
 
     // A rail 1000px wide over a 1000ms item: 1px per ms, so an offset reads straight off the x.
     const SX: f32 = 100.0;
@@ -2241,7 +1907,7 @@ mod tests {
         for i in 0..BTN_N {
             let cx = btn_x(i) + BTN_S * 0.5;
             assert_eq!(
-                icon_hit(ControlSlot::Discs, cx, cy),
+                icon_hit(cx, cy),
                 Some(i),
                 "disc {i} centre"
             );
@@ -2280,19 +1946,19 @@ mod tests {
     fn gaps_and_the_row_ends_belong_to_no_disc() {
         let cy = BTN_Y + BTN_S * 0.5;
         assert_eq!(
-            icon_hit(ControlSlot::Discs, btn_x(0) - 1.0, cy),
+            icon_hit(btn_x(0) - 1.0, cy),
             None,
             "left of the row"
         );
         assert_eq!(
-            icon_hit(ControlSlot::Discs, CTRL_RIGHT + 1.0, cy),
+            icon_hit(CTRL_RIGHT + 1.0, cy),
             None,
             "right of the row"
         );
         for i in 1..BTN_N {
             let mid = btn_x(i) - BTN_GAP * 0.5;
             assert_eq!(
-                icon_hit(ControlSlot::Discs, mid, cy),
+                icon_hit(mid, cy),
                 None,
                 "gap before disc {i}"
             );
@@ -2300,165 +1966,22 @@ mod tests {
         // and the band itself is bounded vertically
         let cx = btn_x(0) + BTN_S * 0.5;
         assert_eq!(
-            icon_hit(ControlSlot::Discs, cx, BTN_Y - 1.0),
+            icon_hit(cx, BTN_Y - 1.0),
             None,
             "above the row"
         );
         assert_eq!(
-            icon_hit(ControlSlot::Discs, cx, BTN_Y + BTN_S + 1.0),
+            icon_hit(cx, BTN_Y + BTN_S + 1.0),
             None,
             "below the row"
         );
     }
 
-    /// While a stand-in owns the row the discs are not on screen, so nothing in that band may
-    /// report a disc — the rule `icon_hit`'s `slot` parameter exists for.
-    #[test]
-    fn a_stand_in_owning_the_row_hides_every_disc_from_the_hit_test() {
-        let cy = BTN_Y + BTN_S * 0.5;
-        let slot = slot_for(Some(marker(MarkerKind::Intro, false)), false, NextEpisodeMode::Countdown);
-        for i in 0..BTN_N {
-            assert_eq!(
-                icon_hit(slot, btn_x(i) + BTN_S * 0.5, cy),
-                None,
-                "disc {i} under a stand-in"
-            );
-        }
-    }
 
-    /// The control row's precedence, which used to live in the ORDER of five separate if-chains
-    /// across `player_hud` and `app.rs` — the draw, the OK handler, the pointer handler, the
-    /// LEFT/RIGHT clamp and `icon_hit` — with nothing keeping them in step and nothing to test.
-    #[test]
-    fn the_control_row_picks_the_most_specific_occupant() {
-        // no segment under the playhead → the ordinary Subtitles + Audio pair
-        assert!(slot_for(None, false, NextEpisodeMode::Countdown).is_discs());
-        assert!(
-            slot_for(None, true, NextEpisodeMode::Countdown).is_discs(),
-            "a queued successor alone changes nothing"
-        );
-        assert_eq!(slot_for(None, true, NextEpisodeMode::Countdown).items(), BTN_N);
-        assert_eq!(
-            slot_for(None, true, NextEpisodeMode::Countdown).primary_btn(),
-            0,
-            "the discs open on Subtitles"
-        );
 
-        // an intro is always Skip, successor or not — "what's next" is an end-of-episode idea
-        for has_next in [false, true] {
-            let slot = slot_for(Some(marker(MarkerKind::Intro, false)), has_next, NextEpisodeMode::Countdown);
-            assert!(matches!(slot, ControlSlot::Skip(p) if p.kind == MarkerKind::Intro));
-            assert_eq!(slot.items(), 1, "a Skip pill is the row's only item");
-            assert_eq!(
-                slot.primary_btn(),
-                0,
-                "…so it is also the one focus lands on"
-            );
-        }
 
-        // credits WITH somewhere to go → Up Next outranks Skip Credits…
-        let up = slot_for(Some(marker(MarkerKind::Credits, true)), true, NextEpisodeMode::Countdown);
-        assert!(matches!(up, ControlSlot::UpNext(_)));
-        // …and it is the ONE stand-in with a pair, whose primary is the RIGHT-hand item. Asserted
-        // together because they are one fact: an `items()` of 2 with a `primary_btn()` of 0 would
-        // park the ring on Watch Credits, and `up_next::countdown_may_run` would then disarm the
-        // countdown on the frame after it armed — a timer that visibly never runs.
-        assert_eq!(up.items(), 2, "Watch Credits + Next Episode");
-        assert_eq!(up.primary_btn(), crate::up_next::BTN_NEXT);
-        // …and WITHOUT (a show's last episode) it stays Skip Credits, which is the whole reason
-        // both still exist
-        assert!(matches!(
-            slot_for(Some(marker(MarkerKind::Credits, true)), false, NextEpisodeMode::Countdown),
-            ControlSlot::Skip(p) if p.kind == MarkerKind::Credits
-        ));
-    }
 
-    /// Up Next is only offered for a credits marker that runs to the end of the item (`final`).
-    /// A mid-item credits segment with a successor queued (a post-credits scene follows) is a
-    /// plain Skip Credits pill that seeks past it, not a countdown into the next episode.
-    #[test]
-    fn up_next_needs_a_final_credits_marker() {
-        let mid = slot_for(Some(marker(MarkerKind::Credits, false)), true, NextEpisodeMode::Countdown);
-        assert!(
-            matches!(mid, ControlSlot::Skip(p) if p.kind == MarkerKind::Credits
-                && p.action == SkipAction::Seek(2_000 * 1_000_000)),
-            "a non-final credits marker offers Skip Credits even with a successor queued"
-        );
-        assert!(matches!(slot_for(Some(marker(MarkerKind::Credits, true)), true, NextEpisodeMode::Countdown), ControlSlot::UpNext(_)));
-    }
 
-    /// **Next episode: After credits / Off.** During the credits of an episode with a successor the
-    /// control row offers nothing — no Up Next tile (so no countdown and no HUD raise, both of
-    /// which key off the slot), and no Skip Credits pill. Everything else keeps its occupant.
-    #[test]
-    fn after_credits_and_off_offer_nothing_during_the_credits() {
-        for mode in [NextEpisodeMode::AfterCredits, NextEpisodeMode::Off] {
-            assert!(slot_for(Some(marker(MarkerKind::Credits, true)), true, mode).is_discs(), "{mode:?}");
-            // a show's last episode and a movie keep the Skip Credits pill, which finishes the item
-            assert!(matches!(
-                slot_for(Some(marker(MarkerKind::Credits, true)), false, mode),
-                ControlSlot::Skip(p) if p.action == SkipAction::Finish
-            ));
-            // a mid-item credits segment and an intro are skippable as ever
-            assert!(matches!(
-                slot_for(Some(marker(MarkerKind::Credits, false)), true, mode),
-                ControlSlot::Skip(p) if p.action == SkipAction::Seek(2_000 * 1_000_000)
-            ));
-            assert!(matches!(slot_for(Some(marker(MarkerKind::Intro, false)), true, mode), ControlSlot::Skip(_)));
-        }
-        assert!(matches!(
-            slot_for(Some(marker(MarkerKind::Credits, true)), true, NextEpisodeMode::Countdown),
-            ControlSlot::UpNext(_)
-        ));
-    }
-
-    /// A `final` credits segment runs to the end of the item, so skipping it FINISHES rather than
-    /// seeks — seeking to its stated end would race the decoder against its own last frames.
-    #[test]
-    fn only_a_final_credits_segment_finishes_the_item() {
-        let fin = match slot_for(Some(marker(MarkerKind::Credits, true)), false, NextEpisodeMode::Countdown) {
-            ControlSlot::Skip(p) => p.action,
-            _ => unreachable!(),
-        };
-        assert_eq!(fin, SkipAction::Finish);
-
-        // a mid-item credits segment (a post-credits scene follows) seeks past it and plays on
-        let mid = match slot_for(Some(marker(MarkerKind::Credits, false)), false, NextEpisodeMode::Countdown) {
-            ControlSlot::Skip(p) => p.action,
-            _ => unreachable!(),
-        };
-        assert_eq!(mid, SkipAction::Seek(2_000 * 1_000_000));
-        // …as does an intro, `final` flag or not (PMS only sets it on credits)
-        let intro = match slot_for(Some(marker(MarkerKind::Intro, true)), false, NextEpisodeMode::Countdown) {
-            ControlSlot::Skip(p) => p.action,
-            _ => unreachable!(),
-        };
-        assert_eq!(intro, SkipAction::Seek(2_000 * 1_000_000));
-    }
-
-    /// The ring only goes back to the scrubber on the EDGE where a stand-in vanished under it.
-    /// As a steady state (`is_discs() && focused`, which is how it shipped) it fired on every
-    /// frame the user had walked UP to the Subtitles/Audio discs, so focus could not rest there
-    /// and OK on a disc never reached the track menu — invisible to the pointer path, and so to
-    /// the on-device suite.
-    #[test]
-    fn only_a_vanishing_standin_takes_the_focus_ring_back() {
-        let discs = slot_for(None, false, NextEpisodeMode::Countdown);
-        let skip = slot_for(Some(marker(MarkerKind::Intro, false)), false, NextEpisodeMode::Countdown);
-
-        // the edge it exists for: the pill was there last frame, the discs are back, ring on the row
-        assert!(standin_left_the_ring(true, discs, true));
-
-        // the steady state it must NOT fire on: the discs were already there, so nothing vanished
-        assert!(
-            !standin_left_the_ring(false, discs, true),
-            "walking UP to the discs is not a lost stand-in"
-        );
-
-        // nothing to take back if the ring is elsewhere, or if a stand-in still owns the row
-        assert!(!standin_left_the_ring(true, discs, false));
-        assert!(!standin_left_the_ring(true, skip, true));
-    }
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 0.01
     }
@@ -2480,7 +2003,7 @@ mod tests {
     /// never coverage (the outline depends on it) and never hue (it tints image subtitles).
     #[test]
     fn the_subtitle_tones_are_a_strictly_darkening_opaque_grey_ladder_from_white() {
-        use plx_plex::plex::session::SubtitleTone;
+        use plx_data::settings::SubtitleTone;
         assert_eq!(theme::SUBTITLE_INKS.len(), SubtitleTone::LADDER.len());
         assert_eq!(subtitle_ink_for(SubtitleTone::White), [1.0, 1.0, 1.0, 1.0]);
         let mut prev = f32::MAX;
@@ -2762,48 +2285,11 @@ mod tests {
     }
 
     fn readout_of(e: &plx_media::player::ErrorShape) -> FailureReadout {
-        let cx = plx_media::player::FailureContext { forced: true, can_retry: true, repair_idle: true };
-        FailureReadout::of(e, plx_media::player::failure_actions(e.kind, cx), "0.7.0 · webOS 4.5 · code".into())
+        let cx = plx_media::player::FailureContext { can_retry: true };
+        FailureReadout::of(e, plx_media::player::failure_actions(e.kind, cx), "0.7.0 · code".into())
     }
 
-    /// **Say it once.** Under Force the reason IS the route's verdict (what happened and why), no
-    /// note repeats it, the row is *Switch to Auto and play* · *Back* (no *Details*), and the
-    /// support facts are the dim footer — which the draw really paints, below the row.
-    #[test]
-    fn the_forced_readout_says_what_and_why_once_and_draws_the_diagnostics_as_the_footer() {
-        use plx_media::player::FailureAction as A;
-        let verdict = plx_media::playback::PlayVerdict::Forced(plx_media::playback::ForcedFailure::Video).text().to_owned();
-        let e = plx_media::player::failtest_policy_shape_for_test(&verdict);
-        let r = readout_of(&e);
-        assert_eq!(r.reason(), verdict.as_str());
-        assert_eq!(r.note(), None, "the verdict already names the cause");
-        assert_eq!(r.actions(), &[A::PlayAutomatically, A::Back]);
-        assert_eq!(r.footer(), "0.7.0 · webOS 4.5 · code");
-        let log = plx_ui::draw_census::capture(|| {
-            r.draw(plx_ui::Painter::recording(), 0, &plx_ui::fixture::FixtureMeasure);
-        });
-        let texts: Vec<Rect> = log.iter().filter(|(tag, _)| *tag == 100).map(|(_, r)| *r).collect();
-        assert!(texts.iter().any(|t| (t.y - FOOTER_TOP).abs() < theme::size::CAPTION as f32 * 2.0),
-            "the footer line is drawn at the foot of the screen: {texts:?}");
-    }
 
-    /// The read-out's row, note and footer stack top to bottom inside the safe band, and the
-    /// footer never meets the row.
-    #[test]
-    fn the_diagnostics_footer_sits_below_the_row_inside_the_safe_bottom_band() {
-        use plx_base::fontcov::advances::ShippedMeasure;
-        let verdict = plx_media::playback::PlayVerdict::Forced(plx_media::playback::ForcedFailure::Video).text().to_owned();
-        let e = plx_media::player::failtest_policy_shape_for_test(&verdict);
-        let r = readout_of(&e);
-        let row_bottom = r.frames(&ShippedMeasure).iter().flatten().map(|f| f.y + f.h).fold(0.0, f32::max);
-        assert!(row_bottom > 0.0, "the row was laid out");
-        // a two-line CAPTION note sits between them, with room to spare
-        let note_box = theme::size::CAPTION as f32 * 1.5 * 2.0;
-        assert!(FOOTER_TOP > row_bottom + note_box + theme::space::MD,
-            "footer top {FOOTER_TOP} must clear the row ({row_bottom}) and its note");
-        let line_box = theme::size::CAPTION as f32 * 1.5;
-        assert!(FOOTER_TOP + line_box < SCR_H - theme::space::XL + 1.0);
-    }
 
     /// **Every row fits the screen, in every shipped language**: the longest row each kind can
     /// draw, measured with the device's advances, stays inside the read-out's width.
@@ -2813,11 +2299,7 @@ mod tests {
         use plx_ui::fit::HEADROOM;
         use plx_platform::i18n::{language_on_this_thread_for_test, Preference};
         use plx_media::player::FailureAction as A;
-        let rows: [&[A]; 3] = [
-            &[A::PlayAutomatically, A::TryAgain, A::Back],
-            &[A::TryAgain, A::ChangeQuality, A::Back],
-            &[A::Repair, A::Back],
-        ];
+        let rows: [&[A]; 2] = [&[A::TryAgain, A::Back], &[A::Back]];
         let mut out = Vec::new();
         for language in [Preference::En, Preference::Es, Preference::Be] {
             let _guard = language_on_this_thread_for_test(language);

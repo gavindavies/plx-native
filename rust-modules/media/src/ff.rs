@@ -10,7 +10,6 @@
 //! detail — struct offsets, AVOption names, custom AVIO — belongs in one module.
 //! The struct layouts below are the FFmpeg n3.3 ABI, confirmed on-device by the
 //! Phase A probe (/tmp/plxnative-ffprobe logs codec_id/width/height for a known title).
-#![allow(dead_code)]
 use crate::aq::AuQueue;
 use crate::player::threads::SendPtr;
 use crate::player::SHARED;
@@ -81,8 +80,6 @@ const OFF_STREAM_INDEX: usize = 4; // NB not 0 — FFmpeg 5.0 put `const AVClass
 const OFF_STREAM_CODECPAR: usize = 12;
 #[cfg(target_pointer_width = "32")]
 const OFF_STREAM_TIME_BASE: usize = 20;
-#[cfg(target_pointer_width = "64")]
-const OFF_STREAM_INDEX: usize = 8;
 #[cfg(target_pointer_width = "64")]
 const OFF_STREAM_CODECPAR: usize = 16;
 #[cfg(target_pointer_width = "64")]
@@ -718,11 +715,6 @@ unsafe fn stream_avg_frame_rate(s: *mut AVStream) -> AVRational {
     *((s as *const u8).add(OFF_STREAM_AVG_FRAME_RATE) as *const AVRational)
 }
 
-#[inline]
-unsafe fn stream_index(s: *mut AVStream) -> c_int {
-    *((s as *const u8).add(OFF_STREAM_INDEX) as *const c_int)
-}
-
 /// The ffmpeg stream index of the first audio stream whose codec matches `want` (the Load
 /// payload's audio codec, e.g. "ac3"), or None. `av_find_best_stream` picks the "highest
 /// quality" audio (on an 8-track file it chose DTS over the AC3 default) — but the Load payload
@@ -792,7 +784,7 @@ unsafe fn nth_audio_stream(fmt: *mut AVFormatContext, n: i32) -> Option<c_int> {
 // asserts them per major, so if anyone ever needs to poke them again the proven numbers are there.
 // AVFrame (avutil 55, 32-bit ARM). pts sits at +104: a 4-byte pad at +100
 // 8-aligns the int64 on ARM EABI (the classic AVFrame-on-ARM quirk).
-const OFF_FRAME_DATA: usize = 0; // u8*[8] — the only one that does not move
+ // u8*[8] — the only one that does not move
 #[cfg(target_pointer_width = "32")]
 const OFF_FRAME_LINESIZE: usize = 32; // c_int[8]
 #[cfg(target_pointer_width = "32")]
@@ -806,25 +798,8 @@ const OFF_FRAME_PTS: usize = 96;
 // 64-bit: `data` is eight POINTERS rather than eight 32-bit ones, so `linesize` doubles and
 // everything after it follows. `pts` needs no pad here — it is already 8-aligned — which is the
 // ARM EABI quirk described above seen from the side where it does not bite.
-#[cfg(target_pointer_width = "64")]
-const OFF_FRAME_LINESIZE: usize = 64;
-#[cfg(target_pointer_width = "64")]
-const OFF_FRAME_WIDTH: usize = 104;
-#[cfg(target_pointer_width = "64")]
-const OFF_FRAME_HEIGHT: usize = 108;
-#[cfg(target_pointer_width = "64")]
-const OFF_FRAME_FORMAT: usize = 116;
-#[cfg(target_pointer_width = "64")]
-const OFF_FRAME_PTS: usize = 136;
-const SWS_BILINEAR: c_int = 2;
-const VENC_TB: AVRational = AVRational { num: 1, den: 30 };
-
-
-
 
 // All FFmpeg objects are owned and touched by the single capture-encoder thread.
-
-
 
 /// Copy the embedded ASS sources before FFmpeg can release them. The codec parameter and
 /// dictionary layouts are already compile-asserted against our bundled FFmpeg headers; the
@@ -1020,7 +995,6 @@ pub fn boot() {
     }
 }
 
-
 /// One audio or subtitle track of a local file, as its container describes it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LocalTrack {
@@ -1188,7 +1162,6 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
             return AVERROR_EOF;
         }
         s.off += r as i64;
-        SHARED.dg_net_rx.fetch_add(r as i64, Ordering::Relaxed);
         r
     }
 }
@@ -1242,16 +1215,6 @@ unsafe fn pts_ns(pkt: *const AVPacket, st: *mut AVStream) -> i64 {
         return 0;
     }
     av_rescale_q(t, stream_time_base(st), NS_TB)
-}
-
-#[inline]
-unsafe fn pts_ns_opt(pkt: *const AVPacket, st: *mut AVStream) -> Option<i64> {
-    let t = if (*pkt).pts != AV_NOPTS_VALUE {
-        (*pkt).pts
-    } else {
-        (*pkt).dts
-    };
-    (t != AV_NOPTS_VALUE).then(|| av_rescale_q(t, stream_time_base(st), NS_TB))
 }
 
 unsafe fn free_ptr(p: *mut c_void) {
@@ -1948,107 +1911,6 @@ fn adts_header(freq_idx: u8, chan_cfg: u8, payload_len: usize) -> [u8; 7] {
     ]
 }
 
-
-fn annexb_start(data: &[u8], from: usize) -> Option<(usize, usize)> {
-    let mut i = from;
-    while i + 3 <= data.len() {
-        if data[i..].starts_with(&[0, 0, 1]) {
-            return Some((i, 3));
-        }
-        if i + 4 <= data.len() && data[i..].starts_with(&[0, 0, 0, 1]) {
-            return Some((i, 4));
-        }
-        i += 1;
-    }
-    None
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /// Whether a demux exit that published no access unit is a playback failure — the ONE rule both
 /// the HLS and the progressive tails read. A demuxer that produced nothing and ended on its own
 /// failed; one whose lane teardown aborted was told to stop (a reload, a seek, BACK), whatever
@@ -2394,7 +2256,7 @@ mod pre_audio_headroom_tests {
 /// The demux thread body (spawned by `engine::start_bufferfeed`): read the file at `path` and push
 /// its video and audio access units onto the two lanes.
 pub fn demux(
-    off: &plx_base::task::OffFrame,
+    _off: &plx_base::task::OffFrame,
     path: std::path::PathBuf,
     acodec: String,
     aq: SendPtr<AuQueue>,
@@ -2662,7 +2524,7 @@ pub fn demux(
                 if declared != 0 && declared != framing.load_video().diag_code() {
                     crate::player::log(&format!(
                         "ff: the Load declared {} but the file is {cname}; refusing the stream",
-                        crate::player::load_v_name(declared)
+                        ["?", "H264", "H265", "AV1", "VP9"].get(declared as usize).copied().unwrap_or("?")
                     ));
                     SHARED.demux_failed.store(true, Ordering::Release);
                     avformat_close_input(&mut fmt);
@@ -3068,22 +2930,13 @@ pub fn demux(
 #[path = "ff_test_support.rs"]
 mod test_support;
 
-
 #[cfg(test)]
 #[path = "ff_packet_framing_tests.rs"]
 mod packet_framing_tests;
 
 #[cfg(test)]
-#[path = "ff_aac_timestamp_tests.rs"]
-mod aac_timestamp_tests;
-
-
-
-
-#[cfg(test)]
 #[path = "ff_image_subtitle_tests.rs"]
 mod image_subtitle_tests;
-
 
 #[cfg(test)]
 #[path = "ff_late_audio_tests.rs"]

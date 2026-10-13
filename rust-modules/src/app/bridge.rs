@@ -44,8 +44,6 @@ pub(crate) struct AppHost;
 pub(crate) struct AppViews<'a> {
     /// The playing item's metadata (title, chapters, streams).
     pub(crate) metadata: plx_data::metadata::MetadataView<'a>,
-    /// The player's subtitle search (`plx_data::subsearch`).
-    pub(crate) subtitle_search: plx_data::subsearch::SubSearchView<'a>,
     /// **The playback session, as this frame's publication.** The Player machine (`App.player`)
     /// owns the value; `Split` can only lend what the RIG owns, so the loop copies the decisions
     /// in once per frame ([`plx_media::playback::PlaybackSession::publication`]) and a screen reads
@@ -60,7 +58,6 @@ impl Bridge {
     pub(crate) fn views(&self) -> AppViews<'_> {
         AppViews {
             metadata: self.stores.metadata_view(),
-            subtitle_search: self.stores.subtitle_search_view(),
             session: &self.playback,
         }
     }
@@ -90,7 +87,7 @@ impl Host for AppHost {
     }
 
     fn app_fx_needs_return(fx: &AppFx) -> bool {
-        !matches!(fx, AppFx::Store(..) | AppFx::StoreWork(_))
+        !matches!(fx, AppFx::Store(..))
     }
 }
 
@@ -100,9 +97,6 @@ impl plx_screens::registry::PlayerLike for AppHost {
 
 impl plx_screens::registry::MetadataLike for AppHost {
     fn metadata<'a>(cx: &Cx<'a, Self>) -> plx_data::metadata::MetadataView<'a> { cx.views.metadata }
-    fn subtitle_search<'a>(cx: &Cx<'a, Self>) -> Option<plx_data::subsearch::SubSearchView<'a>> {
-        Some(cx.views.subtitle_search)
-    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -329,18 +323,13 @@ impl Bridge {
 
     fn store_cmd(&mut self, cmd: StoreCmd) {
         match cmd {
-            StoreCmd::SubtitleSearch(command) => { self.stores.subtitle_search_run(command); }
             StoreCmd::Metadata(command) => { self.stores.metadata_run(command); }
-            other => plx_base::eventlog::log(&format!("stores: a {} command has no owner — dropped", other.store().name())),
         }
     }
 
     fn app_effect(&mut self, from: MachineId, fx: AppFx) {
         match fx {
-            AppFx::Preferences(choice, reply) => super::preferences::choose(choice, reply),
             AppFx::Store(_, cmd) => self.store_cmd(cmd),
-            AppFx::StoreWork(plx_data::stores::StoreWork::SubtitleSearch) => { self.stores.subtitle_search_pump(); }
-            AppFx::StoreWork(_) => {}
             AppFx::Content(req) => self.content_reqs.push((from, req, self.effect_return.clone())),
             AppFx::Player(req) => self.player_reqs.push(req),
             AppFx::ItemMenu(req) => self.item_menu_reqs.push(req),
@@ -372,7 +361,6 @@ impl Rig<AppHost> for Bridge {
             mounter: &mut self.mounter,
             views: AppViews {
                 metadata: self.stores.metadata_view(),
-                subtitle_search: self.stores.subtitle_search_view(),
                 session: &self.playback,
             },
             measure: &self.measure,
@@ -472,9 +460,8 @@ pub(crate) fn frame_with_tap(
 /// The style is `PlayerPanel { survives_failure }`, whose host policy is `(Live, Live)`: what is
 /// behind these panels is a hardware video plane GL cannot read back, so there is no host snapshot
 /// to take and nothing to freeze (`ui/popover.rs`'s `HostPolicy::Live` says exactly this about the
-/// player route). `survives_failure` is the `…` popover's alone — see `OverlayKind`.
+/// player route). No player panel survives a failure: the read-out owns the frame.
 pub(crate) fn open_player_overlay(
-    ps: &plx_media::playback::PlaybackSession,
     meta: plx_data::metadata::MetadataView<'_>,
     d: &mut Dispatcher<AppHost>,
     kind: plx_screens::player::overlay::OverlayKind,
@@ -483,11 +470,11 @@ pub(crate) fn open_player_overlay(
     // pressed while the Subtitles tab is showing — and never a second surface of the same kind.
     if player_overlay_kind(d).is_some_and(|up| up.slot() == kind.slot()) {
         if let Some(surface) = player_overlay_mut(d) {
-            surface.retarget(ps, meta, kind);
+            surface.retarget(meta, kind);
         }
         return;
     }
-    d.nav.next_style = Style::PlayerPanel { survives_failure: kind.survives_failure() };
+    d.nav.next_style = Style::PlayerPanel { survives_failure: false };
     d.request(
         MachineId::Nav,
         NavOp::Present(AppArg::PlayerOverlay(
@@ -659,9 +646,10 @@ pub(crate) fn nav_root(d: &mut Dispatcher<AppHost>, arg: AppArg) {
     d.request(MachineId::Nav, NavOp::Root(arg));
 }
 
-/// **Put `want` on top, reusing an entry that already holds it.** A LANDING rather than a
-/// navigation, which is why it reuses: pushing blindly would put a second copy of a page the user
-/// is already standing on over the first.
+
+/// **Put `want` on top, reusing an entry that already holds it** — a test's way to stand on a
+/// page without stacking a second copy of it.
+#[cfg(test)]
 pub(crate) fn show_page(d: &mut Dispatcher<AppHost>, want: AppArg) {
     use plx_ui::screen::ScreenArg;
     if d.nav.top_page().map(|e| e.arg.same_instance(&want)).unwrap_or(false) { return; }

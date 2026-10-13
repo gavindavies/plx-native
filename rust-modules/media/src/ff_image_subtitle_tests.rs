@@ -6,6 +6,7 @@
 //! staged into `pkg/` by `make check-ffmpeg`) and is `#[ignore]`d everywhere else — an honest
 //! "not run" in `make check`, never a pass that executed nothing.
 
+use std::ffi::CString;
 use super::*;
 
 /// Where the host FFmpeg was staged: `PLX_FFMPEG_DIR` (what `make check-ffmpeg` passes), else the

@@ -17,7 +17,6 @@
 //! in phase 10 and needs the same cadence, and a screen may not name a sibling family for a shared
 //! word (§2.1).
 
-use std::os::raw::c_int;
 
 /// Is the transport HUD on screen? Its timer is live, OR playback is paused, OR the pipeline is
 /// BUSY — unless the user explicitly dismissed it (UP from the top row), which holds until the
@@ -211,14 +210,6 @@ pub struct HudState {
     /// click arm's `hud_vis`); this is the key path's version of that sample, taken once so the two
     /// arms that need it cannot answer the question differently.
     pub visible_at_press: bool,
-    /// The last SEGMENT the control row offered. Sticky: it is never cleared back to None,
-    /// so each segment raises the HUD exactly once per playback however often the row
-    /// flickers.
-    pub last_offer: Option<(plx_data::metadata::MarkerKind, i64)>,
-    /// Did a stand-in own the control row last frame? The reset below is the EDGE of a
-    /// stand-in vanishing under the focus ring — see `player_hud::standin_left_the_ring`,
-    /// which is where that rule is written down and tested.
-    pub was_standin: bool,
 }
 impl HudState {
     /// Focus at rest, no timer, nothing dismissed, no segment seen yet, discs in the control row.
@@ -227,8 +218,6 @@ impl HudState {
         until: 0,
         dismissed: false,
         visible_at_press: false,
-        last_offer: None,
-        was_standin: false,
     };
 
     /// Is the transport on screen right now, by this HUD's own state?
@@ -271,38 +260,6 @@ impl HudState {
         self.dismissed = false;
     }
 
-    /// A FRESH segment offer takes the control row: put the HUD ON SCREEN and, from rest, park the
-    /// ring on the row's primary so a bare OK acts on the offer in one press instead of
-    /// raise-HUD → navigate → OK.
-    ///
-    /// **Clearing the dismissal is half of "on screen", and leaving it out was the bug.**
-    /// [`extend`](Self::extend) moves only the TIMER, and `dismissed` outranks the timer outright
-    /// inside [`hud_visible`] — so a user who UP-hid the transport mid-episode and then touched
-    /// nothing carried that dismissal into the credits, and the Up Next tile was offered to a HUD
-    /// that `draw_hud` was never called for. Being invisible it then lost its ring to the auto-hide
-    /// re-park at the bottom of the same block, which the NEXT frame's steady-state cancel rule
-    /// (`plx_appkit::up_next::countdown_may_run`) read as the user walking away — latching the
-    /// countdown off for the whole segment. The tile appeared only if the HUD was raised by hand,
-    /// with its auto-advance already dead: exactly as reported. A dismissal is a "not now" that any
-    /// key the app BINDS clears (an unsupported one clears nothing — `note_global_press`); a
-    /// segment beginning is that same kind of event, arriving from the player instead of the
-    /// remote, and it must clear it too — which is also what makes an offer behave the same
-    /// whether the HUD auto-hid or was hidden on purpose.
-    ///
-    /// Parking is only ever from REST: a user who walked to the Subtitles disc or an Info tab keeps
-    /// their spot (and for Up Next thereby declines the countdown — the same one rule, read as a
-    /// steady state one block below). `primary` is the occupant's own
-    /// ([`plx_appkit::player_hud::ControlSlot::primary_btn`]) — item 0 for a Skip pill, the
-    /// RIGHT-hand one for Up Next, where parking on item 0 would disarm the timer on the frame
-    /// after it armed.
-    pub fn raise_for_offer(&mut self, now: u32, primary: c_int) {
-        self.extend(now, HUD_LINGER_MS);
-        self.dismissed = false;
-        if self.nav.focus == 0 {
-            self.nav.focus = 1;
-            self.nav.btn = primary;
-        }
-    }
 }
 // scrub tuning: a press jumps scrub_step_ns() (the Skip interval); holding engages a continuous scrub ramping
 // SCRUB_BASE→SCRUB_MAX (playback-seconds per real-second). Defined in `appkit::player_hud` and
@@ -537,53 +494,5 @@ mod hud_visibility_tests {
         assert!(hud.until > pinned, "…but a later deadline still extends it");
     }
 
-    /// A fresh offer takes the control row FROM REST — and clearing the dismissal is half of "on
-    /// screen", which is the half that was missing.
-    #[test]
-    fn a_fresh_offer_puts_the_transport_up_and_parks_the_ring_on_the_primary() {
-        let ps = plx_media::playback::PlaybackSession::IDLE;
-        with_state(PlaybackState::Playing, || {
-            let now = 10_000u32;
-            let mut hud = HudState::IDLE;
-            hud.dismissed = true; // UP-hidden mid-episode, exactly as reported
-            hud.raise_for_offer(now, plx_appkit::up_next::PRIMARY_BTN);
-            assert!(hud.visible(&ps, now, false), "an offer clears a hand dismissal");
-            assert_eq!(
-                hud.nav.focus, 1,
-                "on the control row, so the auto-hide re-park leaves it"
-            );
-            assert!(
-                plx_appkit::up_next::countdown_may_run(true, hud.nav.focus == 1, hud.nav.btn),
-                "…and RESTING on the primary, which is what the next frame's cancel rule asks"
-            );
-        });
-    }
 
-    /// The resting-position clause, the other half of the same call: an offer never takes the ring
-    /// off a control the user chose. It still puts the transport on screen — the segment is worth
-    /// seeing either way — but for Up Next this is also how being busy elsewhere DECLINES the
-    /// countdown, since the cancel rule reads the ring as a steady state rather than as an edge.
-    #[test]
-    fn an_offer_leaves_a_user_who_walked_off_the_scrubber_where_they_are() {
-        let ps = plx_media::playback::PlaybackSession::IDLE;
-        with_state(PlaybackState::Playing, || {
-            let now = 10_000u32;
-            // parked on the Chapters tab, which is only reachable by pressing DOWN twice
-            let mut hud = HudState {
-                nav: HudNav {
-                    focus: 2,
-                    btn: 0,
-                    tab: 1,
-                },
-                ..HudState::IDLE
-            };
-            hud.raise_for_offer(now, plx_appkit::up_next::PRIMARY_BTN);
-            assert!(hud.visible(&ps, now, false), "the offer is still shown");
-            assert_eq!((hud.nav.focus, hud.nav.tab), (2, 1), "their spot is theirs");
-            assert!(
-                !plx_appkit::up_next::countdown_may_run(true, hud.nav.focus == 1, hud.nav.btn),
-                "engaging the transport is not consent to be pulled into the next episode"
-            );
-        });
-    }
 }

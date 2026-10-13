@@ -10,14 +10,14 @@
 //! audio, drains no video. Neither side can move: a spinner at 0:00 forever.
 //!
 //! **What is real here and what is not.** Real: the file (written by the `ffmpeg` CLI, then read
-//! back with `ffprobe` to prove the fixture has the shape it claims), the HTTP transport (a
-//! loopback server honouring `Range`, as the AVIO's `seek_cb` needs), the bundled FFmpeg that
+//! back with `ffprobe` to prove the fixture has the shape it claims), the local-file AVIO, the
+//! bundled FFmpeg that
 //! `ff.rs` ships (the host build `make check-ffmpeg` stages — see `ff_image_subtitle_tests.rs`),
 //! `ff::demux` itself, and `AuQueue` with the production video cap. Not real: the consumer. Nothing
 //! pops the video lane, exactly as on the television before the clock starts, and the test pops the
 //! AUDIO lane itself. The second stall the fix addresses (`feed_audio_lane` dropping the late AU as
 //! stale) lives in the pump, which needs a Starfish sink and a clock, and is not reachable from a
-//! file; the PR's `feed_both_lanes` tests cover it.
+//! file; the `feed_both_lanes` tests cover it.
 //!
 //! **What is asserted.** Not only that the first audio AU arrives: the engine feeds a late
 //! track's first AU and the next `AUDIO_LEAD_IN_NS` of audio ahead of a clock that cannot start
@@ -36,13 +36,13 @@
 //! Like `ff_image_subtitle_tests`, it needs the host FFmpeg libraries, so it is `#[ignore]`d in the
 //! plain suite. It skips (returns, loudly) when the `ffmpeg` / `ffprobe` command line tools are
 //! absent. Run it with:
-//! `cd rust-modules && PLX_FFMPEG_DIR=<dir holding libav*-plx.*.dylib> CARGO_INCREMENTAL=0
+//! `cd rust-modules && PLX_FFMPEG_DIR=<dir holding libav*-plx.*.so> CARGO_INCREMENTAL=0
 //! cargo +nightly test --lib -p plx_media ff::late_audio_tests -- --ignored`
 //! (`make check-ffmpeg` stages the libraries into `pkg/`, which is the default directory).
 
 use super::*;
 use super::image_subtitle_tests::bind_host_ffmpeg;
-use std::io::{Read, Write};
+
 use std::os::raw::c_long;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -173,88 +173,6 @@ fn first_audio_and_video_bytes_before_it(path: &Path) -> (f64, u64) {
     (first_audio, video_before)
 }
 
-/// A loopback HTTP server over one file that honours `Range: bytes=a-[b]` — what the AVIO's
-/// `seek_cb` reopens with when libavformat reads the Cues at the end of the file. One thread per
-/// connection; everything stops when the value drops.
-struct FileServer {
-    port: u16,
-    stop: std::sync::Arc<AtomicBool>,
-}
-
-impl FileServer {
-    fn start(path: &Path) -> FileServer {
-        let body = std::sync::Arc::new(std::fs::read(path).expect("read the fixture"));
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().unwrap().port();
-        listener.set_nonblocking(true).expect("set_nonblocking");
-        let stop = std::sync::Arc::new(AtomicBool::new(false));
-        let accept_stop = stop.clone();
-        std::thread::spawn(move || {
-            while !accept_stop.load(Ordering::Acquire) {
-                match plx_base::testnet::accept(&listener) {
-                    Ok((mut s, _)) => {
-                        let (body, stop) = (body.clone(), accept_stop.clone());
-                        std::thread::spawn(move || serve(&mut s, &body, &stop));
-                    }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(1))
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
-        FileServer { port, stop }
-    }
-}
-
-impl Drop for FileServer {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
-    }
-}
-
-fn serve(s: &mut std::net::TcpStream, body: &[u8], stop: &AtomicBool) {
-    let _ = s.set_nonblocking(false);
-    let mut head = Vec::new();
-    let mut tmp = [0u8; 1024];
-    while !head.windows(4).any(|w| w == b"\r\n\r\n") {
-        match s.read(&mut tmp) {
-            Ok(0) | Err(_) => return,
-            Ok(n) => head.extend_from_slice(&tmp[..n]),
-        }
-    }
-    let text = String::from_utf8_lossy(&head).to_ascii_lowercase();
-    let n = body.len();
-    let range = text.lines().find_map(|l| l.strip_prefix("range: bytes=")).map(|r| {
-        let (a, b) = r.trim().split_once('-').unwrap_or((r.trim(), ""));
-        let start = a.parse::<usize>().unwrap_or(0).min(n);
-        let end = b.parse::<usize>().ok().map_or(n, |e| (e + 1).min(n));
-        (start, end.max(start))
-    });
-    let (start, end) = range.unwrap_or((0, n));
-    let header = if range.is_some() {
-        format!(
-            "HTTP/1.1 206 Partial Content\r\nAccept-Ranges: bytes\r\nContent-Range: bytes {start}-{}/{n}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            end.saturating_sub(1),
-            end - start
-        )
-    } else {
-        format!(
-            "HTTP/1.1 200 OK\r\nAccept-Ranges: bytes\r\nContent-Length: {n}\r\nConnection: close\r\n\r\n"
-        )
-    };
-    if s.write_all(header.as_bytes()).is_err() {
-        return;
-    }
-    // In slices, so a client that has gone away (the test ended) stops the transfer promptly.
-    for chunk in body[start..end].chunks(64 * 1024) {
-        if stop.load(Ordering::Acquire) || s.write_all(chunk).is_err() {
-            return;
-        }
-    }
-    let _ = s.flush();
-}
-
 /// What `ff::demux` left in the lanes by the deadline.
 struct Observed {
     /// pts (ns) of the first AU popped from the AUDIO lane, if one arrived in time.
@@ -275,27 +193,21 @@ struct DemuxRun {
     video: Box<AuQueue>,
     audio: Box<AuQueue>,
     thread: Option<std::thread::JoinHandle<()>>,
-    hs: Box<HttpStream>,
 }
 
 impl DemuxRun {
-    fn start(port: u16) -> DemuxRun {
+    fn start(path: &Path) -> DemuxRun {
         let (video_cap, audio_cap) = crate::player::engine::aq_caps();
         let mut video = crate::aq::aq_new(video_cap as c_long);
         let mut audio = crate::aq::aq_new(audio_cap as c_long);
-        let mut hs = plx_net::stream::http_stream_boxed();
-        let (vp, ap, hp) = (
-            SendPtr(&mut *video as *mut AuQueue),
-            SendPtr(&mut *audio as *mut AuQueue),
-            SendPtr(&mut *hs as *mut HttpStream),
-        );
-        let origin = plx_plex::plex::Origin::http("127.0.0.1", port as i32);
+        let (vp, ap) = (SendPtr(&mut *video as *mut AuQueue), SendPtr(&mut *audio as *mut AuQueue));
+        let path = path.to_path_buf();
         let thread = std::thread::spawn(move || {
             let off = plx_base::task::OffFrame::for_test();
             // `acodec` is the Load payload's audio codec: the demuxer feeds the track that matches.
-            demux(&off, crate::ff::MediaInput::Http { origin, path: "/library/parts/1/file.mkv".into() }, "eac3".into(), None, None, vp, ap, hp)
+            demux(&off, path, "eac3".into(), vp, ap)
         });
-        DemuxRun { video, audio, thread: Some(thread), hs }
+        DemuxRun { video, audio, thread: Some(thread) }
     }
 
     /// Whether the demux thread has returned (end of file, a failure, or a stop).
@@ -346,7 +258,6 @@ impl Drop for DemuxRun {
     fn drop(&mut self) {
         crate::aq::aq_abort(&mut *self.video);
         crate::aq::aq_abort(&mut *self.audio);
-        plx_net::stream::http_shutdown(&mut *self.hs);
         if let Some(t) = self.thread.take() {
             let until = Instant::now() + Duration::from_secs(10);
             while !t.is_finished() && Instant::now() < until {
@@ -361,17 +272,16 @@ impl Drop for DemuxRun {
     }
 }
 
-/// A fixture on disk, served, with a demuxer running over it. Field order is drop order: the
-/// demuxer is stopped before its server and its files go.
+/// A fixture on disk with a demuxer running over it. Field order is drop order: the demuxer is
+/// stopped before its files go.
 struct Prepared {
     run: DemuxRun,
     first_audio_s: f64,
     video_before: u64,
-    _server: FileServer,
     _scratch: Scratch,
 }
 
-/// Build the fixture, prove its shape, serve it and start demuxing it. `None` when the tools are
+/// Build the fixture, prove its shape and start demuxing it. `None` when the tools are
 /// missing (a skip).
 fn prepare(tag: &str, audio_delay_s: f64, video_s: u32) -> Option<Prepared> {
     prepare_with(tag, |dir| generate(dir, audio_delay_s, video_s))
@@ -388,7 +298,6 @@ fn prepare_with(tag: &str, make: impl FnOnce(&Path) -> PathBuf) -> Option<Prepar
     SHARED.seek_to_ns.store(-1, Ordering::Relaxed);
     SHARED.desired_audio_idx.store(-1, Ordering::Relaxed);
     SHARED.dg_load_v.store(0, Ordering::Relaxed);
-    SHARED.side_subs_owner.store(false, Ordering::Relaxed);
     SHARED.demux_failed.store(false, Ordering::Relaxed);
     SHARED.demux_io_failed.store(false, Ordering::Relaxed);
     FEED_AUDIO.store(true, Ordering::Relaxed);
@@ -399,9 +308,8 @@ fn prepare_with(tag: &str, make: impl FnOnce(&Path) -> PathBuf) -> Option<Prepar
     eprintln!(
         "{tag}: fixture first audio packet at {first_audio_s:.3} s, {video_before} bytes of video before it"
     );
-    let server = FileServer::start(&file);
-    let run = DemuxRun::start(server.port);
-    Some(Prepared { run, first_audio_s, video_before, _server: server, _scratch: scratch })
+    let run = DemuxRun::start(&file);
+    Some(Prepared { run, first_audio_s, video_before, _scratch: scratch })
 }
 
 /// [`prepare`], then report what reached the audio lane within the deadline.

@@ -69,6 +69,3 @@ pub fn load_thread(
     }
 }
 
-
-
-

@@ -13,7 +13,7 @@
 //!
 //! **Direction.** This module may name every layer below it (`ui`, `data`, `media`, `session`, ...)
 //! and never `screens` or `app`: a value the loop owns is passed in, and a behaviour a higher layer
-//! owns is a hook it registers at boot (`more_menu::install_stats_reader`, installed by
+//! owns is a hook it registers at boot (installed by
 //! `app::enter_application`). The files here moved out of `ui/` unchanged.
 // **This blankets the whole `appkit` tree**, as `plx_ui`'s `lib.rs`'s own `allow(dead_code)` did for these
 // files while they lived there (that comment records why it is wider than it reads): the moved
@@ -22,12 +22,7 @@
 #![allow(dead_code)]
 
 pub mod chapters_panel;
-pub mod info_panel;
-pub mod more_menu; // the player's `…` overflow popover (holds the Stats for nerds toggle)
 pub mod player_hud;
-pub mod skip_pill; // the Skip Intro / Skip Credits pill — a `ControlSlot` occupant of the player HUD's control row
-pub mod source_list; // the Sources ROW MODEL, shared by the Library panel and that route
 pub mod timing_capsule; // the on-video Subtitle Timing capsule (plan `subtitle-menu-capsule` §4)
 pub mod track_menu;
-pub mod up_next; // end-of-episode Up Next card + auto-advance countdown
 

@@ -282,20 +282,8 @@ mod unsupported_key_tests {
     }
 }
 
-/// What the root press does once `auth::cancel` has answered.
-///
-/// A plan rather than a bool so the production code visibly OWNS each call and the log line names
-/// what was decided. It used to have a third arm, `RestartAndHome`, because `auth::cancel`
-/// invalidated the running sign-in BEFORE deciding whether it could back out, so a `false` on the
-/// QR screen left a dead poller behind a live code and the press had to `auth::retry` on the way
-/// out. That ordering was issue #30 and is gone: a refused `cancel` changes nothing (`auth::cancel`'s
-/// doc, `a_refused_back_leaves_the_live_pin_poll_running`), so the flow it refused to leave is
-/// still running and a restart here would DISCARD it — a fresh code over a poll the user's phone may
-/// already have answered. Retired 2026-09-04 on Codex's integrated review.
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) unsafe fn key_ok(
-    ps: &plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
     now: u32,
     _ptr: &mut Pointer,
@@ -327,9 +315,7 @@ pub(crate) unsafe fn key_ok(
             *ok_armed = true;
         } else if vis && focus == 2 {
             if tab == 0 {
-                super::bridge::open_player_overlay(ps, bridge.metadata_view(), pages, plx_screens::player::overlay::OverlayKind::Info);
-            } else if tab == 1 {
-                super::bridge::open_player_overlay(ps, bridge.metadata_view(), pages, plx_screens::player::overlay::OverlayKind::Chapters);
+                super::bridge::open_player_overlay(bridge.metadata_view(), pages, plx_screens::player::overlay::OverlayKind::Chapters);
             }
         } else {
             let np = !super::lifecycle::viewer_paused();

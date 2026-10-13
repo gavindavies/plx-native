@@ -16,39 +16,22 @@
 //! `threads::load_thread` calls `sf_load` off-main by design (see `ffi`).
 #![allow(non_upper_case_globals)]
 pub mod adapter;
-pub mod claim_hold;
 pub mod ass; // pinned libass worker and immutable rendered frames
 pub mod ass_script; // a sidecar script fed in windows around the playhead
 pub mod ass_source; // bounded embedded scripts and subtitle presentation clock
 pub mod engine;
 pub mod lifecycle;
 pub mod machine;
-pub mod playurl; // the `plxnative-playurl` dev trigger: a stream and its Load declaration, parsed beside the engine that acts on it
-pub mod preview;
-// `test` here is THIS crate's own test build only, not `any(test, feature = "test-support")`: the
-// application crate's `port.rs` names `StarfishSink` in every build of its library that is not its
-// own test build, and `cargo check --lib --tests` builds that library with this crate's
-// `test-support` on. The application's test binaries therefore carry this module's code, but port.rs
-// installs `NoSink` there, so nothing reaches its externs and the linker drops them.
 pub mod ffi_host;
 pub mod gst_sink; // the Linux build's player: the fed AUs decoded by the system GStreamer
 mod pump;
-pub mod report;
-#[cfg(test)]
-mod foreground_flight_tests;
-#[cfg(test)]
-mod resume_tests;
 mod shared;
 pub mod sidecar;
-pub mod subside; // the side subtitle reader's thread and state (dev trigger `plxnative-subside`)
-pub mod sim_video; // the simulator's decoded picture, for screenshots (see its doc)
 pub mod threads;
 pub mod video_geometry;
 pub mod vp9_hdr; // HDR10 for a VP9 stream: the container's PQ tag, written into the sourceInfo envelope ACB is sent
 
 use plx_base::task::MainThread;
-#[cfg(test)]
-pub(crate) use shared::pinned_pause_clock;
 pub use shared::HlsAutomaticTransition;
 pub use shared::HlsClockFenceError;
 /// one rect of an image-subtitle display set — the demuxer builds them, the HUD draws them
@@ -139,93 +122,6 @@ pub static SHARED: Shared = Shared::new();
 pub static TX: Transport = Transport::new();
 static ACB_OK: AtomicBool = AtomicBool::new(false); // was the g_acb availability flag
 
-/// **Is the Stats-for-nerds read-out on screen?** The bit `pump::publish_diag` asks before it
-/// samples the queues (`aq_bytes` takes each queue's pthread mutex, so nobody pays for a panel
-/// nobody is looking at). It is the player's because the pump reads it and `player` may not name
-/// `app`; `app::diagnostics` owns the panel and is the only writer (`toggle`/`open`/`close`).
-/// Off at boot, and never persisted.
-pub static DIAG_READOUT_ON: AtomicBool = AtomicBool::new(false);
-
-// Diagnostics-only Auto state. These codes cross the demux/UI thread boundary through atomics;
-// named constants keep the writer and the photograph formatter from growing separate vocabularies.
-pub const ABR_MODE_ORIGINAL: u8 = 1;
-pub const ABR_MODE_HLS: u8 = 2;
-pub const ABR_ACTION_STEADY: u8 = 1;
-pub const ABR_ACTION_PRIME_DOWN: u8 = 2;
-pub const ABR_ACTION_PRIME_UP: u8 = 3;
-pub const ABR_ACTION_COMMIT_DOWN: u8 = 4;
-pub const ABR_ACTION_COMMIT_UP: u8 = 5;
-pub const ABR_ACTION_REJECT_DOWN: u8 = 6;
-pub const ABR_ACTION_REJECT_UP: u8 = 7;
-pub const ABR_ACTION_PROBE_ORIGINAL: u8 = 8;
-pub const ABR_ACTION_RECOVER_ORIGINAL: u8 = 9;
-pub const ABR_ACTION_ORIGINAL_PROBE_FAILED: u8 = 10;
-pub const ABR_ACTION_PRIME_REFRESH: u8 = 11;
-pub const ABR_ACTION_COMMIT_REFRESH: u8 = 12;
-pub const ABR_ACTION_REJECT_REFRESH: u8 = 13;
-/// Typed, playback-scoped reason the last Original source experiment/open failed. It deliberately
-/// survives the engine reload that restores HLS, otherwise the successful rollback erases the
-/// only fact explaining why Original is no longer being attempted.
-pub const ABR_FAILURE_ORIGINAL_HTTP: u8 = 1;
-pub const ABR_FAILURE_ORIGINAL_DEADLINE: u8 = 2;
-pub const ABR_FAILURE_ORIGINAL_TRANSPORT: u8 = 3;
-pub const ABR_FAILURE_ORIGINAL_NO_BODY: u8 = 4;
-pub const ABR_FAILURE_ORIGINAL_OPEN: u8 = 5;
-
-pub fn note_original_failure(kind: u8, http_status: i32) {
-    SHARED.abr_failure_status.store(http_status.max(0), Relaxed);
-    SHARED.abr_failure_kind.store(kind, Relaxed);
-}
-
-pub fn clear_original_failure() {
-    SHARED.clear_abr_failure();
-}
-/// Why the controller last moved (or declined to) — `crate::abr::HlsReason` as a code, so the
-/// read-out can name the CONSTRAINT that bound rather than only the action it produced. `0` is
-/// "nothing has decided yet", which is a real state at the top of a playback and not a fault.
-pub const ABR_WHY_NONE: u8 = 0;
-pub const ABR_WHY_SAFE_BUDGET: u8 = 1;
-pub const ABR_WHY_UNSAFE_STATE: u8 = 2;
-pub const ABR_WHY_PRODUCTION: u8 = 3;
-pub const ABR_WHY_BUFFER: u8 = 4;
-/// The downshift trigger fired and there is no rung below — the ladder floor. Distinct from the
-/// constraint/telemetry codes above because it names the ABSENCE of an action rather than the
-/// observation that chose one: nothing the controller can do will improve this playback.
-pub const ABR_WHY_LADDER_FLOOR: u8 = 5;
-/// The starvation horizon fired: at the measured delivery law the reserve empties inside the
-/// fallback window. Distinct from [`ABR_WHY_UNSAFE_STATE`] because that one is completed-bag
-/// conservation (`sum A > sum D`) with no reserve in the predicate — and `A` includes every
-/// measured delivery cost, not only link transfer — while this one is a DEADLINE and is the code a
-/// reader sees on the way to a stall.
-pub const ABR_WHY_STARVATION: u8 = 6;
-/// The climb was selected and N11's reject/backoff guard refused it — the evidence supported the
-/// rung and a failed attempt on that same rung had not yet been paid for. Distinct from every code
-/// above because those all describe the MODEL; this one describes a guard sitting on top of it.
-pub const ABR_WHY_REJECT_BACKOFF: u8 = 7;
-/// Nothing above the current rung is sustainable: the two-constraint admission rule came back
-/// empty, or came back at or below where we already are.
-pub const ABR_WHY_NO_TARGET: u8 = 8;
-/// A target was selected and the acquisition window could not carry the climb. The exit that reads
-/// most like a stuck controller from outside — every other field on the line looks healthy.
-pub const ABR_WHY_EVIDENCE: u8 = 9;
-/// Already on the best rung the budget admits. Not a constraint; the controller is doing the right
-/// thing and previously had no way to say so.
-pub const ABR_WHY_AT_BEST: u8 = 10;
-/// The reserve was not knowable on this sample (the audio lane has produced no timestamp since
-/// the open or the seek), so there was nothing to decide against.
-pub const ABR_WHY_RESERVE_UNKNOWN: u8 = 11;
-/// A fetch hit its runway deadline and the controller rolled back without treating its censored
-/// prefix as a capacity measurement.
-pub const ABR_WHY_DEADLINE_ROLLBACK: u8 = 12;
-/// The largest request is active but its observed PMS master/raster is smaller than the request
-/// can produce. It is a response state, not `AtBestRung`: a fresh session at the same actuator
-/// remains eligible after stronger completed-service evidence.
-pub const ABR_WHY_RESPONSE_LIMITED: u8 = 13;
-/// The link would carry the higher rung and the VIEWER is the constraint: this playback has
-/// already made enough recent visible rung changes that the picture this one would buy is worth
-/// less than the interruption. Decays on its own (`AbrPolicy::visible_switch_decay_ms`), so it is
-/// never a terminal state.
-pub const ABR_WHY_SWITCH_COST: u8 = 14;
 // Kodi in-place seek (flush + reopen + re-anchor the decode position + sendSegmentEvent, NO
 // reload/decoder re-init → no HDR-mode popup, no A/V-resync glitch). On webOS<11 (this 4.5)
 // setTimeToDecode returns 0, so feed_stream falls back to the content-info path
@@ -267,14 +163,11 @@ static PTYPE: AtomicI32 = AtomicI32::new(10); // g_ptype (PLAYER_TYPE_MSE)
 // refusal on leaving the player, called from `app.rs`'s `exit_player`) retires it precisely the
 // same way. See `engine.rs`'s `start_bufferfeed`/`start_bufferfeed_tracked` for the gate itself.
 pub use engine::{
-    acb_init, begin_resume, land_resume, start_bufferfeed, start_bufferfeed_tracked, stop_bufferfeed,
-    suspend_bufferfeed, suspend_bufferfeed_if_attempt, BufferfeedStartOutcome, ResumeOutcome, ResumeStart,
+    acb_init, begin_resume, start_bufferfeed, start_bufferfeed_tracked, stop_bufferfeed,
+    suspend_bufferfeed, suspend_bufferfeed_if_attempt, BufferfeedStartOutcome, ResumeOutcome,
 };
 
-pub use pump::{
-    drain_engineless_rollback, land_engineless_rollback, pump, recover_failed_foreground_original, ForegroundOriginalRecovery,
-    RollbackLanding,
-};
+pub use pump::pump;
 pub use shared::PlaybackState;
 
 /// The viewer picked an audio track and the stream is being rebuilt for it: `route::
@@ -352,7 +245,7 @@ pub fn pause(pa: &mut adapter::PlayerAdapter) -> bool {
     true
 } // playback_pause
 pub fn resume(pa: &mut adapter::PlayerAdapter) -> bool {
-    let queued_stream = pa.engine().is_some_and(|eng| eng.uses_stream_queues());
+    let queued_stream = pa.engine().is_some();
     match SHARED.prepare_hls_user_resume(queued_stream) {
         Some(HlsUserResume::Deferred) => {
             // Feeding may resume, but an initial/seek/recovery certificate still owns the physical
@@ -548,8 +441,6 @@ pub fn ended() -> bool {
     SHARED.ended.load(Relaxed)
 }
 pub fn request_seek(ns: i64) {
-    report::note_seek_for(crate::playback::playback_trace_generation());
-    crate::playback::note_user_seek_intent(ns);
     SHARED.ended.store(false, Relaxed); // seeking back from the end un-ends the stream
     SHARED.seeking.store(true, Relaxed); // HUD: spinner + freeze the playhead until it lands
     SHARED.seek_display_ns.store(ns, Relaxed);
@@ -578,7 +469,6 @@ pub fn request_seek(ns: i64) {
 /// HUD reads that as "no seek target" and a stale one would keep the frozen playhead after the
 /// spinner cleared.
 pub fn abandon_seek() {
-    crate::playback::reject_user_seek();
     SHARED.seeking.store(false, Relaxed);
     SHARED.seek_display_ns.store(-1, Relaxed);
     // A failed seek never got the one-frame preroll it was promised. Preserve the viewer's Paused
@@ -603,31 +493,10 @@ pub fn is_playing(ps: &crate::playback::PlaybackSession) -> bool {
 }
 /// The derived playback state — the ONE thing the HUD renders from. See `PlaybackState`.
 pub fn state(ps: &crate::playback::PlaybackSession) -> shared::PlaybackState {
-    // Resolving is DERIVED here rather than stored: the pump owns `pb_state` but only runs once
-    // an engine exists, which is false for the whole resolve window. Deriving in the one reader
-    // keeps a single writer instead of poking the state in from the frame loop.
-    //
-    // A COLD RESUME's flight is the tail of that same resolve: the plan has landed, but the saved
-    // position's rebuild is still on a worker and the Load has not started, so the viewer keeps
-    // the Resolving spinner until it lands. So does every recovery no Engine waits on (the
-    // foreground restore's resume, a rollback after a Load that failed before its Engine
-    // existed): `route::engineless_flight_outstanding`.
-    if crate::playback::play_pending() || crate::playback::engineless_flight_outstanding() {
-        return shared::PlaybackState::Resolving;
-    }
-    // …and so is the PRE-FLIGHT refusal, for exactly the same reason: `/decision` answers before a
-    // byte of video moves, so the plan fails with no URL, no engine is ever built, and the pump
-    // that owns `pb_state` never runs. Deriving it in the one reader keeps a single writer — the
-    // alternative is poking `Error` into the player's state from the frame loop. It sits BELOW the
-    // resolve check because a fresh resolve is the thing that retires the last verdict.
-    // A start refused because a timed-out Load is still parked (`ps.native_start_refused`) is the
-    // same kind of fact: no Engine was built, so the pump that owns `pb_state` never runs and
-    // nothing else could say why the player is empty.
-    if ps.jail_load_blocked
-        || ps.native_start_refused
-        || crate::playback::play_refused(ps)
-        || crate::playback::play_resolution_failed(ps)
-    {
+    // A start refused because a timed-out Load is still parked (`ps.native_start_refused`) built
+    // no Engine, so the pump that owns `pb_state` never runs and nothing else could say why the
+    // player is empty: derive it here, in the one reader.
+    if ps.native_start_refused {
         return shared::PlaybackState::Error;
     }
     // A seek in flight is derived HERE too, not only published by the pump's own ladder (which
@@ -639,302 +508,105 @@ pub fn state(ps: &crate::playback::PlaybackSession) -> shared::PlaybackState {
     if SHARED.seeking.load(Relaxed) {
         return shared::PlaybackState::Seeking;
     }
-    // A retranscode claim's flight holds presentation (`claim_hold`): the stream is paused for the
-    // server's round trip, and the transport's busy mark is the HUD's existing way to say "working".
-    if claim_hold::active() {
-        return shared::PlaybackState::Buffering;
-    }
     shared::PlaybackState::from_u8(SHARED.pb_state.load(Relaxed))
 }
 
-/// The one line that makes a phone photograph of the failure read-out a complete report:
-/// `PlxNative 0.6.0-dev · webOS 4.10.2 · 43LM6300PVB · m3r · tv_pipeline`. It exists because
-/// issue #63 arrived as a title, a model name and nothing else — no version, no reason — and the
-/// only surface carrying those facts (Stats for nerds) is reachable from the player's overflow
-/// menu alone and is force-closed on leaving playback, so a failed session had no way to show them.
-///
-/// Pure. Every part is a product identity or a closed vocabulary: the version every surface shares
-/// (`plex::identity`), the firmware release, the set (model · board · hw — the rule
-/// `app::diagnostics::device_rows` states: shared by every unit LG built, saying nothing about a
-/// household) and [`FailureKind::code`], the same string the telemetry channel sends. It never
-/// carries `ErrorShape::detail`, the server's free text, which is the one thing here that could
-/// name a file.
+/// The one line that makes a photograph of the failure read-out a complete report:
+/// `PiTV 0.1.0 · media_source`. Pure: the product, the version and the failure's code, never the
+/// file's name.
 pub fn support_line(kind: FailureKind) -> String {
-    support_line_of(
-        plx_platform::tv::device::info(),
-        plx_platform::tv::device::device(),
-        kind,
-    )
-}
-fn support_line_of(i: &plx_platform::tv::device::Info, hw: &plx_platform::tv::device::Hardware, kind: FailureKind) -> String {
-    let set = hw.set_line();
-    let set: &str = if set.is_empty() { plx_platform::i18n::msg::settings_login_unknown_device() } else { &set };
-    format!(
-        "{} {} · {} · {} · {}",
-        plx_plex::plex::identity::PRODUCT,
-        plx_plex::plex::identity::version(),
-        plx_platform::i18n::webos_release_line(i),
-        set,
-        kind.code()
-    )
+    format!("{} {} · {}", plx_base::identity::PRODUCT, plx_base::identity::version(), kind.code())
 }
 
-/// The `Error` state's wording, shaped by WHY — issue #22's lesson: `ff: no video stream` was
-/// technically true and cost the reviewer a full server-side investigation that the sentence
-/// "the server sent audio only" would have ended. Pure so every arm is host-testable; the two
-/// wrappers below feed it the globals (main thread only — `route::is_transcoding` reads
-/// main-thread state).
-///
-/// `sub` is `plex::serverinfo`'s Plex Pass tristate, an explicit parameter for the same purity.
-/// It sharpens the WORDING of the transcode arm and nothing more — and on a KNOWN-free server it
-/// appends the subscription as a support FACT, never as the cause. The distinction is the
-/// codebase's own audit: docs/plex-pass-audit.md row 1 says h264 encoding is free everywhere,
-/// and the profile's target chain ends in h264 precisely so a free server always HAS a usable
-/// video target — so reaching this arm on one means something ELSE failed (a source the server's
-/// ffmpeg cannot decode, transcoding disabled server-side), and "it cannot encode video without
-/// Plex Pass" was asserting a cause the profile had already ruled out, pointing the user at a
-/// purchase that would fix nothing. Known-true or unknown keeps the neutral wording alone: a
-/// subscription the app cannot prove absent must never even be named. (And wording is as far as
-/// subscription state may ever reach into playback — see `serverinfo::subscription`'s doc for
-/// why it is not a routing input.)
-///
-/// The (no-video, not-transcoding) arm — an audio-only DIRECT-PLAYED file — is worded for the
-/// file because that is the truth there: route only direct-plays when PMS metadata names an
-/// h264/hevc video track, so reaching it means the file disagrees with its own metadata.
-/// One error, three surfaces — the HUD caption, the diagnostics panel's verdict line, and the
-/// full-screen read-out (`Player Screen.dc.html`, the spec that superseded the retired
-/// `Plex Pass Awareness.dc.html` for this screen) — shaped in ONE place so
-/// they can never disagree about what happened. `no_pass` is the read-out's cue to draw the
-/// filled PLEX PASS capsule: a support FACT beside the reason, never the cause (see the arm
-/// comment above).
-/// **Why a playback failed, as a closed set.** Drives the wording below AND the telemetry code, so
-/// the two are one decision.
-///
-/// Current variants are outcomes `error_shape` can tell apart. The retired `original_rollback`
-/// wire code (the destructive probe transaction was removed) has no cause here any more and lives
-/// on only as `telemetry::classes::FailureClass::OriginalRollback`, so old telemetry fixtures and
-/// dashboards retain their meaning. Runtime source, interrupted-playback and `Load` failures became
-/// distinct only when their worker signals existed. A video-plane bind or stalled feed still
-/// reaches [`Unspecified`](FailureKind::Unspecified) until an equally concrete signal exists.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// **Why a playback failed, as a closed set.** Drives the wording of all three failure surfaces —
+/// the HUD caption, the diagnostics panel's verdict line and the full-screen read-out — so they are
+/// one decision and can never disagree about what happened.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FailureKind {
-    /// `/decision` refused the item outright — the server can neither direct play nor convert it.
-    /// The earliest and most certain failure: it happens before an engine exists.
-    DecisionRefused,
-    /// The explicit Direct Play policy cannot deliver the requested original stream.
-    PlaybackPolicy,
-    /// Transcoding, and the server produced no video stream — it found no usable video target.
-    NoVideoTranscodeTarget,
-    /// Direct playing, and the stream carries no video track, so the file disagrees with the PMS
-    /// metadata that made us choose direct play.
+    /// The file has no video stream (audio-only, or a container that hides it).
     NoVideoTrack,
-    /// The producer never opened a usable media stream or produced a video access unit.
+    /// The file could not be opened or read as media.
     MediaSource,
-    /// The media producer stopped after playback had already begun. The signal does not identify
-    /// whether that happened in the network, parser, allocator or ABR controller, so neither the
-    /// stable code nor the viewer-facing sentence blames a server or connection.
+    /// Reading stopped part-way through a file that had started.
     PlaybackInterrupted,
-    /// Starfish refused the Load declaration, so no decoder session could start.
+    /// The video sink refused the stream (a decoder this machine lacks, a pipeline error).
     TvPipeline,
-    /// This device's jail is missing `/dev/rtkmem` on a SoC where that is a known cause of
-    /// native A/V crashes — the Load was never attempted. Community-tier finding: see
-    /// [`plx_platform::tv::sandbox::blocks_native_video`]'s doc.
-    JailMissingRtkmem,
-    /// Issue #74 D.1.4's `NATIVE_LOAD_BUDGET` fired — either the native `Load` call never
-    /// returned, or it returned but `loadCompleted` never arrived. Distinct from
-    /// [`TvPipeline`](Self::TvPipeline), which is a firmware refusal the pipeline actually
-    /// reported: this is a HANG, and conflating the two made a k5lp-style stall indistinguishable
-    /// from an ordinary rejection on the wire.
+    /// The sink never answered its Load.
     LoadTimeout,
-    /// Everything else. Honest rather than tidy — see the type's doc.
     Unspecified,
 }
 
 impl FailureKind {
-    /// The telemetry wire class of this cause. The wire schema is telemetry's
-    /// (`telemetry::classes::FailureClass`), so this match is the ONE place the player's own enum
-    /// is turned into it, and a new variant cannot compile without choosing its class.
-    pub fn class(self) -> plx_telemetry::telemetry::classes::FailureClass {
-        use plx_telemetry::telemetry::classes::FailureClass as C;
+    /// The stable code the support line carries.
+    pub fn code(self) -> &'static str {
         match self {
-            FailureKind::DecisionRefused => C::DecisionRefused,
-            FailureKind::PlaybackPolicy => C::PlaybackPolicy,
-            FailureKind::NoVideoTranscodeTarget => C::NoVideoTranscodeTarget,
-            FailureKind::NoVideoTrack => C::NoVideoTrack,
-            FailureKind::MediaSource => C::MediaSource,
-            FailureKind::PlaybackInterrupted => C::PlaybackInterrupted,
-            FailureKind::TvPipeline => C::TvPipeline,
-            FailureKind::JailMissingRtkmem => C::JailMissingRtkmem,
-            FailureKind::LoadTimeout => C::LoadTimeout,
-            FailureKind::Unspecified => C::Unspecified,
+            FailureKind::NoVideoTrack => "no_video_track",
+            FailureKind::MediaSource => "media_source",
+            FailureKind::PlaybackInterrupted => "playback_interrupted",
+            FailureKind::TvPipeline => "pipeline",
+            FailureKind::LoadTimeout => "load_timeout",
+            FailureKind::Unspecified => "unspecified",
         }
     }
 
-    /// The stable wire code, which is its class's: the read-out's support line and the telemetry
-    /// channel quote one string because they read one table.
-    pub fn code(self) -> &'static str {
-        self.class().code()
+    /// A failure a second attempt can plausibly cure (a read error, a slow pipeline), as opposed
+    /// to a fact about the file.
+    fn transient(self) -> bool {
+        !matches!(self, FailureKind::NoVideoTrack)
     }
 }
 
-/// One control on the failure read-out's row. See [`failure_actions`], the ONE table that decides
-/// which of these a failure offers.
+/// What the read-out offers after a failure.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FailureAction {
-    /// Set the Direct Play preference back to Auto (the value Settings writes, persisted) and
-    /// resolve the same item again at the same position. The fix for every failure under Force
-    /// Direct Play: Force is what switched the automatic fallback off.
-    PlayAutomatically,
-    /// Resolve the same item again, unchanged — worth offering only where the failure can be
-    /// transient (the stream stopped, the pipeline never answered, no cause was reported).
     TryAgain,
-    /// The `…` popover opened on the quality ladder — a different rung is a different route, and
-    /// picking one retries at it.
-    ChangeQuality,
-    /// Review the sandbox repair (the confirmation `Player.repair` guards).
-    Repair,
-    /// Leave the player.
     Back,
 }
 
-/// What the table needs to know besides the kind: the settings and session facts that decide
-/// whether an action could CHANGE the outcome.
+/// What a failure's actions depend on beyond its kind.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct FailureContext {
-    /// Force Direct Play was in effect for the failed attempt. It overrides every quality rung
-    /// (Force always requests the original), so no rung can change the outcome.
-    pub forced: bool,
-    /// The failed attempt has a Plex request that can be resolved again. A URL/dev-trigger
-    /// playback has none, so nothing that retries can do anything.
+    /// The failed file is still known, so a retry has something to start.
     pub can_retry: bool,
-    /// The sandbox repair can still be started (nothing is running or finished).
-    pub repair_idle: bool,
 }
 
-/// **The failure read-out's row, as ONE table** — every control the read-out draws, in draw order;
-/// every key and click resolves through the same list, so a control cannot be drawn and dead, or
-/// live and undrawn.
-///
-/// **The rule: offer an action only if it can change the outcome under the current settings.**
-/// `Back` is always last, because leaving always does something. In particular:
-///
-/// * Under Force Direct Play NO quality rung can help — Force requests the original whatever rung
-///   is picked — so [`ChangeQuality`](FailureAction::ChangeQuality) is never offered there, and
-///   [`PlayAutomatically`](FailureAction::PlayAutomatically) is, because it is the one change that
-///   re-enables the fallback.
-/// * A deterministic refusal (the server's `/decision`, the TV refusing the Load declaration) gets
-///   no [`TryAgain`](FailureAction::TryAgain): the same request gets the same answer. A different
-///   rung is a different request, so the ladder stays where a transcode or a direct play could
-///   succeed instead.
-/// * A file with no video track and an unrepairable sandbox get nothing but *Back*.
+/// The read-out's buttons for `kind`, in order: Try Again when it might help, then Back.
 pub fn failure_actions(kind: FailureKind, cx: FailureContext) -> Vec<FailureAction> {
-    use FailureAction as A;
-    use FailureKind as K;
-    let transient = matches!(kind, K::MediaSource | K::PlaybackInterrupted | K::LoadTimeout
-        | K::Unspecified);
-    let mut v = Vec::with_capacity(4);
-    match kind {
-        // A device finding: nothing about the request changes it; only the repair can.
-        K::JailMissingRtkmem => {
-            if cx.repair_idle {
-                v.push(A::Repair);
-            }
-        }
-        // The file itself has no picture; no rung and no retry puts one in it.
-        K::NoVideoTrack => {}
-        _ if cx.forced => {
-            if cx.can_retry {
-                v.push(A::PlayAutomatically);
-                if transient {
-                    v.push(A::TryAgain);
-                }
-            }
-        }
-        // Only reachable under Force (`with_forced_playback_context`); without it there is no
-        // policy to relax.
-        K::PlaybackPolicy => {}
-        _ => {
-            if cx.can_retry {
-                if transient {
-                    v.push(A::TryAgain);
-                }
-                v.push(A::ChangeQuality);
-            }
-        }
+    let mut v = Vec::with_capacity(2);
+    if cx.can_retry && kind.transient() {
+        v.push(FailureAction::TryAgain);
     }
-    v.push(A::Back);
+    v.push(FailureAction::Back);
     v
 }
 
-/// The live [`FailureContext`] (main thread).
 pub fn failure_context(ps: &crate::playback::PlaybackSession) -> FailureContext {
-    FailureContext {
-        forced: crate::playback::forced_direct_play(ps) || failtest_forced(),
-        can_retry: crate::playback::can_retry_current_play(ps),
-        repair_idle: ps.repair_status == plx_platform::tv::sandbox::State::Idle,
-    }
+    FailureContext { can_retry: crate::playback::has_url(ps) }
 }
 
+/// One failure, worded for each surface.
 pub struct ErrorShape {
-    /// **The stable, machine-readable reason** — the one field here meant for a wire rather than
-    /// for a person. Every other field is prose that will be re-worded, localised or shortened, and
-    /// a dashboard keyed on any of them breaks the day somebody improves a sentence.
-    ///
-    /// It is not a parallel classification either: `panel`, `caption` and `readout` are all derived
-    /// FROM it, so the words on screen and the code on the wire cannot come to disagree about what
-    /// happened. (`panel` was the obvious thing to key telemetry on, and undercounts: a grep for
-    /// `panel: "` finds three arms where there are four outcomes, because one builds its string
-    /// through an inner `if`.)
     pub kind: FailureKind,
+    /// The HUD's one-line caption.
     pub caption: &'static std::ffi::CStr,
-    /// the diagnostics panel's verdict suffix — always present in `Error`, and includes the
-    /// subscription fact in words because the panel is plain text
+    /// The diagnostics panel's verdict line.
     pub panel: &'static str,
-    /// the read-out's reason line — sentence case, subscription fact NOT baked in (the
-    /// read-out states it as its own line, with the capsule)
+    /// The full-screen read-out's reason.
     pub readout: &'static str,
-    /// Additional reason and recovery instructions for the viewer. A PMS verdict is preserved
-    /// verbatim; local policy failures and Force recovery copy are authored by the app.
-    /// Owned strings borrow from the playback session only while this shape is constructed.
-    ///
-    /// **It deliberately does NOT reach `panel`.** The diagnostics panel is a PHOTOGRAPH — its
-    /// module doc bans URLs, paths and item titles from it, and a PMS decision sentence is
-    /// untrusted free text that can carry a filename. So the viewer's own screen quotes the
-    /// server and the shared support surface names only what the app decided; the asymmetry is
-    /// the redaction rule, not an oversight.
+    /// A further sentence under the reason, or empty.
     pub detail: std::borrow::Cow<'static, str>,
-    /// true only when the failure is the audio-only transcode AND the server is known to have
-    /// no Plex Pass — the one case the capsule appears
-    pub no_pass: bool,
 }
 
-/// Which runtime boundary ended playback after route resolution succeeded.
-///
-/// This is a small product vocabulary, not a copy of FFmpeg or Starfish return codes. Every
-/// variant is backed by a distinct signal the worker already publishes, so the HUD never parses
-/// log strings or guesses from elapsed time.
+/// What the worker signals say went wrong, most specific first.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum RuntimeFailure {
-    /// No worker supplied a cause. Say that honestly rather than leaving the reason slot blank.
     Unknown,
-    /// The producer never opened a usable media stream or produced a video access unit.
     MediaSource,
-    /// The media producer stopped after it had supplied at least one access unit. The worker's
-    /// flag deliberately says nothing narrower about why it stopped.
     PlaybackInterrupted,
-    /// Starfish refused the Load declaration, so no decoder session could start.
     TvPipeline,
-    /// Issue #74 D.1.4's `NATIVE_LOAD_BUDGET` fired — a hang, not a firmware refusal. See
-    /// [`FailureKind::LoadTimeout`].
     LoadTimeout,
 }
 
-/// PURE: turn the four terminal worker signals into one cause. More specific downstream evidence
-/// wins over the generic producer flag when concurrent teardown makes more than one bit visible.
-/// `load_timed_out` is checked FIRST and independently of `load_failed`, even though `pump.rs`
-/// always sets both together on a budget expiry: the distinction this function exists to make is
-/// "did the pipeline refuse this, or did it never answer at all", and only the timed-out signal
-/// can tell the two apart.
 fn runtime_failure(
     demux_failed: bool,
     io_failed: bool,
@@ -954,278 +626,88 @@ fn runtime_failure(
     }
 }
 
-/// The read-out for [`FailureKind::JailMissingRtkmem`] — the one `ErrorShape` not produced by
-/// [`error_shape`], because it precedes route resolution entirely: it names a device finding, not
-/// a decision the server or the runtime made. Phrased as a FINDING throughout — "found... known
-/// to..." — never as a certain diagnosis, matching the community-tier evidence it is built on
-/// (see [`plx_platform::tv::sandbox::blocks_native_video`]'s doc). Caption and readout are kept short for
-/// legibility from a phone photograph, same bar as every other arm here; the remedy's detail goes
-/// in `detail`. `Player.repair` (see `tv::sandbox`) can actually attempt the Homebrew
-/// Channel service call that patches the jail profile, so the remedy text points at that confirmed
-/// in-app repair rather than at a bare reinstall.
-fn jail_error_shape() -> ErrorShape {
-    ErrorShape {
-        kind: FailureKind::JailMissingRtkmem,
-        caption: plx_platform::i18n::msg::widgets_failure_jail_c(),
-        panel: plx_platform::i18n::msg::widgets_panel_jail(),
-        readout: plx_platform::i18n::msg::widgets_reason_jail(),
-        detail: std::borrow::Cow::Borrowed(
-            plx_platform::i18n::msg::widgets_reason_jail_help(),
-        ),
-        no_pass: false,
-    }
-}
-
-fn error_shape(
-    no_video: bool,
-    transcoding: bool,
-    sub: plx_plex::plex::serverinfo::Subscription,
-    verdict: Option<&str>,
-    runtime: RuntimeFailure,
-) -> ErrorShape {
-    let no_pass = sub == plx_plex::plex::serverinfo::Subscription::No;
-    // FIRST, because it is the earliest thing that can fail and the most certain thing we can say:
-    // the server adjudicated the request at `/decision` and refused BOTH lanes before any of the
-    // signals below could exist (no engine ran, so `no_video` is simply false here). The two lines
-    // it produces are different KINDS of sentence — ours states what happened, mapped from the
-    // decision CODE; the server's is quoted verbatim beneath it.
-    //
-    // `no_pass` is FALSE on this arm on purpose, and it stays false on a server we KNOW has no Plex
-    // Pass and even when the encoder the server names happens to be HEVC. The server told us the
-    // cause; naming a subscription beside it would be exactly the speculation the tristate rule
-    // forbids — and it would be wrong twice over, since the arm is reachable for any source the
-    // server's own ffmpeg cannot decode, which no subscription changes.
-    if let Some(v) = verdict {
-        return ErrorShape {
-            kind: FailureKind::DecisionRefused,
-            caption: plx_platform::i18n::msg::widgets_failure_refused_c(),
-            // The panel's line is ours and static; the server's sentence rides on `detail`, whose
-            // surface (the full-screen read-out) is the one that can hold a whole sentence.
-            panel: plx_platform::i18n::msg::widgets_panel_refused(),
-            readout: plx_platform::i18n::msg::widgets_reason_refused(),
-            // OWNED since phase 9: the verdict is borrowed from the caller's session publication
-            // rather than from a `static mut`, so it cannot be lent for `'static`. One allocation,
-            // on the path where a playback has already failed.
-            detail: std::borrow::Cow::Owned(v.to_owned()),
-            no_pass: false,
-        };
-    }
-    if no_video && transcoding {
-        return ErrorShape {
-            kind: FailureKind::NoVideoTranscodeTarget,
-            caption: plx_platform::i18n::msg::widgets_failure_audio_only_c(),
-            panel: if no_pass {
-                plx_platform::i18n::msg::widgets_panel_audio_only_no_pass()
-            } else {
-                plx_platform::i18n::msg::widgets_panel_audio_only()
-            },
-            readout: plx_platform::i18n::msg::widgets_reason_audio_only(),
-            detail: std::borrow::Cow::Borrowed(""),
-            no_pass,
-        };
-    }
+/// The wording for a failure. Pure, so every arm is host-testable.
+fn error_shape(no_video: bool, runtime: RuntimeFailure) -> ErrorShape {
+    use plx_platform::i18n::msg;
+    let shape = |kind, caption, panel, readout| ErrorShape {
+        kind,
+        caption,
+        panel,
+        readout,
+        detail: std::borrow::Cow::Borrowed(""),
+    };
     if no_video {
-        return ErrorShape {
-            kind: FailureKind::NoVideoTrack,
-            caption: plx_platform::i18n::msg::widgets_failure_no_video_c(),
-            panel: plx_platform::i18n::msg::widgets_panel_no_video(),
-            readout: plx_platform::i18n::msg::widgets_reason_no_video(),
-            detail: std::borrow::Cow::Borrowed(""),
-            no_pass: false,
-        };
-    }
-    match runtime {
-        RuntimeFailure::MediaSource => ErrorShape {
-            kind: FailureKind::MediaSource,
-            caption: plx_platform::i18n::msg::widgets_failure_open_c(),
-            panel: plx_platform::i18n::msg::widgets_panel_open(),
-            readout: plx_platform::i18n::msg::widgets_reason_open(),
-            detail: std::borrow::Cow::Borrowed(""),
-            no_pass: false,
-        },
-        RuntimeFailure::PlaybackInterrupted => ErrorShape {
-            kind: FailureKind::PlaybackInterrupted,
-            caption: plx_platform::i18n::msg::widgets_failure_stopped_c(),
-            panel: plx_platform::i18n::msg::widgets_panel_stopped(),
-            readout: plx_platform::i18n::msg::widgets_reason_stopped(),
-            detail: std::borrow::Cow::Borrowed(""),
-            no_pass: false,
-        },
-        RuntimeFailure::TvPipeline => ErrorShape {
-            kind: FailureKind::TvPipeline,
-            caption: plx_platform::i18n::msg::widgets_failure_tv_rejected_c(),
-            panel: plx_platform::i18n::msg::widgets_panel_tv_rejected(),
-            readout: plx_platform::i18n::msg::widgets_reason_tv_rejected(),
-            detail: std::borrow::Cow::Borrowed(""),
-            no_pass: false,
-        },
-        // A DIFFERENT `kind` from `TvPipeline` (issue #74 D.1.4's budget is a hang, not a firmware
-        // refusal — see `RuntimeFailure::LoadTimeout`'s doc), and now its own reader-facing wording
-        // too: the pipeline never actually answered, so "rejected" would claim a firmware verdict
-        // that was never given.
-        RuntimeFailure::LoadTimeout => ErrorShape {
-            kind: FailureKind::LoadTimeout,
-            caption: plx_platform::i18n::msg::widgets_failure_load_timeout_c(),
-            panel: plx_platform::i18n::msg::widgets_panel_load_timeout(),
-            readout: plx_platform::i18n::msg::widgets_reason_load_timeout(),
-            detail: std::borrow::Cow::Borrowed(""),
-            no_pass: false,
-        },
-        RuntimeFailure::Unknown => ErrorShape {
-            kind: FailureKind::Unspecified,
-            caption: plx_platform::i18n::msg::widgets_status_failed_c(),
-            panel: plx_platform::i18n::msg::widgets_panel_unknown(),
-            readout: plx_platform::i18n::msg::widgets_reason_unknown(),
-            detail: std::borrow::Cow::Borrowed(""),
-            no_pass: false,
-        },
-    }
-}
-/// The Plex Pass claim that applies to THIS failure: the subscription of the server the PLAYING
-/// item came from.
-///
-/// **Never `serverinfo::subscription()`**, which answers for whichever server is *current* — and
-/// `current` stays pinned to the primary while a borrowed film plays (`plex::servers`' own rule:
-/// browsing a share does not re-point it). Both polarities are wrong and both are silent: a film
-/// borrowed from a Pass-less share loses the "(server has no Plex Pass)" clause and the read-out's
-/// capsule, which is exactly the support fact issue #22 was reported without; and our own Pass-less
-/// server would put that capsule on a failure that came from a friend's Pass'd machine, asserting a
-/// fact about a server that has nothing to do with it. `serverinfo::subscription_of` exists for
-/// this, and `route::cur_sid` is the playing item's own server — captured once at `request_play`
-/// and installed by `apply_plan`, which runs before either signal that can flip the state to
-/// `Error` (the plan's own refusal and the engine it would otherwise have started).
-///
-/// MAIN THREAD, like every other reader of `route`'s playback state.
-fn playing_subscription(ps: &crate::playback::PlaybackSession) -> plx_plex::plex::serverinfo::Subscription {
-    plx_plex::plex::serverinfo::subscription_of(crate::playback::cur_sid(ps))
-}
-
-/// Keep the runtime diagnosis while making the active override and its recovery path visible.
-/// A failed strict-original request is a policy failure, not evidence that PMS cannot convert
-/// the file: conversion was never allowed. The mode snapshot supplies that distinction; no
-/// user-facing sentence or firmware error string is parsed to decide it.
-fn with_forced_playback_context(mut shape: ErrorShape, forced: bool) -> ErrorShape {
-    if !forced { return shape; }
-    if shape.kind == FailureKind::DecisionRefused {
-        shape.kind = FailureKind::PlaybackPolicy;
-        shape.caption = plx_platform::i18n::msg::widgets_failure_forced_playback_c();
-        shape.panel = plx_platform::i18n::msg::widgets_panel_forced_playback();
-        shape.readout = plx_platform::i18n::msg::widgets_reason_forced_playback();
-        // The policy verdict already names the specific limitation and the return-to-Auto step.
-    } else {
-        shape.detail = std::borrow::Cow::Borrowed(
-            plx_platform::i18n::msg::widgets_reason_forced_playback_help(),
+        return shape(
+            FailureKind::NoVideoTrack,
+            msg::widgets_failure_no_video_c(),
+            msg::widgets_panel_no_video(),
+            msg::widgets_reason_no_video(),
         );
     }
-    shape.no_pass = false;
-    shape
+    match runtime {
+        RuntimeFailure::MediaSource => shape(
+            FailureKind::MediaSource,
+            msg::widgets_failure_open_c(),
+            msg::widgets_panel_open(),
+            msg::widgets_reason_open(),
+        ),
+        RuntimeFailure::PlaybackInterrupted => shape(
+            FailureKind::PlaybackInterrupted,
+            msg::widgets_failure_stopped_c(),
+            msg::widgets_panel_stopped(),
+            msg::widgets_reason_stopped(),
+        ),
+        RuntimeFailure::TvPipeline => shape(
+            FailureKind::TvPipeline,
+            msg::widgets_failure_tv_rejected_c(),
+            msg::widgets_panel_tv_rejected(),
+            msg::widgets_reason_tv_rejected(),
+        ),
+        // A hang, not a refusal: the pipeline never answered, so "rejected" would claim a verdict
+        // that was never given.
+        RuntimeFailure::LoadTimeout => shape(
+            FailureKind::LoadTimeout,
+            msg::widgets_failure_load_timeout_c(),
+            msg::widgets_panel_load_timeout(),
+            msg::widgets_reason_load_timeout(),
+        ),
+        RuntimeFailure::Unknown => shape(
+            FailureKind::Unspecified,
+            msg::widgets_status_failed_c(),
+            msg::widgets_panel_unknown(),
+            msg::widgets_reason_unknown(),
+        ),
+    }
 }
 
-/// The live [`ErrorShape`] for `PlaybackState::Error` (main thread — `route::is_transcoding` and
-/// `route::play_verdict` read main-thread state).
+/// The failure now, from the worker signals.
 pub fn error_now(ps: &crate::playback::PlaybackSession) -> ErrorShape {
-    if let Some(arm) = failtest_arm(ps) {
+    if let Some(arm) = failtest_arm() {
         return arm;
     }
-    // Ahead of every other cause: on an affected, unfixed set every Load this boot has been (and
-    // every later one will be) refused before it reached the native Engine at all, so no other
-    // signal below can be the real explanation for a playback failure.
-    if ps.jail_load_blocked {
-        return jail_error_shape();
-    }
-    let demux_failed = SHARED
-        .demux_failed
-        .load(std::sync::atomic::Ordering::Acquire);
-    let demux_io_failed = SHARED
-        .demux_io_failed
-        .load(std::sync::atomic::Ordering::Acquire);
-    with_forced_playback_context(error_shape(
+    error_shape(
         SHARED.demux_no_video.load(Relaxed),
-        crate::playback::is_transcoding(ps),
-        playing_subscription(&ps),
-        crate::playback::play_verdict(ps),
         runtime_failure(
-            demux_failed,
-            demux_io_failed,
+            SHARED.demux_failed.load(std::sync::atomic::Ordering::Acquire),
+            SHARED.demux_io_failed.load(std::sync::atomic::Ordering::Acquire),
             SHARED.load_failed.load(Relaxed),
             // The refused start's cause: an abandoned Load exists only after the budget fired.
             SHARED.load_timed_out.load(Relaxed) || ps.native_start_refused,
         ),
-    ), crate::playback::forced_direct_play(ps))
+    )
 }
 
-/// A sample PMS refusal, for the `verdict` variant of the dev trigger below. Real wording: this is
-/// the sentence a server emits when the only encoder our profile asked for is one it does not have,
-/// which is issue #22's failure with the pre-#22 single-entry target chain.
-const FAILTEST_VERDICT: &str =
-    "Cannot convert this item. Implementation for video encoder 'hevc' not found.";
-
-/// dev: `/tmp/plxnative-failtest=<arm>` — force one variant of the failure read-out.
-///
-/// The read-out is the one screen in the app that **cannot be reached on purpose**: it needs a
-/// server that refuses, which is exactly the state a working setup does not have. It is also the
-/// screen most designed to be looked at — `Player Screen.dc.html` shapes it to survive a phone
-/// photograph, because a maintainer triaging a report from someone else's television is its whole
-/// audience. So the arms are selectable, and there is no other way to grade them on a panel.
-///
-/// Arms: `verdict` (the pre-flight refusal, with the server's own sentence quoted), `audio` (the
-/// audio-only transcode — pair with `/tmp/plxnative-nopass` for the PLEX PASS capsule), `novideo`
-/// (an audio-only file that direct-played), `stream` (no usable media), `connection` (an interrupted
-/// transfer), `tv` (the native pipeline refused Load), `jail` (this device's jail is missing
-/// `/dev/rtkmem` — forces [`jail_error_shape`] regardless of the real device probe, since most
-/// dev machines are not an affected SoC), and `none` (no cause was reported). It feeds
-/// [`error_shape`] rather than short-circuiting it, so what is photographed is the real resolver.
-///
-/// `player_hud::busy` has the other half — the state itself — for the same reason.
-///
-/// The subscription comes from [`playing_subscription`], the same reader the real path uses, so the
-/// arm being photographed is the real resolver on real state. `/tmp/plxnative-nopass` is what makes
-/// the capsule reachable and it applies to EVERY server, so the pairing `docs/agent-reference.md`
-/// documents is unaffected — but note the arm still has to be looked at from the player route,
-/// i.e. after a play, which is when `route::cur_sid` names a server at all.
-fn failtest_arm(ps: &crate::playback::PlaybackSession) -> Option<ErrorShape> {
+/// The `failtest` dev trigger: show a chosen failure's wording without having to cause it.
+fn failtest_arm() -> Option<ErrorShape> {
     let arm = plx_base::devtrig::read("failtest")?;
-    let sub = playing_subscription(&ps);
     Some(match arm.trim() {
-        "audio" => error_shape(true, true, sub, None, RuntimeFailure::Unknown),
-        "novideo" => error_shape(true, false, sub, None, RuntimeFailure::Unknown),
-        "stream" => error_shape(false, false, sub, None, RuntimeFailure::MediaSource),
-        "connection" => error_shape(false, false, sub, None, RuntimeFailure::PlaybackInterrupted),
-        "tv" => error_shape(false, false, sub, None, RuntimeFailure::TvPipeline),
-        "load_timeout" => error_shape(false, false, sub, None, RuntimeFailure::LoadTimeout),
-        "jail" => jail_error_shape(),
-        "none" => error_shape(false, false, sub, None, RuntimeFailure::Unknown),
-        // Force Direct Play's own refusal (issue: the owner's photograph) — the route's real
-        // verdict sentence for a video format the engine cannot take, through the real resolver.
-        "policy" => with_forced_playback_context(
-            error_shape(false, false, sub,
-                Some(crate::playback::PlayVerdict::Forced(crate::playback::ForcedFailure::Video).text()),
-                RuntimeFailure::Unknown),
-            true,
-        ),
-        _ => error_shape(
-            false,
-            true,
-            sub,
-            Some(FAILTEST_VERDICT),
-            RuntimeFailure::Unknown,
-        ),
+        "novideo" => error_shape(true, RuntimeFailure::Unknown),
+        "stream" => error_shape(false, RuntimeFailure::MediaSource),
+        "connection" => error_shape(false, RuntimeFailure::PlaybackInterrupted),
+        "tv" => error_shape(false, RuntimeFailure::TvPipeline),
+        "load_timeout" => error_shape(false, RuntimeFailure::LoadTimeout),
+        _ => error_shape(false, RuntimeFailure::Unknown),
     })
-}
-/// dev: the `policy` arm of `/tmp/plxnative-failtest` stands for a Force Direct Play session, so
-/// the action table sees the Force the arm's shape claims.
-fn failtest_forced() -> bool {
-    plx_base::devtrig::read("failtest").is_some_and(|a| a.trim() == "policy")
-}
-
-/// Publish the jail read-out fixture on the same session fact the owned confirmation reads.
-/// Only ordinary development scenarios call this; controlled replay never reads this trigger.
-/// It lives beside [`failtest_arm`], the other reader of `/tmp/plxnative-failtest`, because it
-/// only reads that trigger and writes a `PlaybackSession` field — nothing of the app's.
-pub fn failure_fixture(session: &mut crate::playback::PlaybackSession) {
-    if plx_base::devtrig::read("failtest").is_some_and(|arm| arm.trim() == "jail") {
-        session.jail_load_blocked = true;
-    }
 }
 
 /// HUD caption for `PlaybackState::Error` (main thread).
@@ -1270,268 +752,13 @@ pub use plx_platform::tv::sink::{VP_ACB, VP_EXPORTED, VP_NONE};
 /// The simulator's clock-sink stop; the television's pipeline has no such control.
 pub use ffi_host::stop_clock_at as stop_sim_clock_at;
 
-/// The video codec a `dg_load_v` code names (video 1 = H264, 2 = H265, 3 = AV1, 4 = VP9; 0 = not built).
-/// The codes are written from `engine::LoadVideo::diag_code`, the names from its `payload_name`.
-pub fn load_v_name(code: u8) -> &'static str {
-    match code {
-        1 => "H264",
-        2 => "H265",
-        3 => "AV1",
-        4 => "VP9",
-        _ => "—",
-    }
-}
-
-/// One consistent read of everything the on-screen diagnostics overlay shows (`app::diagnostics`).
-///
-/// A struct rather than twenty accessors for one reason: the panel must not tell a story that
-/// never happened. Sampled field-by-field across a frame it could report "no frames" beside a
-/// callback count taken 16 ms later, and the whole point is that a maintainer trusts the
-/// photograph. One call, one instant, main thread.
-///
-/// Everything here is a MIRROR — see `Shared`'s diagnostics block. Nothing in the playback state
-/// machine may read a `Diag` back.
-///
-/// `Default` is the never-started session — all zero, no window, nothing fed — which is both the
-/// honest pre-playback reading and what the host tests build, since the real [`diag`] reaches
-/// `starfish.c` symbols that do not exist on the dev Mac.
-#[derive(Default)]
-pub struct Diag {
-    pub vp_mode: c_int,
-    pub window_id: String,
-    pub acb_ok: bool,
-    pub place_rv: i32,
-    pub placed_w: i32,
-    pub placed_h: i32,
-    pub stage: u8,
-    pub load_completed: bool,
-    pub load_failed: bool,
-    pub cb_count: u32,
-    pub pushed_any: bool,
-    pub fed_v: i64,
-    pub fed_a: i64,
-    pub frames: i32,
-    pub seen_frame: bool,
-    pub aq_video: i64,
-    pub aq_audio: i64,
-    pub fed_v_pts: i64,
-    pub fed_a_pts: i64,
-    pub load_v: u8,
-    pub load_a: u8,
-    pub feed_state: u8,
-    pub cb_err: i32,
-    pub cb_err_at: u32,
-    pub http_status: i32,
-    pub net_rx: i64,
-    /// Playable content-time reserve derived from the elementary-stream tails and the displayed
-    /// movie position. Unlike `abr_buffer_ms`, this is transport/controller independent and is
-    /// therefore present for Manual Original and fixed qualities too. `None` means one required
-    /// lane has not published a post-open/post-seek timestamp yet.
-    pub playable_buffer_ms: Option<i64>,
-    pub load_at: u32,
-    pub frame_at: u32,
-    pub video_w: i32,
-    pub video_h: i32,
-    pub video_fps_milli: i64,
-    pub pos_ns: i64,
-    pub dur_ns: i64,
-    /// Whole-file transport requirement from the route resolve. Unlike the ABR fields this also
-    /// exists for a manual Original session, so the diagnostics sweep can keep the same demand
-    /// lane in every delivery mode.
-    pub source_kbps: i64,
-    pub abr_mode: u8,
-    pub abr_kbps: i64,
-    pub abr_declared_kbps: i64,
-    pub abr_media_kbps: i64,
-    pub abr_net_kbps: i64,
-    pub abr_buffer_ms: i64,
-    pub abr_ratio_pm: i64,
-    pub abr_action: u8,
-    pub abr_target_kbps: i64,
-    pub abr_failure_kind: u8,
-    pub abr_failure_status: i32,
-    /// Wall milliseconds an unsafe Original deficit has held (N13). Was a COUNT of
-    /// 750 ms active-read windows — a clock that stops under backpressure, so the read-out it
-    /// fed said "3 windows" for durations an order of magnitude apart.
-    pub abr_unsafe_deficit_ms: i64,
-    pub abr_safe_kbps: i64,
-    pub abr_optimal_kbps: i64,
-    pub abr_unc_pm: i64,
-    pub abr_samples: i64,
-    pub abr_slope_ms_per_s: i64,
-    pub abr_starve_secs: i64,
-    pub abr_pred_pm: i64,
-    pub abr_risk: i64,
-    pub abr_why: u8,
-}
-
-/// One physical reserve definition for every delivery mode. Direct-file tails already use movie
-/// time and have `display_base_ns == 0`; segmented HLS and offset progressive transcodes publish a
-/// zero-based tail and carry the movie offset in `display_base_ns`. Adding that base universally
-/// makes all three shapes land in the same timeline without a route-specific heuristic.
-fn playable_buffer_ms(
-    video_tail_ns: i64,
-    audio_tail_ns: i64,
-    audio_expected: bool,
-    display_base_ns: i64,
-    playpos_ns: i64,
-) -> Option<i64> {
-    if video_tail_ns < 0 {
-        return None;
-    }
-    let tail_ns = if audio_expected {
-        if audio_tail_ns < 0 {
-            return None;
-        }
-        video_tail_ns.min(audio_tail_ns)
-    } else {
-        video_tail_ns
-    };
-    Some(
-        tail_ns
-            .saturating_add(display_base_ns.max(0))
-            .saturating_sub(playpos_ns.max(0))
-            .max(0)
-            / 1_000_000,
-    )
-}
-
-impl Diag {
-    /// The lab snapshot's wire spelling; the on-screen read-out words its own labels.
-    #[allow(dead_code)]
-    pub fn vp_mode_str(&self) -> &'static str {
-        match self.vp_mode {
-            VP_EXPORTED => "exported window (webOS 5+)",
-            VP_ACB => "ACB (webOS 4)",
-            _ => "NONE — no video path",
-        }
-    }
-    /// What the Load payload named as the video codec, or `—` before one was built.
-    pub fn load_v_str(&self) -> &'static str {
-        load_v_name(self.load_v)
-    }
-    /// …and the audio codec. `needAudio:false` is its own answer, not an absence.
-    pub fn load_a_str(&self) -> &'static str {
-        match self.load_a {
-            1 => "AC3",
-            2 => "AC3 PLUS",
-            3 => "AAC",
-            4 => "DTS",
-            n if n >= 5 => engine::GST_AUDIO_PAYLOAD_CODECS.iter().find(|c| c.2 == n).map_or("NONE (needAudio:false)", |c| c.1),
-            _ => "NONE (needAudio:false)",
-        }
-    }
-    /// Why the VIDEO feeder is where it is. The video lane specifically: the picture is what a
-    /// user complains about, and a two-lane string overflows the value column.
-    ///
-    /// `queue empty` vs `BufferFull` is the row's whole point — a dead PRODUCER and a dead SINK
-    /// look identical from every other field on the panel and want opposite fixes.
-    ///
-    /// The throttle state is worded as what it IS, not as what it is waiting for. It was
-    /// "waiting for a frame", which is the literal truth and reads as a stall — and it is the
-    /// state a healthy playback sits in most of the time, because the feeder deliberately stays
-    /// within `MAX_FEED_AHEAD_NS` of the presented position. The first person to see the panel in
-    /// the wild asked why playback was stuck; it was not.
-    #[allow(dead_code)]
-    pub fn feed_state_str(&self) -> &'static str {
-        match self.feed_state {
-            1 => "accepting",
-            2 => "BufferFull (sink is full)",
-            3 => "REFUSED",
-            4 => "holding ~1.6 s ahead",
-            5 => "queue empty (no data)",
-            _ => "— nothing fed yet",
-        }
-    }
-    /// Only an outright refusal is a fault. BufferFull is the steady state under the feed-ahead
-    /// throttle, and the throttle and an empty queue are ordinary moments in a healthy stream.
-    pub fn feed_is_fault(&self) -> bool {
-        self.feed_state == 3
-    }
-}
-
-pub fn diag(ps: &crate::playback::PlaybackSession) -> Diag {
-    let (fed_v, fed_a) = engine::fed_totals();
-    // The sink hands back the seam's own static buffer — never NULL, "" when no window was
-    // created — so this is a copy of a bounded char[64], not a borrow with a lifetime to reason about.
-    let window_id = sink().window_id().to_string_lossy().into_owned();
-    let load_a = SHARED.dg_load_a.load(Relaxed);
-    let playable_buffer_ms = playable_buffer_ms(
-        SHARED.hls_video_tail_ns.load(Relaxed),
-        SHARED.hls_audio_tail_ns.load(Relaxed),
-        load_a != 0,
-        SHARED.disp_base.load(Relaxed),
-        SHARED.playpos_ns.load(Relaxed),
-    );
-    let (video_w, video_h) = SHARED.video_raster();
-    Diag {
-        vp_mode: sink().window_mode(),
-        window_id,
-        acb_ok: ACB_OK.load(Relaxed),
-        place_rv: SHARED.dg_place_rv.load(Relaxed),
-        placed_w: SHARED.dg_placed_w.load(Relaxed),
-        placed_h: SHARED.dg_placed_h.load(Relaxed),
-        stage: SHARED.dg_stage.load(Relaxed),
-        load_completed: SHARED.load_completed.load(Relaxed),
-        load_failed: SHARED.load_failed.load(Relaxed),
-        cb_count: SHARED.dg_cb_count.load(Relaxed),
-        pushed_any: crate::ff::pushed_any(),
-        fed_v,
-        fed_a,
-        frames: SHARED.frames.load(Relaxed),
-        seen_frame: SHARED.seen_frame.load(Relaxed),
-        aq_video: SHARED.dg_aq_video.load(Relaxed),
-        aq_audio: SHARED.dg_aq_audio.load(Relaxed),
-        fed_v_pts: SHARED.dg_fed_v_pts.load(Relaxed),
-        fed_a_pts: SHARED.dg_fed_a_pts.load(Relaxed),
-        load_v: SHARED.dg_load_v.load(Relaxed),
-        load_a,
-        feed_state: SHARED.dg_feed_state.load(Relaxed),
-        cb_err: SHARED.dg_cb_err.load(Relaxed),
-        cb_err_at: SHARED.dg_cb_err_at.load(Relaxed),
-        http_status: SHARED.dg_http_status.load(Relaxed),
-        net_rx: SHARED.dg_net_rx.load(Relaxed),
-        playable_buffer_ms,
-        load_at: SHARED.dg_load_at.load(Relaxed),
-        frame_at: SHARED.dg_frame_at.load(Relaxed),
-        video_w,
-        video_h,
-        video_fps_milli: SHARED.video_fps_milli.load(Relaxed),
-        pos_ns: SHARED.playpos_ns.load(Relaxed),
-        dur_ns: SHARED.duration_ns.load(Relaxed),
-        source_kbps: crate::playback::transport_kbps(ps),
-        abr_mode: SHARED.dg_abr_mode.load(Relaxed),
-        abr_kbps: SHARED.dg_abr_kbps.load(Relaxed),
-        abr_declared_kbps: SHARED.dg_abr_declared_kbps.load(Relaxed),
-        abr_media_kbps: SHARED.dg_abr_media_kbps.load(Relaxed),
-        abr_net_kbps: SHARED.dg_abr_net_kbps.load(Relaxed),
-        abr_buffer_ms: SHARED.dg_abr_buffer_ms.load(Relaxed),
-        abr_ratio_pm: SHARED.dg_abr_ratio_pm.load(Relaxed),
-        abr_action: SHARED.dg_abr_action.load(Relaxed),
-        abr_target_kbps: SHARED.dg_abr_target_kbps.load(Relaxed),
-        abr_failure_kind: SHARED.abr_failure_kind.load(Relaxed),
-        abr_failure_status: SHARED.abr_failure_status.load(Relaxed),
-        abr_unsafe_deficit_ms: SHARED.dg_abr_unsafe_deficit_ms.load(Relaxed),
-        abr_safe_kbps: SHARED.dg_abr_safe_kbps.load(Relaxed),
-        abr_optimal_kbps: SHARED.dg_abr_optimal_kbps.load(Relaxed),
-        abr_unc_pm: SHARED.dg_abr_unc_pm.load(Relaxed),
-        abr_samples: SHARED.dg_abr_samples.load(Relaxed),
-        abr_slope_ms_per_s: SHARED.dg_abr_slope_ms_per_s.load(Relaxed),
-        abr_starve_secs: SHARED.dg_abr_starve_secs.load(Relaxed),
-        abr_pred_pm: SHARED.dg_abr_pred_pm.load(Relaxed),
-        abr_risk: SHARED.dg_abr_risk.load(Relaxed),
-        abr_why: SHARED.dg_abr_why.load(Relaxed),
-    }
-}
-
 pub fn seek_display_ns() -> i64 {
     SHARED.seek_display_ns.load(Relaxed)
 }
 /// The playhead the user INTENDS, which is not always the one being published: while a seek is
 /// still resolving (request → reopen → prime → Play) `playpos_ns` keeps reporting the PRE-seek
 /// spot, so anything snapshotting "where are we?" inside that window snapshots the position the
-/// user just left. The rule — an in-flight seek target wins, then an outstanding recovery flight's
-/// own offset (a resume that has not landed has published nothing), else the published position — used to
+/// user just left. The rule — an in-flight seek target wins, else the published position — used to
 /// be open-coded at each reader that remembered it and was simply MISSING at the one that did not
 /// (the OS-background save; see `app::intended_pos`). This is that rule, once.
 ///
@@ -1546,34 +773,19 @@ pub fn intended_pos_ns(ps: &crate::playback::PlaybackSession) -> i64 {
     let t = seek_display_ns();
     if loading(ps) && t >= 0 {
         t
-    } else if let Some(offset_ns) = crate::playback::recovery_flight_offset_ns() {
-        // A resume/recovery flight is out and has not landed: `playpos_ns` is still the zero
-        // `reset_session` left (it is seeded at the landing), so the flight's own offset is where
-        // the viewer is. Without it a Home press mid-resume saves 0 and the restore plays from the
-        // start, after which the timeline reports overwrite the server's viewOffset.
-        offset_ns
     } else {
         playpos_ns()
     }
 }
-/// request an audio-track switch (Plex audioStreamID); the pump forces a fresh
-/// transcode with that source audio at the current position next tick.
-pub fn request_audio_switch(ps: &crate::playback::PlaybackSession, _sid: i64) {
-    crate::playback::request_user_route_intent(ps, crate::playback::UserRouteIntent::Retranscode);
-    SHARED.sub_cues.lock().unwrap().clear(); // the fresh transcode carries no embedded subs
-}
-/// request a NATIVE audio-track switch (direct-play, NO transcode): feed the 0-based `audio_idx`
-/// audio stream from the same MKV with codec `codec`. The pump reloads direct-play at the current
-/// position next tick (switch_audio_native). Used when the item direct-plays and the target track
-/// is a direct-playable codec (aac/ac3/eac3).
+/// Request an audio-track switch: feed the 0-based `audio_idx` audio stream of the same file, with
+/// codec `codec`. The pump reloads at the current position on its next tick
+/// (`engine::reload_at`), since the Load payload must name the new track's codec.
 pub fn request_audio_track(ps: &mut crate::playback::PlaybackSession, audio_idx: i32, codec: &str) {
     stage_native_audio(ps, audio_idx, codec);
-    crate::playback::request_user_route_intent(ps, crate::playback::UserRouteIntent::NativeAudioReload);
+    TX.audio_reload.store(true, Relaxed);
 }
-/// Everything a native audio switch needs BEFORE its direct-play reload, without queueing one:
-/// the Load payload codec, the demuxer's stream index, and the old track's embedded cues gone.
-/// A claimed action that owes a displaced pick its reload (issue #266) stages it here and runs
-/// the reload itself, so no second intent is queued mid-claim.
+/// Everything an audio switch needs BEFORE its reload, without queueing one: the Load payload
+/// codec, the demuxer's stream index, and the old track's embedded cues gone.
 pub fn stage_native_audio(ps: &mut crate::playback::PlaybackSession, audio_idx: i32, codec: &str) {
     crate::playback::set_stream_acodec(ps, codec); // the reload's Load payload uses this audio codec
     SHARED.desired_audio_idx.store(audio_idx, Relaxed);
@@ -1599,56 +811,16 @@ pub fn reset_subtitle() {
 pub fn set_audio_track(idx: i32) {
     SHARED.desired_audio_idx.store(idx, Relaxed);
 }
-/// request a re-transcode at the current position with the CURRENT audio + subtitle —
-/// used when a subtitle is (de)selected while already transcoding, so the server
-/// re-burns (or drops) it. No-op-ish if not transcoding (the caller gates on that).
-pub fn request_transcode_refresh(ps: &crate::playback::PlaybackSession) {
-    crate::playback::request_user_route_intent(ps, crate::playback::UserRouteIntent::Retranscode);
-    SHARED.sub_cues.lock().unwrap().clear(); // burned/absent in the fresh transcode
-}
-
-/// Restart the current stream at the current movie position so a fresh demux worker captures a
-/// newly-enabled adaptive controller. This mailbox does not itself mutate the route or ask PMS for
-/// another encode; the main-thread pump owns the eventual same-position restart.
-pub fn request_adaptive_reload(ps: &crate::playback::PlaybackSession) {
-    crate::playback::request_user_route_intent(ps, crate::playback::UserRouteIntent::AdaptiveReload);
-}
-
-pub fn cancel_adaptive_reload() {
-    crate::playback::cancel_user_route_intent(crate::playback::UserRouteIntent::AdaptiveReload);
-}
-
-/// Whether a route change has scheduled an encoder rebuild. Test-visible so route policy can be
-/// graded independently of the pump's frame timing.
-#[cfg(any(test, feature = "test-support"))]
-pub fn pending_transcode_refresh() -> bool {
-    crate::playback::pending_user_route_intent(crate::playback::UserRouteIntent::Retranscode)
-}
 
 // Dev-only: used only by `route::decision`'s `#[cfg(feature = "devtriggers")]` tests (a store
 // build's `CredentialPolicy::HttpsOnly` refuses those tests' plaintext loopback PMS fixtures; see
 // the comment on that module's first gated test).
-#[cfg(all(any(test, feature = "test-support"), feature = "devtriggers"))]
-pub fn pending_adaptive_reload() -> bool {
-    crate::playback::pending_user_route_intent(crate::playback::UserRouteIntent::AdaptiveReload)
-}
 
 /// Route-policy tests share the process-wide player mailbox even though no Engine pumps it.
 /// Empty it between cases so one test's requested handoff cannot become the next test's input.
 #[cfg(any(test, feature = "test-support"))]
 pub fn reset_route_requests_for_test(ps: &crate::playback::PlaybackSession) {
     crate::playback::reset_player_control_for_test(ps);
-}
-
-/// Request the main-thread HLS→Original pipeline replacement. Used by an explicit Original pick;
-/// the adaptive worker publishes through the same synchronized route-intent controller after its
-/// source probes pass.
-pub fn request_original_recovery(ps: &crate::playback::PlaybackSession) {
-    crate::playback::request_user_route_intent(
-        ps,
-        crate::playback::UserRouteIntent::RecoverOriginal(crate::playback::RecoveryCause::ManualOriginal),
-    );
-    SHARED.sub_cues.lock().unwrap().clear();
 }
 
 // ---- client-rendered subtitles (direct-play only; a transcode carries no subs) ----
@@ -1669,20 +841,12 @@ pub fn request_subtitle(idx: i32) {
         SHARED.sub_bitmaps.lock().unwrap().clear();
     }
 }
-/// The tone client-rendered subtitles are drawn in. A [`crate::playback::LiveCell`] rather than a field
-/// of [`SHARED`] because it OUTLIVES a playback — it is a preference, not session state
-/// (the same reasoning as the quality cell in `route::prefs`) — and `reset_session` must not put a viewer back on white
-/// between two episodes. Restored by `route::restore_all`; written by [`set_subtitle_tone`] through
-/// the one write door (`route::choose`).
-///
-/// Seeded to white, which is what every build before the preference drew.
-pub(crate) static SUBTITLE_TONE: crate::playback::LiveCell<plx_plex::plex::session::SubtitleTone> =
-    crate::playback::LiveCell::new("subtitle tone preference");
 
-/// The selected tone. Read once a frame by the two subtitle draws (`appkit::player_hud`) and by the
-/// track menu for its checkmark.
-pub fn subtitle_tone() -> plx_plex::plex::session::SubtitleTone {
-    SUBTITLE_TONE.get()
+/// The tone client-rendered subtitles are drawn in: an install-wide setting
+/// (`plx_data::settings`), read once a frame by the two subtitle draws (`appkit::player_hud`) and by
+/// the track menu for its checkmark.
+pub fn subtitle_tone() -> plx_data::settings::SubtitleTone {
+    plx_data::settings::subtitle_tone()
 }
 
 /// The viewer's subtitle timing offset in MILLISECONDS — positive draws every client-rendered cue
@@ -1787,53 +951,10 @@ fn clamp_subtitle_offset_ms(offset_ms: i64) -> i32 {
     offset_ms.clamp(earliest, latest) as i32
 }
 
-/// The viewer's Plex Pass audio-DSP preference (issue #266: dialog boost, loudness normalization),
-/// as two bits — a PREFERENCE, like [`SUBTITLE_TONE`], so it outlives a playback. Only the
-/// resolve's `ResolveEnv::snapshot` reads it, on the main thread, and it reaches the wire only
-/// through `route::desired_audio`: with no Plex Pass (or an unknown one) nothing reads it at all.
-/// Restored by `route::restore_all`; written through the one write door (`route::choose`).
-pub(crate) static AUDIO_ENHANCEMENTS: crate::playback::LiveCell<plx_plex::plex::AudioEnhancements> =
-    crate::playback::LiveCell::new("audio enhancements preference");
-
-/// The current preference (see [`AUDIO_ENHANCEMENTS`]).
-pub fn audio_enhancements() -> plx_plex::plex::AudioEnhancements {
-    AUDIO_ENHANCEMENTS.get()
-}
-
-/// Restore the persisted preference without writing it back — what `route::restore_all` does for
-/// boot, the credentials handoff and a profile switch.
-pub fn restore_audio_enhancements(a: plx_plex::plex::AudioEnhancements) {
-    AUDIO_ENHANCEMENTS.set(a);
-}
-
-/// Select a preference on the main thread and retain its persistence for the shared storage
-/// worker, exactly as [`set_subtitle_tone`] does: both go through `route::choose` with
-/// `How::Optimistic`.
-pub fn set_audio_enhancements(a: plx_plex::plex::AudioEnhancements) {
-    crate::playback::choose::<plx_plex::plex::session::AudioEnhancementsPref>(a, crate::playback::How::Optimistic(None));
-}
-
-/// **The Audio tab's toggle rows land here** (issue #266): persist the preference, then bring the
-/// playing route in line with it. The reconcile itself defers behind a pending Original trial, so
-/// a toggle during one applies to whichever route that trial settles on.
-pub fn request_audio_enhancement(ps: &mut crate::playback::PlaybackSession, a: plx_plex::plex::AudioEnhancements) {
-    set_audio_enhancements(a);
-    crate::playback::reconcile_enhancement(ps, false);
-    // the rows' checkmarks move on this — see `route::choose`
-    plx_machine::idle::invalidate();
-}
-
-/// Restore the persisted preference without writing it back (what `route::restore_all` does for
-/// boot, the credentials handoff and a profile switch).
-pub fn restore_subtitle_tone(tone: plx_plex::plex::session::SubtitleTone) {
-    SUBTITLE_TONE.set(tone);
-}
-
-/// Select a tone on the main thread and retain its persistence work for the shared worker
-/// (`route::choose`, `How::Optimistic`). Takes effect on the next drawn frame — the draws read the
-/// cell — so there is nothing to reload and no cue store to touch.
-pub fn set_subtitle_tone(tone: plx_plex::plex::session::SubtitleTone) {
-    crate::playback::choose::<plx_plex::plex::session::SubtitleTonePref>(tone, crate::playback::How::Optimistic(None));
+/// Select a tone. Takes effect on the next drawn frame — the draws read the setting — so there is
+/// nothing to reload and no cue store to touch.
+pub fn set_subtitle_tone(tone: plx_data::settings::SubtitleTone) {
+    plx_data::settings::set_subtitle_tone(tone);
 }
 
 /// Set the timing offset (ms) on the main thread, clamped to the range; like the tone it takes
@@ -2249,12 +1370,6 @@ fn sink_counter_kind(ty: c_int, major: u32) -> Option<SinkCounter> {
 
 fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
     if ty != 0 {
-        // The diagnostics census, beside the log line that already records every event. A COUNT is
-        // what the read-out needs: "Load completed and then nothing ever called us" is the sharpest
-        // symptom the stuck-buffering reports could carry, and it is invisible in a log the user
-        // cannot reach. Kept here rather than in the `ty` dispatch below so an event we do not
-        // handle still counts — an unhandled callback is still the pipeline talking.
-        let n = SHARED.dg_cb_count.fetch_add(1, Relaxed) + 1;
         // Latch the FIRST error, with the callback index it arrived at. Sticky, because a later
         // healthy callback must not erase the one event that explains the session — and the index
         // separates "refused immediately" from "died after a long healthy run". Only `ty == 18`:
@@ -2268,7 +1383,6 @@ fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
         // text and can hold a URI or a path.
         if ty == 18 && SHARED.dg_cb_err.load(Relaxed) == 0 {
             SHARED.dg_cb_err.store(ty, Relaxed);
-            SHARED.dg_cb_err_at.store(n, Relaxed);
             SHARED
                 .dg_cb_err_num
                 .store(num.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32, Relaxed);
@@ -2425,33 +1539,17 @@ pub extern "C" fn acb_on_event(ev: c_long, reply: *const c_char) {
     }));
 }
 
-/// The shape the `failtest=policy` arm builds, for tests outside this module.
-#[cfg(any(test, feature = "test-support"))]
-pub fn failtest_policy_shape_for_test(verdict: &str) -> ErrorShape {
-    with_forced_playback_context(
-        error_shape(false, false, plx_plex::plex::serverinfo::Subscription::Yes, Some(verdict), RuntimeFailure::Unknown),
-        true,
-    )
-}
-
 /// Every kind × every context the table can see, so a rule is a property, not an example. Shared
-/// with the tests outside this module that grade the table against a screen's own limits (the
-/// read-out's row has `STATUS_ROW_MAX` slots, which is the UI's to name).
+/// with the tests outside this module that grade the table against a screen's own limits.
 #[cfg(any(test, feature = "test-support"))]
 pub fn every_failure_row() -> Vec<(FailureKind, FailureContext, Vec<FailureAction>)> {
     use FailureKind as K;
-    let kinds = [K::DecisionRefused, K::PlaybackPolicy, K::NoVideoTranscodeTarget, K::NoVideoTrack,
-        K::MediaSource, K::PlaybackInterrupted, K::TvPipeline, K::LoadTimeout,
-        K::JailMissingRtkmem, K::Unspecified];
+    let kinds = [K::NoVideoTrack, K::MediaSource, K::PlaybackInterrupted, K::TvPipeline, K::LoadTimeout, K::Unspecified];
     let mut out = Vec::new();
     for kind in kinds {
-        for forced in [false, true] {
-            for can_retry in [false, true] {
-                for repair_idle in [false, true] {
-                    let cx = FailureContext { forced, can_retry, repair_idle };
-                    out.push((kind, cx, failure_actions(kind, cx)));
-                }
-            }
+        for can_retry in [false, true] {
+            let cx = FailureContext { can_retry };
+            out.push((kind, cx, failure_actions(kind, cx)));
         }
     }
     out
@@ -2467,158 +1565,10 @@ mod tests {
     // below, against the real `ps.jail_load_blocked`-based gate in `engine.rs` — see that test.
 
     #[test]
-    fn forced_runtime_failures_keep_the_cause_and_explain_how_to_leave_force() {
-        use plx_plex::plex::serverinfo::Subscription as Sub;
-        for runtime in [RuntimeFailure::Unknown, RuntimeFailure::MediaSource,
-            RuntimeFailure::PlaybackInterrupted, RuntimeFailure::TvPipeline, RuntimeFailure::LoadTimeout] {
-            let normal = error_shape(false, false, Sub::No, None, runtime);
-            let forced = with_forced_playback_context(error_shape(false, false, Sub::No, None, runtime), true);
-            assert_eq!(forced.kind, normal.kind);
-            assert_eq!(forced.readout, normal.readout);
-            assert!(forced.detail.contains("Force Direct Play is on"));
-            // The remedy is the read-out's own button now (`FailureAction::PlayAutomatically`),
-            // so the sentence says what happened and why, and no longer points into Settings.
-            assert!(!forced.detail.contains("Settings"), "{}", forced.detail);
-            assert!(!forced.no_pass);
-            let ordinary = with_forced_playback_context(normal, false);
-            assert!(ordinary.detail.is_empty(), "Auto/Disabled retain their ordinary error detail");
-        }
-    }
-
-    #[test]
-    fn forced_policy_refusal_does_not_claim_the_server_cannot_convert() {
-        use plx_plex::plex::serverinfo::Subscription as Sub;
-        let reason = "Force Direct Play is on, and this audio format can’t play without conversion.";
-        let forced = with_forced_playback_context(
-            error_shape(false, false, Sub::No, Some(reason), RuntimeFailure::Unknown), true);
-        assert_eq!(forced.kind, FailureKind::PlaybackPolicy);
-        assert_eq!(forced.kind.code(), "playback_policy");
-        assert_eq!(forced.detail, reason);
-        assert!(!forced.readout.contains("server"));
-        assert!(!forced.caption.to_str().unwrap().contains("convert"));
-        assert!(forced.panel.contains("automatic fallback is disabled"));
-        assert!(!forced.no_pass);
-        let server = with_forced_playback_context(
-            error_shape(false, true, Sub::No, Some("PMS cannot convert this item"), RuntimeFailure::Unknown), false);
-        assert_eq!(server.kind, FailureKind::DecisionRefused);
-        assert!(server.readout.contains("server"));
-    }
-
-    /// **Each cause converts to its own telemetry class, under the code it always had.** The class
-    /// enum is telemetry's and the match that fills it is this layer's, so a copy-paste that sent
-    /// two causes to one class would merge two dashboard series without any compile error. (The
-    /// retired `original_rollback` code has no cause here; its class is exercised by telemetry.)
-    #[test]
-    fn every_failure_kind_converts_to_its_own_stable_wire_class() {
-        use FailureKind as K;
-        let table = [
-            (K::DecisionRefused, "decision_refused"),
-            (K::PlaybackPolicy, "playback_policy"),
-            (K::NoVideoTranscodeTarget, "no_video_transcode_target"),
-            (K::NoVideoTrack, "no_video_track"),
-            (K::MediaSource, "media_source"),
-            (K::PlaybackInterrupted, "playback_interrupted"),
-            (K::TvPipeline, "tv_pipeline"),
-            (K::JailMissingRtkmem, "jail_missing_rtkmem"),
-            (K::LoadTimeout, "load_timeout"),
-            (K::Unspecified, "unspecified"),
-        ];
-        for (kind, code) in table {
-            assert_eq!(kind.code(), code, "{kind:?}");
-            assert_eq!(kind.class().code(), code, "{kind:?}");
-        }
-        let mut classes: Vec<_> = table.iter().map(|(kind, _)| kind.class().code()).collect();
-        classes.sort_unstable();
-        classes.dedup();
-        assert_eq!(classes.len(), table.len(), "two causes share one wire class");
-    }
-
-    /// **The owner's bug**: under Force Direct Play the read-out offered the Quality ladder, whose
-    /// every rung Force overrides. The fix is the one change that re-enables the fallback.
-    #[test]
-    fn forced_direct_play_offers_the_fix_and_never_the_quality_ladder() {
-        let cx = FailureContext { forced: true, can_retry: true, repair_idle: true };
-        let row = failure_actions(FailureKind::PlaybackPolicy, cx);
-        assert_eq!(row.first(), Some(&FailureAction::PlayAutomatically));
-        assert!(!row.contains(&FailureAction::ChangeQuality), "{row:?}");
-        assert!(!row.contains(&FailureAction::TryAgain), "the same request gets the same refusal: {row:?}");
-        // the owner's chosen read-out: the fix and Back — the support facts are the footer, never
-        // a control of their own
-        assert_eq!(row, [FailureAction::PlayAutomatically, FailureAction::Back]);
-    }
-
-    /// **Offer an action only if it can change the outcome**, over the whole table: no quality
-    /// rung under Force, nothing that retries without a request to retry, no retry of a
-    /// deterministic refusal, no repair unless one can start; Back always, last, once. (At most
-    /// four controls, the row's slots, is graded against the UI's own slot count in
-    /// `screens::player`'s `the_failure_table_never_outgrows_the_read_outs_row`.)
-    #[test]
-    fn the_failure_table_offers_only_actions_that_can_change_the_outcome() {
-        use FailureAction as A;
-        use FailureKind as K;
-        for (kind, cx, row) in every_failure_row() {
-            let at = format!("{kind:?} {cx:?}: {row:?}");
-            assert_eq!(row.last(), Some(&A::Back), "{at}");
-            assert_eq!(row.iter().filter(|a| **a == A::Back).count(), 1, "{at}");
-            if cx.forced {
-                assert!(!row.contains(&A::ChangeQuality), "Force overrides every rung — {at}");
-            } else {
-                assert!(!row.contains(&A::PlayAutomatically), "nothing to switch off — {at}");
-            }
-            if !cx.can_retry {
-                for a in [A::TryAgain, A::ChangeQuality, A::PlayAutomatically] {
-                    assert!(!row.contains(&a), "no request to resolve again — {at}");
-                }
-            }
-            if matches!(kind, K::DecisionRefused | K::PlaybackPolicy | K::TvPipeline | K::NoVideoTranscodeTarget) {
-                assert!(!row.contains(&A::TryAgain), "a deterministic refusal repeats — {at}");
-            }
-            if matches!(kind, K::NoVideoTrack) {
-                assert_eq!(row, [A::Back], "{at}");
-            }
-            assert_eq!(row.contains(&A::Repair), kind == K::JailMissingRtkmem && cx.repair_idle, "{at}");
-        }
-        // and a transient failure without Force keeps both of its recoveries
-        let cx = FailureContext { forced: false, can_retry: true, repair_idle: true };
-        let row = failure_actions(K::PlaybackInterrupted, cx);
-        assert_eq!(&row[..2], &[A::TryAgain, A::ChangeQuality]);
-    }
-
-    #[test]
     fn acb_pause_resume_cannot_overtake_the_bind_transaction() {
         assert!(!acb_playstate_ready(shared::Stage::Playing));
         assert!(!acb_playstate_ready(shared::Stage::Bound));
         assert!(acb_playstate_ready(shared::Stage::Streaming));
-    }
-
-    #[test]
-    fn playable_buffer_uses_one_movie_timeline_for_every_transport() {
-        assert_eq!(
-            playable_buffer_ms(70_000_000_000, 69_500_000_000, true, 0, 60_000_000_000,),
-            Some(9_500),
-            "a direct file publishes absolute movie timestamps",
-        );
-        assert_eq!(
-            playable_buffer_ms(
-                4_000_000_000,
-                3_500_000_000,
-                true,
-                120_000_000_000,
-                122_000_000_000,
-            ),
-            Some(1_500),
-            "an HLS or offset-transcode tail is translated by its display base",
-        );
-        assert_eq!(
-            playable_buffer_ms(4_000_000_000, -1, true, 0, 1_000_000_000),
-            None,
-            "an A/V stream cannot claim reserve before its audio lane arrives",
-        );
-        assert_eq!(
-            playable_buffer_ms(4_000_000_000, -1, false, 0, 1_000_000_000),
-            Some(3_000),
-            "a declared video-only stream uses its video tail",
-        );
     }
 
     #[test]
@@ -2768,38 +1718,6 @@ mod tests {
         assert_eq!(SHARED.dg_cb_err_num.load(std::sync::atomic::Ordering::Acquire), 0);
         SHARED.retire_native_session(epoch);
         SHARED.reset_session();
-    }
-
-    #[test]
-    fn the_support_line_names_version_firmware_set_and_code_and_nothing_free_text() {
-        let i = plx_platform::tv::device::Info {
-            release: "4.10.2".into(),
-            major: 4,
-            ..Default::default()
-        };
-        let hw = plx_platform::tv::device::Hardware {
-            model: "43LM6300PVB".into(),
-            board: "m3r".into(),
-            hw_revision: String::new(),
-        };
-        let line = support_line_of(&i, &hw, FailureKind::TvPipeline);
-        assert_eq!(
-            line,
-            format!(
-                "PlxNative {} · webOS 4.10.2 · 43LM6300PVB · m3r · tv_pipeline",
-                plx_plex::plex::identity::version()
-            )
-        );
-        let bare = support_line_of(
-            &plx_platform::tv::device::Info::default(),
-            &plx_platform::tv::device::Hardware::default(),
-            FailureKind::Unspecified,
-        );
-        assert!(bare.contains(&format!(
-            "{} · {} · unspecified",
-            plx_platform::i18n::msg::browse_diagnostics_unknown_os(),
-            plx_platform::i18n::msg::settings_login_unknown_device(),
-        )), "{bare}");
     }
 
     #[test]
@@ -3078,395 +1996,6 @@ mod tests {
         SHARED.seek_display_ns.store(was_display, Relaxed);
     }
 
-    /// Issue #22: the error must NAME an audio-only stream, and name the right party. On a
-    /// transcode it is the server's doing — and on a KNOWN-free server the reason appends the
-    /// subscription as a FACT, never as the cause: the audit's row 1 says h264 encoding is free
-    /// everywhere and the profile's target chain ends in h264, so a missing Pass cannot be WHY
-    /// the video is gone, and asserting it would point the user at a purchase that fixes nothing
-    /// (the confident wrong answer this arm exists to prevent). Known-true or UNKNOWN keeps the
-    /// neutral wording alone: a subscription the app cannot prove absent is never even named.
-    /// Direct-played, the fault is the file's whatever the subscription says. Drives the pure
-    /// shape only, so no globals move and nothing here can race the HUD test that reads the real
-    /// (default-false) flags.
-    #[test]
-    fn an_audio_only_stream_is_blamed_on_whoever_sent_it() {
-        use plx_plex::plex::serverinfo::Subscription as Sub;
-        // transcode on a known-free server: the Pass appears as a parenthetical fact on the
-        // panel, as the capsule flag for the read-out…
-        let e = error_shape(true, true, Sub::No, None, RuntimeFailure::Unknown);
-        assert!(
-            e.caption
-                .to_str()
-                .unwrap()
-                .contains("server sent audio only"),
-            "{:?}",
-            e.caption
-        );
-        assert!(
-            e.panel.contains("no usable video transcode target"),
-            "{}",
-            e.panel
-        );
-        assert!(e.panel.contains("server has no Plex Pass"), "{}", e.panel);
-        assert!(e.no_pass, "the read-out draws the capsule from this flag");
-        // …and never as a cause — h264 encoding is free everywhere (audit row 1). The read-out
-        // reason carries no Pass words at all: the capsule line states the fact separately.
-        assert!(
-            !e.panel.contains("cannot encode"),
-            "causation may not be asserted: {}",
-            e.panel
-        );
-        assert!(
-            !e.readout.contains("Plex Pass"),
-            "the capsule, not prose, names the Pass: {}",
-            e.readout
-        );
-        assert!(
-            e.detail.is_empty(),
-            "only the server's own verdict fills the detail line"
-        );
-        // known-Pass'd or never-heard-from: today's wording, and no Pass blame anywhere in it
-        for sub in [Sub::Yes, Sub::Unknown] {
-            let e = error_shape(true, true, sub, None, RuntimeFailure::Unknown);
-            assert!(
-                e.caption
-                    .to_str()
-                    .unwrap()
-                    .contains("server sent audio only"),
-                "{:?}",
-                e.caption
-            );
-            assert!(
-                e.panel.contains("no usable video transcode target"),
-                "{} ({sub:?})",
-                e.panel
-            );
-            assert!(
-                !e.panel.contains("Plex Pass"),
-                "an unproven subscription must not be blamed ({sub:?})"
-            );
-            assert!(
-                !e.no_pass,
-                "the capsule may not appear on an unproven subscription ({sub:?})"
-            );
-        }
-        for sub in [Sub::Unknown, Sub::No, Sub::Yes] {
-            let e = error_shape(true, false, sub, None, RuntimeFailure::Unknown);
-            assert!(
-                e.caption.to_str().unwrap().contains("no video in the file"),
-                "{:?}",
-                e.caption
-            );
-            assert!(
-                e.panel.contains("no video track"),
-                "direct play blames the file, not the server"
-            );
-            assert!(!e.no_pass, "an audio-only FILE is not a subscription story");
-            for transcoding in [false, true] {
-                let e = error_shape(false, transcoding, sub, None, RuntimeFailure::Unknown);
-                assert_eq!(
-                    e.caption.to_str().unwrap(),
-                    "Playback failed",
-                    "no subsystem may be invented"
-                );
-                assert!(e.panel.contains("without a reported cause"));
-                assert!(e.readout.contains("identify the problem"));
-                assert!(e.detail.is_empty());
-                assert!(!e.no_pass);
-            }
-        }
-    }
-
-    /// A terminal runtime failure already knows which subsystem stopped: the media source,
-    /// the live transfer, or the television pipeline. The player read-out reserves a reason
-    /// slot for that answer, so falling through to an empty string turns a diagnosed failure
-    /// back into the unhelpful bare "Playback failed" screen.
-    #[test]
-    fn runtime_failures_fill_the_existing_readout_reason_slot() {
-        use plx_plex::plex::serverinfo::Subscription as Sub;
-        let cases = [
-            (
-                (true, false, false, false),
-                RuntimeFailure::MediaSource,
-                FailureKind::MediaSource,
-                "media_source",
-                "media stream",
-            ),
-            (
-                (false, true, false, false),
-                RuntimeFailure::PlaybackInterrupted,
-                FailureKind::PlaybackInterrupted,
-                "playback_interrupted",
-                "stopped after it had started",
-            ),
-            (
-                (false, false, true, false),
-                RuntimeFailure::TvPipeline,
-                FailureKind::TvPipeline,
-                "tv_pipeline",
-                "TV",
-            ),
-            (
-                // The budget always sets `load_failed` alongside `load_timed_out` — see
-                // `Shared::load_timed_out`'s doc — but the KIND must still differ from the
-                // ordinary refusal case above, which is what this row pins.
-                (false, false, true, true),
-                RuntimeFailure::LoadTimeout,
-                FailureKind::LoadTimeout,
-                "load_timeout",
-                "TV",
-            ),
-            (
-                (false, false, false, false),
-                RuntimeFailure::Unknown,
-                FailureKind::Unspecified,
-                "unspecified",
-                "identify the problem",
-            ),
-        ];
-        for ((demux, io, load, timed_out), want, kind, code, words) in cases {
-            let cause = runtime_failure(demux, io, load, timed_out);
-            assert_eq!(
-                cause, want,
-                "the flags must resolve to the subsystem that stopped"
-            );
-            let e = error_shape(false, false, Sub::Unknown, None, cause);
-            assert_eq!(e.kind, kind);
-            assert_eq!(e.kind.code(), code, "the Sentry/usage wire code is stable");
-            assert!(
-                !e.readout.is_empty(),
-                "a terminal runtime failure must explain what stopped"
-            );
-            assert!(
-                e.readout.contains(words),
-                "{} did not name {words:?}",
-                e.readout
-            );
-            assert!(
-                !e.panel.is_empty(),
-                "diagnostics and the viewer read-out share the answer"
-            );
-        }
-        assert_eq!(
-            runtime_failure(true, true, true, false),
-            RuntimeFailure::TvPipeline,
-            "the most specific downstream signal must win if teardown exposes all three",
-        );
-        assert_eq!(
-            runtime_failure(true, true, true, true),
-            RuntimeFailure::LoadTimeout,
-            "a timed-out Load must win over every other concurrently-set signal",
-        );
-    }
-
-    /// A firmware REFUSAL (`TvPipeline`) and a HANG (`LoadTimeout`, issue #74 D.1.4's
-    /// `NATIVE_LOAD_BUDGET`) are different events on the telemetry wire — `runtime_failures_fill_
-    /// the_existing_readout_reason_slot` above already pins the distinct `kind`/`code` — but until
-    /// now every viewer-facing string (`caption`, `panel`, `readout`) was byte-identical between
-    /// them, so a maintainer reading a photographed read-out or the diagnostics panel could not
-    /// tell "the TV said no" from "the TV never answered" apart. Pin that they now differ, and that
-    /// the timeout's own wording says something a hang actually describes (never finished /
-    /// answered), not the refusal's "rejected".
-    #[test]
-    fn load_timeout_has_its_own_wording_distinct_from_an_ordinary_tv_refusal() {
-        use plx_plex::plex::serverinfo::Subscription as Sub;
-        let refused = error_shape(false, false, Sub::Unknown, None, RuntimeFailure::TvPipeline);
-        let timed_out = error_shape(false, false, Sub::Unknown, None, RuntimeFailure::LoadTimeout);
-        assert_ne!(
-            refused.caption, timed_out.caption,
-            "a refusal and a hang must not share a caption"
-        );
-        assert_ne!(
-            refused.panel, timed_out.panel,
-            "a refusal and a hang must not share a diagnostics panel line"
-        );
-        assert_ne!(
-            refused.readout, timed_out.readout,
-            "a refusal and a hang must not share a read-out reason"
-        );
-        let timed_out_caption = timed_out.caption.to_str().unwrap();
-        assert!(
-            timed_out_caption.contains("did not finish") || timed_out_caption.contains("never finished"),
-            "{timed_out_caption:?} should say the Load never finished, not that the TV rejected anything"
-        );
-        assert!(
-            !timed_out_caption.to_lowercase().contains("rejected"),
-            "{timed_out_caption:?} borrows the refusal's wording; a hang was never rejected"
-        );
-    }
-
-    /// The PRE-FLIGHT arm: `/decision` refused the item before a byte of video moved, so the reason
-    /// is the SERVER's and not our inference. Three things are asserted and each was a way to get
-    /// this wrong. (1) The reason line is ours and fixed, while the detail is the server's sentence
-    /// **verbatim** — not sentence-cased, not re-worded, because its wording is not ours and it is
-    /// the line a maintainer photographs. (2) The capsule NEVER appears here, on any subscription
-    /// state, including a proven-free server and including a verdict that names HEVC — the server
-    /// named the cause, so naming a subscription beside it is the speculation the tristate rule
-    /// forbids. (3) The arm OUTRANKS the demux-derived ones: nothing was ever demuxed, so a stale
-    /// `no_video` from a previous session must not re-word a refusal.
-    #[test]
-    fn a_refused_decision_quotes_the_server_and_never_names_a_subscription() {
-        use plx_plex::plex::serverinfo::Subscription as Sub;
-        const VP9: &str =
-            "Cannot convert this item. Implementation for video encoder 'vp9' not found.";
-        for sub in [Sub::Unknown, Sub::No, Sub::Yes] {
-            // graded with `no_video`/`transcoding` BOTH set — the arm that would otherwise win
-            let e = error_shape(
-                true,
-                true,
-                sub,
-                Some(VP9),
-                RuntimeFailure::PlaybackInterrupted,
-            );
-            assert_eq!(
-                e.readout, "The server cannot play or convert this file",
-                "({sub:?})"
-            );
-            assert_eq!(
-                e.detail, VP9,
-                "the server's sentence is reproduced unedited ({sub:?})"
-            );
-            assert!(
-                !e.no_pass,
-                "no capsule on this arm, ever — the server named the cause ({sub:?})"
-            );
-            assert!(
-                !e.readout.contains("Plex Pass") && !e.panel.contains("Plex Pass"),
-                "({sub:?})"
-            );
-            assert!(
-                e.caption.to_str().unwrap().starts_with("Playback failed"),
-                "{:?}",
-                e.caption
-            );
-        }
-        // an HEVC verdict on a server PROVEN to have no Pass is the temptation, and still no capsule
-        let e = error_shape(
-            false,
-            true,
-            Sub::No,
-            Some("Implementation for video encoder 'hevc' not found."),
-            RuntimeFailure::PlaybackInterrupted,
-        );
-        assert!(!e.no_pass);
-        // a server that refused without saying why: the reason still lands, the quote line does not
-        let e = error_shape(
-            false,
-            true,
-            Sub::No,
-            Some(""),
-            RuntimeFailure::PlaybackInterrupted,
-        );
-        assert_eq!(e.readout, "The server cannot play or convert this file");
-        assert!(
-            e.detail.is_empty(),
-            "an empty verdict draws no quote line at all"
-        );
-    }
-
-    /// **The subscription the read-out states is the FAILING ITEM's server's, not the current
-    /// one's** — the wiring the pure shape above cannot see, because it takes the tristate as an
-    /// argument.
-    ///
-    /// The two are routinely different: `plex::servers` keeps `current` pinned to the primary while
-    /// a borrowed film plays, so `serverinfo::subscription()` here answered for OUR server on every
-    /// failure of a share's item. Both polarities are silent and wrong. A film borrowed from a
-    /// Pass-less share dropped the "(server has no Plex Pass)" clause and the read-out's capsule —
-    /// the exact support fact issue #22 was reported without, on the exact configuration (someone
-    /// else's free server) that produced it. And with the primary free and the share Pass'd, the
-    /// capsule appeared on a failure nothing about a subscription explains, which is the confident
-    /// wrong answer `error_shape`'s tristate rule exists to prevent.
-    ///
-    /// Registry and subscription slots are still crate globals, so this holds `testlock::serial()`
-    /// and puts them back on the way OUT — the discipline `serverinfo`'s own multi-server tests
-    /// state, and the reason its `Fresh` guard has a `Drop`. **`route`'s playing identity is no
-    /// longer among them** (phase 9): the session is this test's own local, so it is restored by
-    /// being dropped, and the guard no longer has to put it back.
-    #[test]
-    fn the_failure_read_out_states_the_playing_items_server_not_the_current_one() {
-        let mut ps = crate::playback::PlaybackSession::IDLE;
-        use plx_plex::plex::serverinfo::{store_for_test, Subscription as Sub};
-        struct Fresh {
-            _g: plx_base::testlock::Serial,
-        }
-        impl Drop for Fresh {
-            fn drop(&mut self) {
-                plx_plex::plex::reset_servers_for_test();
-            }
-        }
-        let g = plx_base::testlock::serial();
-        plx_plex::plex::reset_servers_for_test();
-        let _fresh = Fresh { _g: g };
-        crate::playback::swap_cur_sid_for_test(&mut ps, plx_plex::plex::ServerId::UNSET);
-
-        let reg =
-            |m: &str, host: &str| plx_plex::plex::register_for_test(m, host, 32400, "tok", "cid");
-        let (ours, theirs) = (reg("mach-A", "10.0.0.1"), reg("mach-B", "10.0.0.2"));
-        // the slot arrays outlive `reset_servers_for_test` — start from the boot state explicitly
-        store_for_test(ours, Sub::Unknown, "");
-        store_for_test(theirs, Sub::Unknown, "");
-        // our own server has a Plex Pass; the friend's share does not
-        store_for_test(ours, Sub::Yes, "1.43.3.10861-cd85035e7");
-        store_for_test(theirs, Sub::No, "1.32.0.6918-free");
-        // …and browsing a share does NOT re-point `current`, which is the whole trap
-        assert!(plx_plex::plex::set_current(ours));
-
-        crate::playback::swap_cur_sid_for_test(&mut ps, theirs);
-        assert_eq!(
-            playing_subscription(&ps),
-            Sub::No,
-            "the borrowed film's own server is the one that failed"
-        );
-        let e = error_shape(
-            true,
-            true,
-            playing_subscription(&ps),
-            None,
-            RuntimeFailure::Unknown,
-        );
-        assert!(e.no_pass, "so the read-out draws the capsule…");
-        assert!(
-            e.panel.contains("server has no Plex Pass"),
-            "…and the panel states the fact: {}",
-            e.panel
-        );
-
-        // the inverse polarity: playing from OUR Pass'd server while `current` sits on the share
-        assert!(plx_plex::plex::set_current(theirs));
-        crate::playback::swap_cur_sid_for_test(&mut ps, ours);
-        assert_eq!(
-            playing_subscription(&ps),
-            Sub::Yes,
-            "the current server's answer is not this item's"
-        );
-        assert!(
-            !error_shape(
-                true,
-                true,
-                playing_subscription(&ps),
-                None,
-                RuntimeFailure::Unknown
-            )
-            .no_pass,
-            "no capsule may be invented"
-        );
-
-        // before the first play there is no playing server, and "we have not heard" is the honest
-        // answer — never slot 0's, and never a blamed subscription
-        crate::playback::swap_cur_sid_for_test(&mut ps, plx_plex::plex::ServerId::UNSET);
-        assert_eq!(playing_subscription(&ps), Sub::Unknown);
-        assert!(
-            !error_shape(
-                true,
-                true,
-                playing_subscription(&ps),
-                None,
-                RuntimeFailure::Unknown
-            )
-            .no_pass
-        );
-    }
-
     fn rect(x: i32, y: i32, w: i32, h: i32) -> SubRect {
         SubRect {
             x,
@@ -3477,7 +2006,6 @@ mod tests {
             palette: Box::new([[0u8; 4]; 256]),
         }
     }
-
 
     /// A rect whose share of the store's byte budget is about `bytes`, whatever a rect's pixels
     /// cost in the store's representation (measured, not assumed).
@@ -3863,31 +2391,6 @@ mod tests {
 #[cfg(test)]
 mod native_failure_regressions {
     use super::*;
-    struct JailGuard;
-    impl Drop for JailGuard {
-        fn drop(&mut self) { plx_platform::tv::sandbox::FORCE_BLOCKED.store(false, Relaxed); }
-    }
-    #[test]
-    fn jail_refusal_enters_error_without_engine_and_retires_on_exit() {
-        let _serial = plx_base::testlock::serial();
-        let _guard = JailGuard;
-        let mut ps = crate::playback::PlaybackSession::IDLE;
-        crate::playback::reset_player_control_for_test(&ps);
-        SHARED.reset_session();
-        let mut pa = adapter::PlayerAdapter::new(unsafe { plx_base::task::MainThread::assume() });
-        plx_platform::tv::sandbox::FORCE_BLOCKED.store(true, Relaxed);
-        assert!(start_bufferfeed(&mut ps, &mut pa));
-        assert!(!pa.is_live());
-        assert_eq!(state(&ps), PlaybackState::Error);
-        assert_eq!(error_now(&ps).kind, FailureKind::JailMissingRtkmem);
-        crate::playback::cancel_play(&mut ps);
-        assert!(!ps.jail_load_blocked);
-        assert_ne!(state(&ps), PlaybackState::Error);
-        assert!(matches!(start_bufferfeed_tracked(&mut ps, &mut pa), BufferfeedStartOutcome::Failed));
-        assert!(ps.jail_load_blocked);
-        assert!(!pa.is_live());
-        crate::playback::cancel_play(&mut ps);
-    }
     #[test]
     fn timeout_is_distinct_from_pipeline_refusal_and_resets_per_session() {
         let _serial = plx_base::testlock::serial();

@@ -12,9 +12,6 @@ use plx_ui::screen::{Mounter, ReturnState, Screen};
 
 /// The application's effects.
 pub enum AppFx {
-    /// One live player setting's pick (`plx_media::playback::Choice`): the app writes it through the
-    /// media door, and the sender learns whether the write was durable.
-    Preferences(plx_media::playback::Choice, std::sync::mpsc::Sender<bool>),
     /// Library-page requests, executed by the navigation bridge.
     Content(ContentReq),
     /// Player-route requests — what an overlay panel on the player's own `ModalStack` asks of the
@@ -24,8 +21,6 @@ pub enum AppFx {
     ItemMenu(ItemMenuReq),
     /// A store command, executed as a `Deliver` to the store machine in the same drain.
     Store(plx_data::stores::StoreId, plx_data::stores::StoreCmd),
-    /// Poll only the store work this visible route owns, after its read-only step returns.
-    StoreWork(plx_data::stores::StoreWork),
 }
 
 /// **What the item context menu asks of the loop**, once its own `step` has resolved the pressed
@@ -42,16 +37,11 @@ pub struct ItemMenuReq {
 /// performs.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PlayerReq {
-    /// Accepted only after the owned player confirmation. Never emitted by boot or Play.
-    RepairSandbox,
-    /// The failure read-out's fix for Force Direct Play: set the Direct Play preference to Auto
-    /// and resolve the failed item again under it.
-    PlayAutomatically,
     /// The failure read-out's *Try again*: resolve the failed item again, unchanged, at the
     /// position the viewer was at (`app::playback::retry_failed_playback`).
     RetryPlayback,
     /// A transport key FELL THROUGH the panel (§ `overlay_transport_key_tests`): a viewer holding
-    /// the track menu, the Info card or the Chapters strip open still expects PAUSE/PLAY to work,
+    /// the track menu or the Chapters strip open still expects PAUSE/PLAY to work,
     /// and the panel stays up. `true` = the key was PLAY, `false` = PAUSE; a PLAYPAUSE toggle is
     /// neither and is carried as `None`.
     Transport(Option<bool>),
@@ -68,32 +58,21 @@ pub enum PlayerReq {
     /// the pipeline decode the landed frame without publishing a viewer Resume — which is why this
     /// is a request rather than something `PlayerScreen` performs.
     CommitSeek(i64),
-    /// Apply the `…` popover's chosen row.
-    More(plx_appkit::more_menu::Action),
-    /// Apply the Info card's focused action.
-    Info(plx_appkit::info_panel::InfoAction),
     /// The panel took a DOWN past its own bottom: drop the HUD's ring onto the tabs row.
     FocusTabs,
     /// Keep the transport alive while a panel is being read (`HUD_MENU_MS`), or hand it the
     /// ordinary linger as a panel closes (`HUD_LINGER_MS`).
     ExtendHud(u32),
-    /// The Info card's OK landed on a control FACE, which has a press dip of its own: arm the
-    /// tvOS press and commit on the spring-back rather than acting now.
-    ArmInfoPress,
     /// The track menu picked a row. `route::commit_audio_selection`/`commit_subtitle_selection`
     /// take the playback session's `&mut`, which a screen never has (§2.2) — so the panel decides
     /// and the loop performs, exactly as every other request in this enum.
     CommitTrack(plx_appkit::track_menu::TrackCommit),
-    /// **Present one of the player's overlays directly** (restructure phase 12) — the tabs row's OK
-    /// (`OverlayKind::Info`/`::Chapters`, the old `key_ok`'s `focus == 2` arm) and the failure
-    /// read-out's own recovery escape (`OverlayKind::More { quality: true }`, the old
-    /// `key_player_failed`'s `ChooseQuality` arm). Both used to reach
-    /// `super::bridge::open_player_overlay` straight from the loop's key ladder; `PlayerScreen`
-    /// may not name that function itself (§2.2), so it asks instead.
+    /// **Present one of the player's overlays directly** — the tabs row's OK
+    /// (`OverlayKind::Chapters`). `PlayerScreen` may not name the bridge that opens it (§2.2), so
+    /// it asks instead.
     OpenOverlay(crate::player::overlay::OverlayKind),
-    /// **OK landed on the transport's own control row** — whichever disc, the Skip pill or the Up
-    /// Next tile currently occupies it (restructure phase 12, the old `key_ok`'s `focus == 1`
-    /// arm). Arms the same tvOS press dip [`ArmInfoPress`](PlayerReq::ArmInfoPress) does; the
+    /// **OK landed on the transport's own control row** — a Subtitles or Audio disc. Arms the
+    /// tvOS press dip; the
     /// loop's existing commit-frame dispatch (`app/run.rs`'s `Route::Player =>
     /// activate_player_row(...)`) is unchanged and performs whatever the row decides once the
     /// spring-back has played.
@@ -173,11 +152,6 @@ impl<H: AppLike<Memory = PageMemory>> ContentLike for H {}
 /// and streams).
 pub trait MetadataLike: AppLike + Sized {
     fn metadata<'a>(cx: &Cx<'a, Self>) -> plx_data::metadata::MetadataView<'a>;
-    /// The subtitle search the player's Search page reads. PROVIDED, defaulting to `None` — a host
-    /// that offers no search shows no Search row.
-    fn subtitle_search<'a>(_cx: &Cx<'a, Self>) -> Option<plx_data::subsearch::SubSearchView<'a>> {
-        None
-    }
 }
 
 /// A host that publishes this frame's playback session. The player's owned screens read the
@@ -328,7 +302,7 @@ impl RepeatGate {
 /// **The cadence a held direction walks a player panel's list at**, in ms.
 ///
 /// 110 ms, which is the number `app/run.rs`'s client-side repeat timer used for exactly these four
-/// panels (the track menu, the `…` popover, the Info card and the Chapters strip) while their keys
+/// panels (the track menu and the Chapters strip) while their keys
 /// went through the loop's own ladder. That timer existed because the Magic Remote streams
 /// hardware auto-repeat at ~50 ms and a list walked at that rate is unusable; phase 9 put the
 /// panels' input on the dispatcher, where `Edge::Repeat` arrives at the hardware's rate, so the
@@ -442,7 +416,7 @@ pub struct LocalArg {
 }
 
 pub const ARG_SHAPE: &str = "AppArg{ItemMenu{path:str,mark:u32,host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4]},\
-     PlayerOverlay{Tracks(tab:i32),Info,Chapters,More(quality:bool)},Player,Local{path:str}}";
+     PlayerOverlay{Tracks(tab:i32),Chapters},Player,Local{path:str}}";
 
 impl LogicalState for AppArg {
     fn write(&self, c: &mut Canon) {
@@ -519,10 +493,7 @@ where
         match arg {
             AppArg::ItemMenu(arg) => Box::new(crate::item_menu::ItemMenuScreen::new(entry, arg.clone())),
             AppArg::PlayerOverlay(arg) => Box::new(
-                crate::player::overlay::PlayerOverlayScreen::new_with(
-                    H::session(cx), H::metadata(cx), entry, arg.kind,
-                    // The search asks the playing item's SERVER; a local file has none.
-                    H::subtitle_search(cx).is_some() && !plx_media::localfile::is_file_url(&plx_media::playback::url(H::session(cx)))),
+                crate::player::overlay::PlayerOverlayScreen::new(H::session(cx), H::metadata(cx), entry, arg.kind),
             ),
             AppArg::Player => {
                 let mut page = crate::player::PlayerScreen::new(entry);

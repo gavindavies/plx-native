@@ -95,12 +95,6 @@ pub(crate) fn loop_tick(iters_ct: &mut i32, loop_t: &mut u32, loop_shown: &mut i
     true
 }
 
-/// Boot's restore: the live player preferences from the record, before any route can resolve a
-/// stream.
-pub(super) fn restore_player_preferences(session: &plx_plex::plex::session::Session) {
-    plx_media::playback::restore_all(session, plx_media::playback::Overrides { quality: None });
-}
-
 /// Everything before the loop: SDL and the window, GL, text, the poster workers and the `App`
 /// literal. An early exit is the process exit code.
 ///
@@ -212,14 +206,14 @@ pub(crate) unsafe fn boot(
     plx_gfx::gfx::init_image();
     plx_gfx::gfx::init_blur();
     super::adapters::poster::init();
-    let session = plx_plex::plex::session::load();
+    // The player preferences (`settings.json`), before anything can draw a subtitle.
+    plx_data::settings::load();
     #[cfg(not(test))]
-    plx_platform::i18n::initialize(session.language, false);
+    plx_platform::i18n::initialize(plx_platform::i18n::Preference::System, false);
     let bridge = super::bridge::Bridge::new(plx_base::diag::heartbeat::now_us);
     let pages = plx_ui::dispatch::Dispatcher::with_transition(Box::new(
         plx_ui::containers::transition::PageDip::new(),
     ));
-    restore_player_preferences(&session);
     // Before the frame loop: the one blocking read of where each file was left.
     plx_data::local_progress::load();
     log("boot: local library");

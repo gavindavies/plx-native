@@ -109,7 +109,6 @@ impl ChaptersState {
 
     pub fn draw(
         &mut self,
-        ps: &plx_media::playback::PlaybackSession,
         appear: f32,
         measure: &dyn plx_machine::machine::Measure,
         meta: metadata::MetadataView<'_>,
@@ -142,8 +141,8 @@ impl ChaptersState {
             plx_ui::widgets::draw_card(
                 p,
                 card,
-                plx_media::playback::item_sid(plx_media::playback::cur_sid(ps)).raw(),
-                &ch.thumb,
+                0,
+                "", // a local file carries no chapter stills
                 (480, 270),
                 CH_RAD,
                 focused,

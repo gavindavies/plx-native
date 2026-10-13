@@ -1012,10 +1012,9 @@ fn start_bufferfeed_inner(
         }
         video_declared = lv.payload_name();
         // Record what the payload ACTUALLY says, for the diagnostics read-out — including the
-        // video-only case, where `dg_load_a == 0` is the whole explanation for silence.
+        // video-only case.
         SHARED.dg_load_v.store(lv.diag_code(), Ordering::Relaxed);
         if no_audio {
-            SHARED.dg_load_a.store(0, Ordering::Relaxed);
             // A static payload declares its own envelope; say so on the `load:` line.
             sink_env = static_envelope(lv);
             match lv {
@@ -1031,12 +1030,11 @@ fn start_bufferfeed_inner(
             // wrong string leaves the audio ES unconfigured, and with audioSync the video
             // sink slaves to the dead audio clock and stalls (verified: video-only plays).
             let codec = crate::playback::stream_acodec(ps);
-            let Some((ac, diagnostic)) = audio_payload_codec(&codec) else {
+            let Some((ac, _)) = audio_payload_codec(&codec) else {
                 log(&format!("start_bufferfeed: unsupported audio codec {codec:?}; refusing incorrect Load declaration"));
                 SHARED.demux_failed.store(true, Ordering::Release);
                 return Err(crate::playback::RouteStartResult::StartFailed);
             };
-            SHARED.dg_load_a.store(diagnostic, Ordering::Relaxed);
             audio_declared = ac;
             // The sink envelope — `adaptiveStreaming`'s maxWidth/maxHeight/maxFrameRate — used
             // to be the panel max (4K60) for every codec and every source, on the reasoning that
@@ -1299,8 +1297,6 @@ fn reload_start_outcome(
     }
 }
 
-
-
 pub fn reload_at(ps: &mut crate::playback::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, target_ns: i64) -> ReloadOutcome {
     if crate::playback::url(ps).is_empty() {
         log("reload_at: no url (ignored)");
@@ -1332,8 +1328,6 @@ pub fn switch_audio_native(ps: &mut crate::playback::PlaybackSession, pa: &mut s
     ));
     reload_at(ps, pa, pos_ns) // fresh direct-play Load at the current position, new audio stream
 }
-
-
 
 /// Stop playback: unblock+join threads, unload+destruct the pipeline, release the
 /// video plane, reset all state so a fresh start_bufferfeed() can restart.
@@ -1992,7 +1986,6 @@ fn feed_stream(mt: &MainThread, eng: &mut Engine) {
                 }
                 // Nothing to send. THE case the read-out's Feed row exists to name: a dead
                 // PRODUCER, which every other field on the panel cannot tell from a dead sink.
-                SHARED.dg_feed_state.store(5, Ordering::Relaxed);
                 break;
             }
             eng.pending_video = Some(AuBox(n));
@@ -2105,7 +2098,6 @@ fn feed_stream(mt: &MainThread, eng: &mut Engine) {
                 MAX_FEED_AHEAD_NS + AUDIO_SLACK_NS
             };
             if pres != PRES_NONE && fp - pres > budget {
-                SHARED.dg_feed_state.store(4, Ordering::Relaxed); // waiting for a frame
                 break;
             }
         }
@@ -2174,15 +2166,11 @@ fn feed_stream(mt: &MainThread, eng: &mut Engine) {
         }
         if (r as u8) != b'O' {
             // 'B' BufferFull -> keep pending, retry next tick (VIDEO lane only)
-            SHARED
-                .dg_feed_state
-                .store(if (r as u8) == b'B' { 2 } else { 3 }, Ordering::Relaxed);
             break;
         }
         if eng.presentation_rearm_pending {
             eng.presentation_rearm_pending = false;
         }
-        SHARED.dg_feed_state.store(1, Ordering::Relaxed); // accepting
                                                           // COUNTED HERE, below the reply test, so `Fed` means AUs the pipeline TOOK. Counted above
                                                           // it, a permanently-full sink re-offered and re-counted the same retained AU every tick,
                                                           // and the read-out showed a brisk feed rate through a stall.
@@ -2297,7 +2285,6 @@ fn feed_audio_lane(mt: &MainThread, eng: &mut Engine) {
         fed += 1;
     }
 }
-
 
 /// Whether the decompiled StarfishMediaAPIs offsets (see the NOR comment in `start_bufferfeed_inner`)
 /// may be trusted for in-place seek. The old-ABI `Feed` is the primary gate: it proves
@@ -2452,247 +2439,11 @@ mod native_lifecycle_host_seam_tests {
         assert!(SHARED.retire_native_session(refused));
     }
 
-    /// S12a: the window breadcrumbs `release_native_object` leaves, as a host can see them. The
-    /// capture sits behind the consent check, so the test grants the crash-report answer first and
-    /// puts the previous one back.
-    struct Consented(Option<plx_telemetry::telemetry::consent::Consent>);
-
-    impl Consented {
-        fn grant() -> Self {
-            use plx_telemetry::telemetry::consent::{self, Consent};
-            let previous = consent::current();
-            let mut granted = Consent::default();
-            granted.errors = true;
-            granted.asked_version = consent::POLICY_VERSION;
-            consent::install(granted);
-            // Another test's lifecycle edges may have left a cycle open on this process-wide flag.
-            plx_telemetry::telemetry::window::close_cycle_for_test();
-            plx_telemetry::telemetry::window::take_recorded_for_test();
-            Self(previous)
-        }
-
-        /// Consent granted with a background cycle open, as the teardown and create steps are
-        /// recorded only inside one (`window::record_in_cycle`). The lifecycle edge's own crumb is
-        /// drained, so a test sees only the steps it runs.
-        fn grant_in_cycle() -> Self {
-            let granted = Self::grant();
-            plx_telemetry::telemetry::window::lifecycle(0x103, true);
-            plx_telemetry::telemetry::window::take_recorded_for_test();
-            granted
-        }
-    }
-
-    impl Drop for Consented {
-        fn drop(&mut self) {
-            plx_telemetry::telemetry::consent::install(self.0.take().unwrap_or_default());
-            plx_telemetry::telemetry::window::close_cycle_for_test();
-            plx_telemetry::telemetry::window::take_recorded_for_test();
-        }
-    }
-
-    fn loaded_epoch(mt: &MainThread) -> u32 {
-        let epoch = SHARED.begin_native_session().expect("native epoch");
-        assert_eq!(unsafe { crate::player::sink().load(c"{}".as_ptr(), epoch) }, 1);
-        assert_eq!(unsafe { crate::player::sink().ready(mt) }, 1);
-        epoch
-    }
-
-    #[test]
-    fn a_proven_release_leaves_unload_destroyed_and_window_destroy_in_order() {
-        let _serial = plx_base::testlock::serial();
-        crate::player::ffi_host::reset_native_lifecycle_for_test();
-        crate::player::ffi_host::force_clocksink_for_test(true);
-        SHARED.reset_session();
-        let _fresh_process = FreshProcess;
-        let consent = Consented::grant_in_cycle();
-        let mt = unsafe { MainThread::assume() };
-        let epoch = loaded_epoch(&mt);
-        release_native_object(&mt, epoch);
-        assert_eq!(
-            plx_telemetry::telemetry::window::take_recorded_for_test(),
-            ["native_unload", "native_destroyed", "exported_window_destroy"],
-        );
-        drop(consent);
-    }
-
-    #[test]
-    fn an_unproven_release_records_quarantine_not_destroyed() {
-        let _serial = plx_base::testlock::serial();
-        crate::player::ffi_host::reset_native_lifecycle_for_test();
-        crate::player::ffi_host::force_clocksink_for_test(true);
-        SHARED.reset_session();
-        let _fresh_process = FreshProcess;
-        let consent = Consented::grant_in_cycle();
-        let mt = unsafe { MainThread::assume() };
-        let epoch = loaded_epoch(&mt);
-        // No callback ever crossed the gate: the evidence is incomplete and the object is kept.
-        crate::player::ffi_host::force_callback_intercepts_for_test(0);
-        release_native_object(&mt, epoch);
-        assert_eq!(
-            plx_telemetry::telemetry::window::take_recorded_for_test(),
-            ["native_unload", "native_quarantined", "exported_window_destroy"],
-        );
-        drop(consent);
-    }
-
-    #[test]
-    fn a_seam_rejected_destroy_is_recorded_as_quarantine() {
-        let _serial = plx_base::testlock::serial();
-        crate::player::ffi_host::reset_native_lifecycle_for_test();
-        crate::player::ffi_host::force_clocksink_for_test(true);
-        SHARED.reset_session();
-        let _fresh_process = FreshProcess;
-        let consent = Consented::grant_in_cycle();
-        let mt = unsafe { MainThread::assume() };
-        let epoch = loaded_epoch(&mt);
-        // Rust's three proofs hold, but the C seam's own evidence does not: `destroy` answers 0,
-        // and the crumb must say so rather than "destroyed".
-        crate::player::ffi_host::force_destroy_refusal_for_test(true);
-        release_native_object(&mt, epoch);
-        let recorded = plx_telemetry::telemetry::window::take_recorded_for_test();
-        assert!(recorded.contains(&"native_quarantined"), "{recorded:?}");
-        assert!(!recorded.contains(&"native_destroyed"), "{recorded:?}");
-        drop(consent);
-    }
-
-    #[test]
-    fn the_acb_plane_unload_is_a_step_only_when_acb_is_the_plane() {
-        let _serial = plx_base::testlock::serial();
-        crate::player::ffi_host::reset_native_lifecycle_for_test();
-        crate::player::ffi_host::force_clocksink_for_test(true);
-        SHARED.reset_session();
-        let _fresh_process = FreshProcess;
-        let consent = Consented::grant_in_cycle();
-        let mt = unsafe { MainThread::assume() };
-        let epoch = loaded_epoch(&mt);
-        ACB_OK.store(true, Ordering::Relaxed);
-        release_native_object(&mt, epoch);
-        ACB_OK.store(false, Ordering::Relaxed);
-        let recorded = plx_telemetry::telemetry::window::take_recorded_for_test();
-        let at = |label| recorded.iter().position(|l| *l == label);
-        assert!(
-            at("native_unload") < at("acb_plane_unload") && at("acb_plane_unload") < at("native_destroyed"),
-            "{recorded:?}",
-        );
-        drop(consent);
-    }
-
-    #[test]
-    fn without_a_dispatchable_object_or_an_exported_window_nothing_is_recorded() {
-        let _serial = plx_base::testlock::serial();
-        crate::player::ffi_host::reset_native_lifecycle_for_test();
-        crate::player::ffi_host::force_clocksink_for_test(false);
-        SHARED.reset_session();
-        let _fresh_process = FreshProcess;
-        let consent = Consented::grant_in_cycle();
-        let mt = unsafe { MainThread::assume() };
-        let epoch = SHARED.begin_native_session().expect("native epoch");
-        release_native_object(&mt, epoch);
-        assert!(
-            plx_telemetry::telemetry::window::take_recorded_for_test().is_empty(),
-            "the seam's destroy_window is a no-op outside VP_EXPORTED, so it is not a step",
-        );
-        drop(consent);
-    }
-
-    #[test]
-    fn creating_the_exported_window_is_a_step_only_in_that_mode() {
-        let _serial = plx_base::testlock::serial();
-        crate::player::ffi_host::reset_native_lifecycle_for_test();
-        SHARED.reset_session();
-        let _fresh_process = FreshProcess;
-        let consent = Consented::grant_in_cycle();
-        let mt = unsafe { MainThread::assume() };
-        crate::player::ffi_host::force_clocksink_for_test(false);
-        let _ = with_window_id(&mt, "{}");
-        assert!(plx_telemetry::telemetry::window::take_recorded_for_test().is_empty());
-        crate::player::ffi_host::force_clocksink_for_test(true);
-        let _ = with_window_id(&mt, "{}");
-        assert_eq!(
-            plx_telemetry::telemetry::window::take_recorded_for_test(),
-            ["exported_window_create"],
-        );
-        drop(consent);
-    }
-
-    /// One engine's native life through the real create and release paths: what a trailer's start
-    /// and stop, a seek or quality reload's teardown and an abandoned Load's release all run.
-    fn engine_comes_and_goes(mt: &MainThread) {
-        let _ = with_window_id(mt, "{}");
-        let epoch = loaded_epoch(mt);
-        release_native_object(mt, epoch);
-    }
-
-    /// S12a: **the 16-slot ring belongs to the lifecycle cycle.** The webOS 5 exported-window path
-    /// costs a trailer four steps, so browsing four trailers used to push `will_foreground`,
-    /// `wm_*` and `first_frame` out of the ring before the next background cycle. Teardown and
-    /// window steps are crumbs of a lifecycle cycle only: this drives the REAL create and release
-    /// paths through the longest cycle (webOS 5, playing, foreground reload) with trailer churn
-    /// before, between and after, and checks the cycle's own steps are all the ring ever holds.
-    #[test]
-    fn trailer_starts_and_reloads_add_no_window_crumbs_and_a_whole_cycle_fits_the_ring() {
-        use plx_telemetry::telemetry::window::{self, Observation, Stage};
-        let _serial = plx_base::testlock::serial();
-        crate::player::ffi_host::reset_native_lifecycle_for_test();
-        crate::player::ffi_host::force_clocksink_for_test(true);
-        SHARED.reset_session();
-        let _fresh_process = FreshProcess;
-        let consent = Consented::grant();
-        let mt = unsafe { MainThread::assume() };
-        let step = |stage| window::record(Observation::step(stage, Some(true)));
-        let mut ring = Vec::new();
-
-        for _ in 0..6 {
-            engine_comes_and_goes(&mt);
-        }
-        assert_eq!(
-            window::take_recorded_for_test(),
-            Vec::<&str>::new(),
-            "browsing trailers and reloading engines is not a lifecycle cycle",
-        );
-
-        // Background, with playback: the engine is released inside the cycle.
-        window::lifecycle(0x103, true);
-        step(Stage::WaylandReleased);
-        window::lifecycle(0x104, true);
-        let epoch = loaded_epoch(&mt);
-        release_native_object(&mt, epoch);
-        step(Stage::BackgroundDone);
-        ring.extend(window::take_recorded_for_test());
-
-        // Foreground: the window is grabbed, then the restoring Load creates its exported window.
-        window::lifecycle(0x105, true);
-        window::lifecycle(0x106, true);
-        step(Stage::WmQuery);
-        step(Stage::WmReady);
-        let _ = with_window_id(&mt, "{}");
-        step(Stage::ForegroundDone);
-        ring.extend(window::take_recorded_for_test());
-
-        // The app is up again: trailers come and go before and after the first resumed frame.
-        engine_comes_and_goes(&mt);
-        step(Stage::FirstFrame);
-        step(Stage::FirstSwapComplete);
-        engine_comes_and_goes(&mt);
-        ring.extend(window::take_recorded_for_test());
-
-        assert_eq!(
-            ring,
-            [
-                "will_background", "wayland_released", "did_background", "native_unload",
-                "native_destroyed", "exported_window_destroy", "background_done",
-                "will_foreground", "did_foreground", "wm_query", "wm_ready",
-                "exported_window_create", "foreground_done", "first_frame", "first_swap_complete",
-            ],
-        );
-        assert!(ring.len() <= window::LIMIT, "{} steps would evict the start of the cycle", ring.len());
-        drop(consent);
-    }
 }
 
 #[cfg(test)]
 mod payload_tests {
-    use super::{build_av_payload, SinkEnvelope, PAYLOAD_AV, PAYLOAD_H265, PAYLOAD_V};
+    use super::{PAYLOAD_AV, PAYLOAD_H265, PAYLOAD_V};
 
     /// **Every Load payload must carry the `appId` placeholder, exactly once**, because that key
     /// is what `with_window_id` splices the webOS 5+ `option.windowId` onto — without it the
@@ -2799,19 +2550,10 @@ mod payload_tests {
 mod prime_livelock_tests {
     use super::*;
 
-    /// One 2-second HLS segment, as the device delivered it: 48 video AUs at 24 fps and 93 AAC
-    /// frames. These are the counts the failing run's `hls: segment=458 … v=48 a=93` line records.
-    const VIDEO_AUS: i64 = 48;
-    const AUDIO_AUS: i64 = 93;
-    const V_STEP_NS: i64 = 41_666_666; // 24 fps
-    const A_STEP_NS: i64 = 21_333_333; // 1024 samples at 48 kHz
-
-    /// An engine in the state a fresh `Load` leaves behind: streaming, nothing fed yet, and
-    /// `prime_play` armed so the next sufficient buffer starts the clock.
     pub(super) fn engine_after_reload() -> Engine {
         SHARED.ensure_initial_clock_hold_for_test();
         Engine {
-            route_start: crate::playback::RouteStartAttempt::fixture(),
+            route_start: crate::playback::RouteStartAttempt::fixture(0, 0),
             native_epoch: 0,
             stage: Stage::Streaming,
             video_info_sent: true,
@@ -2831,18 +2573,20 @@ mod prime_livelock_tests {
             prime_play: true,
             aq_video: Some(crate::aq::aq_new(AQ_VIDEO_BYTES)),
             aq_audio: Some(crate::aq::aq_new(AQ_AUDIO_BYTES)),
-            hs: plx_net::stream::http_stream_boxed(),
             pending_video: None,
             pending_audio: None,
             payload: std::ffi::CString::new("").unwrap(),
-            source: Source::Stream,
             stream_th: None,
             load_th: None,
-            report_th: None,
-            report_stop: None,
-            preview_abandon: false,
         }
     }
+
+    /// One 2-second HLS segment, as the device delivered it: 48 video AUs at 24 fps and 93 AAC
+    /// frames. These are the counts the failing run's `hls: segment=458 … v=48 a=93` line records.
+    const VIDEO_AUS: i64 = 48;
+    const AUDIO_AUS: i64 = 93;
+    const V_STEP_NS: i64 = 41_666_666; // 24 fps
+    const A_STEP_NS: i64 = 21_333_333; // 1024 samples at 48 kHz
 
     /// Push one whole segment into both lanes before any tick runs — which is what a segmented
     /// demux does, and the entire difference from direct play.
@@ -3666,15 +3410,6 @@ mod replay_after_stop_tests {
     }
 }
 
-/// Test-only: an Engine parked at `Stage::Streaming` on the host sink, for the pump-level rigs
-/// that live outside this module (`pump::flight_tests`).
-#[cfg(test)]
-pub(super) fn streaming_engine_for_test(native_epoch: u32) -> Engine {
-    let mut eng = prime_livelock_tests::engine_after_reload();
-    eng.native_epoch = native_epoch;
-    eng
-}
-
 /// issue #74 D.1 regression tests. Real v0.6.0 dispatches every Starfish/ACB verb through
 /// `sf_ready_object()` alone (`src/starfish.c`), which went live at `SMP_SET_READY(1)` BEFORE the
 /// real, blocking `sf_load` call (`g_load_with_context`) returned — nothing waited for that
@@ -4336,73 +4071,6 @@ mod load_in_flight_tests {
     /// An Engine whose `sf_load` is held past the budget: the pump's budget arm has fired
     /// (`load_failed` + `load_timed_out`), the Load thread is still inside `sf_load`, and the
     /// Engine is installed in `pa`. The state the Auto Original's recovery starts from.
-    fn install_engine_with_timed_out_load(
-        ps: &mut crate::playback::PlaybackSession,
-        pa: &mut crate::player::adapter::PlayerAdapter,
-    ) {
-        let epoch = SHARED.begin_native_session().expect("native session");
-        let mut eng = engine_loading(epoch);
-        crate::player::ffi_host::hold_load_for_test();
-        let payload_ptr = threads::SendPtr(eng.payload.as_ptr() as *mut c_char);
-        eng.load_th = Some(
-            std::thread::Builder::new()
-                .name("test-load-thread-hung".into())
-                .spawn(move || threads::load_thread(payload_ptr, epoch, None))
-                .expect("spawn load_thread"),
-        );
-        pa.install(eng);
-        wait_for_load_in_flight();
-        assert!(
-            SHARED.test_backdate_native_load_issued(epoch, crate::player::pump::NATIVE_LOAD_BUDGET),
-            "PRECONDITION FAILED: the epoch must still own Active to backdate it"
-        );
-        crate::player::pump::pump(ps, pa, 1_000);
-        assert!(
-            SHARED.load_timed_out.load(Ordering::Acquire),
-            "PRECONDITION FAILED: the budget must have fired, or this test is not about a timed-out Load"
-        );
-    }
-
-    /// PLX-NATIVE-15: the Auto Original's Load passes its budget, the HLS recovery reloads while
-    /// the Load is still inside `sf_load`, the reload's teardown parks that Load (clearing
-    /// `load_timed_out` with the rest of the session) and the start is refused. The failure was
-    /// published with no cause, so the report said `unspecified`; the cause is the timeout.
-    #[test]
-    fn a_recovery_reload_refused_for_an_abandoned_load_still_reports_the_timeout() {
-        let mut ps = crate::playback::PlaybackSession::IDLE;
-        let _serial = plx_base::testlock::serial();
-        SHARED.reset_session();
-        crate::playback::reset_player_control_for_test(&ps);
-        crate::player::ffi_host::reset_native_lifecycle_for_test();
-        crate::player::ffi_host::force_clocksink_for_test(true);
-        let _cleanup = Cleanup;
-        let _release = ReleaseLoadOnDrop;
-        let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
-            plx_base::task::MainThread::assume()
-        });
-        crate::playback::set_url(&mut ps, "http://127.0.0.1:1/hls/start.m3u8");
-        install_engine_with_timed_out_load(&mut ps, &mut pa);
-
-        // `land_recovery_flight`'s own two calls: the reload (whose teardown parks the
-        // still-running Load) and the settle that publishes the outcome.
-        let started = crate::player::pump::settle_reload(
-            reload_transcode(&mut ps, &mut pa, 0),
-            "test HLS recovery",
-        );
-        assert!(!started, "the recovery start must be refused while the Load is outstanding");
-        assert!(pa.has_abandoned_load(), "PRECONDITION FAILED: the Load must still be parked");
-        assert_eq!(crate::player::state(&ps), crate::player::PlaybackState::Error);
-        assert_eq!(
-            crate::player::error_now(&ps).kind,
-            crate::player::FailureKind::LoadTimeout,
-            "the refusal must keep the timeout as its cause, not report `unspecified`"
-        );
-    }
-
-    /// The fresh-start half of the same hole: a Retry or Back+Play while the parked Load is still
-    /// inside `sf_load` is refused with no Engine to publish anything, so the player sat in Idle
-    /// and drew nothing: no read-out, no report, no Try Again. The refusal stays (a second native
-    /// object must not be started), but the viewer is told why.
     #[test]
     fn a_fresh_start_refused_for_an_abandoned_load_shows_an_error_with_try_again() {
         let mut ps = crate::playback::PlaybackSession::IDLE;
@@ -4434,7 +4102,7 @@ mod load_in_flight_tests {
         assert_eq!(shape.kind, crate::player::FailureKind::LoadTimeout);
         let actions = crate::player::failure_actions(
             shape.kind,
-            crate::player::FailureContext { forced: false, can_retry: true, repair_idle: true },
+            crate::player::FailureContext { can_retry: true },
         );
         assert!(
             actions.contains(&crate::player::FailureAction::TryAgain),
@@ -4457,14 +4125,40 @@ mod load_in_flight_tests {
         );
     }
 
-    /// The latch's other edge: a start refused for the parked Load sets `native_start_refused`,
-    /// and a RELOAD that then starts (the foreground restore's rollback landing after the Load was
-    /// reaped: `land_engineless_rollback` -> `reload_transcode_tracked`) goes through
-    /// `start_bufferfeed_for`, not `start_bufferfeed_tracked`, which is where the flag used to be
-    /// cleared. The flag outlived the refusal and, once the flight ended, `state()` answered Error
-    /// over playing video and `report::tick` sent a bogus `load_timeout`.
     #[test]
-    fn a_reload_that_starts_after_a_refused_fresh_start_does_not_keep_the_refusals_error() {
+    fn a_reload_refused_for_an_abandoned_load_still_reports_the_timeout() {
+        let mut ps = crate::playback::PlaybackSession::IDLE;
+        let _serial = plx_base::testlock::serial();
+        SHARED.reset_session();
+        crate::playback::reset_player_control_for_test(&ps);
+        crate::player::ffi_host::reset_native_lifecycle_for_test();
+        crate::player::ffi_host::force_clocksink_for_test(true);
+        let _cleanup = Cleanup;
+        let _release = ReleaseLoadOnDrop;
+        let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
+            plx_base::task::MainThread::assume()
+        });
+        crate::playback::set_url(&mut ps, "file:///nonexistent/film.mkv");
+        install_engine_with_timed_out_load(&mut ps, &mut pa);
+
+        // A seek's reload (whose teardown parks the still-running Load) and the settle that
+        // publishes the outcome.
+        let started = crate::player::pump::settle_reload(
+            reload_at(&mut ps, &mut pa, 0),
+            "test seek reload",
+        );
+        assert!(!started, "the recovery start must be refused while the Load is outstanding");
+        assert!(pa.has_abandoned_load(), "PRECONDITION FAILED: the Load must still be parked");
+        assert_eq!(crate::player::state(&ps), crate::player::PlaybackState::Error);
+        assert_eq!(
+            crate::player::error_now(&ps).kind,
+            crate::player::FailureKind::LoadTimeout,
+            "the refusal must keep the timeout as its cause, not report `unspecified`"
+        );
+    }
+
+    #[test]
+    fn a_start_that_launches_after_a_refused_fresh_start_does_not_keep_the_refusals_error() {
         let mut ps = crate::playback::PlaybackSession::IDLE;
         let _serial = plx_base::testlock::serial();
         SHARED.reset_session();
@@ -4479,10 +4173,8 @@ mod load_in_flight_tests {
         install_engine_with_timed_out_load(&mut ps, &mut pa);
         stop_bufferfeed(&mut ps, &mut pa);
         assert!(pa.has_abandoned_load(), "PRECONDITION FAILED: the Load must be parked");
-        crate::playback::set_url(&mut ps, "http://127.0.0.1:1/hls/start.m3u8");
-        crate::playback::set_stream_acodec(&mut ps, "aac");
-
-        // The resumed foreground's `PlayerForegroundActuator::start_load`.
+        crate::playback::set_url(&mut ps, "file:///nonexistent/film.mkv");
+        crate::playback::set_stream_declaration(&mut ps, "h264", "aac", 24.0);
         assert_eq!(
             start_bufferfeed_tracked(&mut ps, &mut pa),
             BufferfeedStartOutcome::Failed,
@@ -4490,28 +4182,55 @@ mod load_in_flight_tests {
         );
         assert!(ps.native_start_refused, "PRECONDITION FAILED: the refusal must be recorded");
 
-        // The parked Load returns and is reaped; the rollback's reload then starts.
+        // The parked Load returns and is reaped; the next start then launches.
         crate::player::ffi_host::release_load_for_test();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !reap_abandoned_load(&mut pa) {
             assert!(std::time::Instant::now() < deadline, "the returned Load was never released");
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        let reload = reload_transcode_tracked(&mut ps, &mut pa, 0);
+        let restart = start_bufferfeed_tracked(&mut ps, &mut pa);
         assert!(
-            matches!(reload, BufferfeedStartOutcome::Launched(_)),
-            "PRECONDITION FAILED: the reload must start once the Load is reaped ({reload:?})"
+            matches!(restart, BufferfeedStartOutcome::Launched(_)),
+            "PRECONDITION FAILED: the start must launch once the Load is reaped ({restart:?})"
         );
-        assert!(pa.is_live(), "the reload must have built an Engine");
+        assert!(pa.is_live(), "the start must have built an Engine");
 
         assert_ne!(
             crate::player::state(&ps),
             crate::player::PlaybackState::Error,
-            "a reload that started kept the refused fresh start's Error over live video \
-             (and report::tick would send a bogus load_timeout)"
+            "a start that launched kept the refused fresh start's Error over live video"
         );
         stop_bufferfeed(&mut ps, &mut pa);
     }
+
+    fn install_engine_with_timed_out_load(
+        ps: &mut crate::playback::PlaybackSession,
+        pa: &mut crate::player::adapter::PlayerAdapter,
+    ) {
+        let epoch = SHARED.begin_native_session().expect("native session");
+        let mut eng = engine_loading(epoch);
+        crate::player::ffi_host::hold_load_for_test();
+        let payload_ptr = threads::SendPtr(eng.payload.as_ptr() as *mut c_char);
+        eng.load_th = Some(
+            std::thread::Builder::new()
+                .name("test-load-thread-hung".into())
+                .spawn(move || threads::load_thread(payload_ptr, epoch, None))
+                .expect("spawn load_thread"),
+        );
+        pa.install(eng);
+        wait_for_load_in_flight();
+        assert!(
+            SHARED.test_backdate_native_load_issued(epoch, crate::player::pump::NATIVE_LOAD_BUDGET),
+            "PRECONDITION FAILED: the epoch must still own Active to backdate it"
+        );
+        crate::player::pump::pump(ps, pa, 1_000);
+        assert!(
+            SHARED.load_timed_out.load(Ordering::Acquire),
+            "PRECONDITION FAILED: the budget must have fired, or this test is not about a timed-out Load"
+        );
+    }
+
 }
 
 /// **The webOS 10.3.1 refusal, replayed.** `docs/webos10-lab-report.md` §3.2 records the exact
@@ -4741,18 +4460,6 @@ mod sink_envelope_tests {
         assert!(load_video_refused(LoadVideo::Vp9, &av1_only));
     }
 
-    #[test]
-    fn load_v_name_is_the_name_the_payload_declares() {
-        use crate::player::load_v_name;
-        assert_eq!(load_v_name(1), "H264");
-        assert_eq!(load_v_name(2), "H265");
-        assert_eq!(load_v_name(3), "AV1");
-        assert_eq!(load_v_name(4), "VP9");
-        assert_eq!(load_v_name(0), "—");
-        for video in [LoadVideo::H264, LoadVideo::H265, LoadVideo::Av1, LoadVideo::Vp9] {
-            assert_eq!(load_v_name(video.diag_code()), video.payload_name());
-        }
-    }
 }
 
 #[cfg(test)]

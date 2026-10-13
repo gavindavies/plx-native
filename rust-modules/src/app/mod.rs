@@ -112,7 +112,6 @@ pub(crate) mod playback;
 pub(crate) mod local_launch; // `plxnative-sim <file>`: play a file from the command line
 pub(crate) mod toast;
 mod local_watch; // follows a local file's playback and keeps its place // the Linux build's toast, drawn by the app (the port delivers to it)
-mod preferences;
 pub(crate) mod input;
 pub(crate) mod bridge;
 pub(crate) mod content;
@@ -319,9 +318,6 @@ unsafe fn run_and_shutdown(app: &mut App) -> c_int {
 
 fn enter_application(pms_host: *const c_char, pms_port: c_int) -> Result<App,c_int> {
     pre_boot_diagnostics();
-    // Resolve the Dolby Vision latches' filesystem state outside `FrameScope`, so no render frame
-    // performs its first `stat`.
-    plx_data::metadata::prewarm_dv_latches();
     let main_thread = unsafe { plx_base::task::MainThread::assume() };
     unsafe { boot(pms_host, pms_port, main_thread) }
 }

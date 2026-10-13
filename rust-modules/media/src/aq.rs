@@ -109,7 +109,6 @@ unsafe fn init_not_full_cond(cond: *mut libc::pthread_cond_t) {
     }
 }
 
-
 pub fn aq_destroy(q: *mut AuQueue) {
     if q.is_null() {
         return;
@@ -169,7 +168,6 @@ fn aq_park_deadline() -> libc::timespec {
     }
     add_10ms(ts)
 }
-
 
 fn add_10ms(ts: libc::timespec) -> libc::timespec {
     let mut nsec = ts.tv_nsec + 10_000_000;

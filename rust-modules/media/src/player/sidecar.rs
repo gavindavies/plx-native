@@ -102,7 +102,6 @@ fn state() -> std::sync::MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-
 /// Select the subtitle FILE `key` (its path) beside the playing video, reading it unless it is
 /// already loaded. MAIN THREAD.
 pub fn select_file(stream_id: i64, key: String, codec: String) {
@@ -216,7 +215,6 @@ pub fn reset() {
     st.loaded = None;
     st.failed = None;
 }
-
 
 /// The line to draw at `now_ns`, if a sidecar is selected.
 pub fn active(now_ns: i64) -> Option<String> {
@@ -609,7 +607,6 @@ mod tests {
         reset();
         super::super::ass_source::reset();
     }
-
 
     #[test]
     fn styled_sidecars_never_draw_a_flattened_second_caption() {

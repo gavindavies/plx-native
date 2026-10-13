@@ -248,25 +248,6 @@ pub(super) mod pinned_clock {
         PINNED.with(Cell::get)
     }
 
-    pub(crate) struct Pinned;
-
-    impl Pinned {
-        /// Pin this thread's sink clock at the real time now.
-        pub(crate) fn now() -> Self {
-            PINNED.with(|p| p.set(Some(i64::from(super::super::vclock_ms()))));
-            Pinned
-        }
-
-        pub(crate) fn advance_ms(&self, by: i64) {
-            PINNED.with(|p| p.set(p.get().map(|at| at + by)));
-        }
-    }
-
-    impl Drop for Pinned {
-        fn drop(&mut self) {
-            PINNED.with(|p| p.set(None));
-        }
-    }
 }
 /// The rebase `sf_on_event` applies to a reported position (`playpos = fed - pts_shift +
 /// disp_base`), inverted: the fed PTS at which the app will read `media_ns`.
@@ -351,13 +332,6 @@ pub(super) fn force_callback_intercepts_for_test(value: u32) {
 pub(super) fn lifecycle_blocked_for_test() -> bool {
     LIFECYCLE_BLOCKED.load(Relaxed)
 }
-/// Make the seam's own D1 evidence disagree with Rust's: `sf_destroy` answers 0 and latches the
-/// quarantine even though every proof Rust holds says Destroy. Cleared by
-/// [`reset_native_lifecycle_for_test`].
-#[cfg(test)]
-pub(super) fn force_destroy_refusal_for_test(on: bool) {
-    FORCE_DESTROY_REFUSAL.store(on, Relaxed);
-}
 #[cfg(test)]
 pub(super) fn force_object_ready_for_test(on: bool) {
     OBJECT_READY.store(on, Relaxed);
@@ -381,22 +355,6 @@ pub(super) fn reset_native_lifecycle_for_test() {
     *HOLD_LOAD.0.lock().unwrap_or_else(|e| e.into_inner()) = false;
     HOLD_LOAD.1.notify_all();
     Clock::rewind();
-}
-
-/// Start the sink clock running at `base_ns` in the fed-PTS space with plenty of fed media ahead,
-/// so a test can watch whether it advances. Test-only: production starts it through `sf_play`.
-#[cfg(test)]
-pub(super) fn clock_run_for_test(base_ns: i64) {
-    Clock::rewind();
-    BASE_NS.store(base_ns, Relaxed);
-    FED_MAX_NS.store(i64::MAX / 2, Relaxed);
-    RESUMED_AT_MS.store(now_ms(), Relaxed);
-    PLAYING.store(true, Relaxed);
-}
-/// The sink clock's position and whether it is running. Test-only.
-#[cfg(test)]
-pub(super) fn clock_state_for_test() -> (i64, bool) {
-    (Clock::position_ns(), PLAYING.load(Relaxed))
 }
 
 impl Clock {
@@ -484,16 +442,11 @@ impl Clock {
     }
 }
 
-unsafe fn sf_load(payload: *const c_char, epoch: u32) -> c_int {
+unsafe fn sf_load(_payload: *const c_char, epoch: u32) -> c_int {
     if !enabled() || epoch == 0 || OBJECT_READY.load(Relaxed) || LIFECYCLE_BLOCKED.load(Relaxed) {
         return 0; // "pipeline could not be constructed" — the engine's existing failure path
     }
     Clock::rewind();
-    // `plxnative-simvideo`: the screenshot picture (`player::sim_video`) learns the codec here.
-    if !payload.is_null() {
-        let payload = std::ffi::CStr::from_ptr(payload).to_string_lossy();
-        crate::player::sim_video::load(&payload, Clock::position_ns);
-    }
     ACTIVE_EPOCH.store(epoch, Relaxed);
     CALLBACK_INTERCEPTS.store(0, Relaxed);
     CALLBACK_GATE_RETIRED.store(false, Relaxed);
@@ -630,7 +583,6 @@ unsafe fn sf_flush() -> c_int {
         return 0;
     }
     Clock::rewind();
-    crate::player::sim_video::flush();
     1
 }
 unsafe fn sf_push_eos() -> c_int {
@@ -673,7 +625,6 @@ unsafe fn sf_feed(p: *const u8, size: c_uint, pts: i64, es_data: c_int) -> c_cha
     if es_data == 1 {
         FED_MAX_NS.fetch_max(pts, Relaxed);
         if !p.is_null() && size > 0 {
-            crate::player::sim_video::feed(std::slice::from_raw_parts(p, size as usize), pts);
         }
     }
     FEED_OK
@@ -690,7 +641,6 @@ unsafe fn sf_unload() {
     }
     LOADED.store(false, Relaxed);
     Clock::rewind();
-    crate::player::sim_video::stop();
 }
 unsafe fn sf_callback_gate_retire() -> c_int {
     #[cfg(any(test, feature = "test-support"))]
@@ -726,7 +676,6 @@ unsafe fn sf_destroy() -> c_int {
     OBJECT_READY.store(false, Relaxed);
     LOADED.store(false, Relaxed);
     Clock::rewind();
-    crate::player::sim_video::stop();
     1
 }
 unsafe fn sf_quarantine() {
@@ -737,7 +686,6 @@ unsafe fn sf_quarantine() {
     OBJECT_READY.store(false, Relaxed);
     LOADED.store(false, Relaxed);
     Clock::rewind();
-    crate::player::sim_video::stop();
 }
 
 /// `VP_NONE` — "video cannot be displayed, but the app still runs", which is precisely the
