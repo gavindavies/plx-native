@@ -111,6 +111,8 @@ pub fn install(ps: &mut crate::route::PlaybackSession, path: &Path, probe: &crat
         .and_then(|p| p.file_name())
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     crate::route::set_hud_title(ps, &title_of(path), &folder);
+    // No account to say which subtitles are the viewer's: the interface's language leads the menu.
+    crate::route::set_sub_pref_lang(ps, plx_platform::i18n::current().language().tag());
     crate::route::set_url(ps, &crate::localfile::file_url(path));
     crate::player::log(&format!(
         "localplay: {} v={} {}x{} fps={:.3} a={} (tracks: {})",
@@ -125,6 +127,82 @@ pub fn install(ps: &mut crate::route::PlaybackSession, path: &Path, probe: &crat
     Ok(())
 }
 
+/// The track store the player's menus read for a local file (`metadata::PlayingItem`, which a
+/// Plex playback fills from the server): its embedded subtitle tracks, in file order, then the
+/// subtitle files beside it ([`plx_data::local::sidecars`]). The item's server is
+/// `local::ART_SRV` and its key the file's path.
+///
+/// No audio list: switching tracks on a direct play goes through the server's route
+/// (`route::commit_audio_selection`), which a local file has none of, so the menu offers none
+/// rather than a pick that cannot land.
+pub fn playing_item(path: &Path, probe: &crate::ff::LocalProbe, sidecars: &[plx_data::local::SidecarFile]) -> plx_data::metadata::PlayingItem {
+    use plx_data::metadata::Stream;
+    let named = |tag: &str| {
+        plx_data::metadata::two_letter_code(tag).map_or_else(String::new, |c| plx_plex::plex::languages::label(&c).to_owned())
+    };
+    let mut subs: Vec<Stream> = probe
+        .subs
+        .iter()
+        .enumerate()
+        .map(|(i, t)| Stream {
+            id: EMBEDDED_SUB_ID + i as i64,
+            index: i as i64,
+            lang: named(&t.lang),
+            lang_code: t.lang.clone(),
+            codec: sub_codec(&t.codec).to_owned(),
+            title: t.title.clone(),
+            sdh: t.sdh,
+            forced: t.forced,
+            default: t.default,
+            ..Stream::default()
+        })
+        .collect();
+    subs.extend(sidecars.iter().enumerate().map(|(j, f)| Stream {
+        id: SIDECAR_ID + j as i64,
+        index: SIDECAR_ID + j as i64,
+        lang: named(&f.lang),
+        lang_code: f.lang.clone(),
+        codec: f.codec.clone(),
+        title: f.title.clone(),
+        sdh: f.sdh,
+        forced: f.forced,
+        external: true,
+        key: f.path.to_string_lossy().into_owned(),
+        ..Stream::default()
+    }));
+    plx_data::metadata::PlayingItem {
+        sid: plx_plex::plex::ServerId::from_raw(plx_data::local::ART_SRV),
+        rk: path.to_string_lossy().into_owned(),
+        show_rk: String::new(),
+        kind: "movie".into(),
+        audio: Vec::new(),
+        subs,
+        video_fps: probe.fps,
+        width: i64::from(probe.width),
+        height: i64::from(probe.height),
+        bitrate: 0,
+        dovi: Default::default(),
+        markers: Vec::new(),
+        chapters: Vec::new(),
+        blur: None,
+    }
+}
+
+/// Stream ids for a local file's subtitles: embedded tracks from 1, files beside it from 1000.
+/// Any non-zero id will do (0 is Off); the two ranges keep a file's sidecar from ever sharing an
+/// embedded track's id.
+const EMBEDDED_SUB_ID: i64 = 1;
+const SIDECAR_ID: i64 = 1000;
+
+/// FFmpeg's subtitle codec name in the spelling the track menu reads (PMS's).
+fn sub_codec(ffmpeg: &str) -> &str {
+    match ffmpeg {
+        "subrip" => "srt",
+        "webvtt" => "vtt",
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,11 +212,34 @@ mod tests {
             vcodec: v.into(),
             acodec: a.into(),
             audio_codecs: all.iter().map(|s| (*s).into()).collect(),
+            audio: Vec::new(),
+            subs: Vec::new(),
             width: 1920,
             height: 1080,
             fps: 23.976,
             duration_ns: 0,
         }
+    }
+
+    #[test]
+    fn the_track_store_lists_embedded_subtitles_then_the_files_beside_it() {
+        let mut p = probe("hevc", "eac3", &["eac3"]);
+        p.subs = vec![crate::ff::LocalTrack { codec: "subrip".into(), lang: "eng".into(), forced: true, ..Default::default() }];
+        let side = plx_data::local::SidecarFile {
+            path: "/m/Film.de.srt".into(), codec: "srt".into(), lang: "de".into(), forced: false, sdh: true, title: String::new(),
+        };
+        let item = playing_item(Path::new("/m/Film.mkv"), &p, &[side]);
+        assert_eq!(item.rk, "/m/Film.mkv");
+        assert_eq!(item.sid.raw(), plx_data::local::ART_SRV);
+        assert!(item.audio.is_empty());
+        let (embedded, file) = (&item.subs[0], &item.subs[1]);
+        assert_eq!((embedded.codec.as_str(), embedded.lang_code.as_str(), embedded.forced, embedded.external), ("srt", "eng", true, false));
+        assert!(!embedded.lang.is_empty(), "a tagged track is named");
+        assert!(file.external && file.sidecar_renderable() && file.sdh);
+        assert_eq!(file.key, "/m/Film.de.srt");
+        assert_ne!(embedded.id, file.id);
+        assert_eq!(plx_data::metadata::sub_render_ordinal(&item.subs, 0), 0, "the embedded track is the demuxer's first");
+        assert_eq!(plx_data::metadata::sub_render_ordinal(&item.subs, 1), -1, "a file beside it is not the demuxer's");
     }
 
     #[test]

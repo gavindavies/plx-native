@@ -105,6 +105,15 @@ const OFF_STREAM_TIME_BASE: usize = 32;
 const OFF_STREAM_METADATA: usize = 72;
 #[cfg(target_pointer_width = "64")]
 const OFF_STREAM_METADATA: usize = 80;
+/// `AVStream.disposition` (the `AV_DISPOSITION_*` flags), after the 8-aligned `nb_frames`: which
+/// track a local file marks default, forced or for the hard of hearing (`probe_local`).
+#[cfg(target_pointer_width = "32")]
+const OFF_STREAM_DISPOSITION: usize = 56;
+#[cfg(target_pointer_width = "64")]
+const OFF_STREAM_DISPOSITION: usize = 64;
+const AV_DISPOSITION_DEFAULT: c_int = 0x0001;
+const AV_DISPOSITION_FORCED: c_int = 0x0040;
+const AV_DISPOSITION_HEARING_IMPAIRED: c_int = 0x0080;
 /// `AVStream.avg_frame_rate`, directly after `metadata` — the frame rate a local file declares when
 /// its demuxer leaves `codecpar.framerate` unset (`probe_local`).
 #[cfg(target_pointer_width = "32")]
@@ -663,6 +672,24 @@ unsafe fn stream_name(s: *mut AVStream) -> String {
         }
     }
     String::new()
+}
+
+/// One tag of the stream's own dictionary (`language`, `title`, ...), trimmed; empty when absent.
+unsafe fn stream_tag(s: *mut AVStream, key: &std::ffi::CStr) -> String {
+    let dict = *((s as *const u8).add(OFF_STREAM_METADATA) as *const *const AVDictionary);
+    if dict.is_null() {
+        return String::new();
+    }
+    let e = av_dict_get(dict, key.as_ptr(), std::ptr::null(), 0);
+    if e.is_null() || (*e).value.is_null() {
+        return String::new();
+    }
+    std::ffi::CStr::from_ptr((*e).value).to_string_lossy().trim().to_string()
+}
+
+#[inline]
+unsafe fn stream_disposition(s: *mut AVStream) -> c_int {
+    *((s as *const u8).add(OFF_STREAM_DISPOSITION) as *const c_int)
 }
 
 /// Every track's container name, by TYPE, in file order — the two lists
@@ -1483,6 +1510,21 @@ fn probe(url: &str) {
     }
 }
 
+/// One audio or subtitle track of a local file, as its container describes it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LocalTrack {
+    /// FFmpeg's codec name (`eac3`, `subrip`, `hdmv_pgs_subtitle`, ...).
+    pub codec: String,
+    /// The `language` tag — an ISO 639-2 code (`eng`) in Matroska and MP4; empty when untagged.
+    pub lang: String,
+    /// The track's own name ([`stream_name`]).
+    pub title: String,
+    pub channels: i32,
+    pub default: bool,
+    pub forced: bool,
+    pub sdh: bool,
+}
+
 /// What [`probe_local`] learned about a file on this machine's disk: everything the Load
 /// declaration needs, which for a Plex item comes from the server's decision instead.
 #[derive(Debug, Clone, PartialEq)]
@@ -1494,6 +1536,9 @@ pub struct LocalProbe {
     pub acodec: String,
     /// Every audio stream's codec name, in file order — what the refusal names when none fits.
     pub audio_codecs: Vec<String>,
+    /// Every audio and subtitle track, in file order: what the player's track menu lists.
+    pub audio: Vec<LocalTrack>,
+    pub subs: Vec<LocalTrack>,
     pub width: u16,
     pub height: u16,
     /// Frames per second, 0 when the container does not say.
@@ -1526,13 +1571,27 @@ pub fn probe_local(path: &std::path::Path) -> Result<LocalProbe, String> {
             }
             let vcp = stream_codecpar(*(*fmt).streams.add(vi as usize));
             let name = |id: c_int| std::ffi::CStr::from_ptr(avcodec_get_name(id)).to_string_lossy().into_owned();
-            let mut audio_codecs = Vec::new();
+            let (mut audio, mut subs) = (Vec::new(), Vec::new());
             for i in 0..(*fmt).nb_streams {
-                let cp = stream_codecpar(*(*fmt).streams.add(i as usize));
-                if (*cp).codec_type == AVMEDIA_TYPE_AUDIO {
-                    audio_codecs.push(name((*cp).codec_id));
+                let st = *(*fmt).streams.add(i as usize);
+                let cp = stream_codecpar(st);
+                let disposition = stream_disposition(st);
+                let track = || LocalTrack {
+                    codec: name((*cp).codec_id),
+                    lang: stream_tag(st, c"language"),
+                    title: stream_name(st),
+                    channels: (*cp).ch_layout.nb_channels,
+                    default: disposition & AV_DISPOSITION_DEFAULT != 0,
+                    forced: disposition & AV_DISPOSITION_FORCED != 0,
+                    sdh: disposition & AV_DISPOSITION_HEARING_IMPAIRED != 0,
+                };
+                match (*cp).codec_type {
+                    AVMEDIA_TYPE_AUDIO => audio.push(track()),
+                    AVMEDIA_TYPE_SUBTITLE => subs.push(track()),
+                    _ => {}
                 }
             }
+            let audio_codecs: Vec<String> = audio.iter().map(|t: &LocalTrack| t.codec.clone()).collect();
             // FILE order, not codec preference: the first track is the one the file's author
             // put first (usually the main mix), and a commentary must never win on its codec.
             let acodec = audio_codecs
@@ -1549,6 +1608,8 @@ pub fn probe_local(path: &std::path::Path) -> Result<LocalProbe, String> {
                 vcodec: name((*vcp).codec_id),
                 acodec,
                 audio_codecs,
+                audio,
+                subs,
                 width: clamp((*vcp).width),
                 height: clamp((*vcp).height),
                 fps,

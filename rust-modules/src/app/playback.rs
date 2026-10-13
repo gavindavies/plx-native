@@ -529,6 +529,11 @@ pub(crate) fn commit_track(
             // is silenced for as long as that is true, so selecting here is harmless and means
             // the line survives the playback going BACK to direct play.
             match sidecar_key {
+                // A local file's sidecar is a file beside it (`localplay::playing_item`).
+                #[cfg(feature = "gst")]
+                Some(key) if plx_media::localfile::is_file_url(&plx_media::route::url(ps)) => {
+                    plx_media::player::sidecar::select_file(stream_id, key, sidecar_codec)
+                }
                 Some(key) => plx_media::player::sidecar::select(plx_media::route::cur_sid(ps), stream_id, key, sidecar_codec),
                 None => plx_media::player::sidecar::deselect(),
             }

@@ -5528,6 +5528,13 @@ pub fn source_acodec(ps: &PlaybackSession) -> String {
 }
 /// Name what the player shows when there is no library item behind it (a local file): the HUD's
 /// title and the context line under it, truncated to their fixed buffers like every other title.
+/// The subtitle language the track menu ranks first ("your languages"). A Plex playback takes it
+/// from the account's preference at resolve time; a local file (`localplay::install`) has none,
+/// and names the interface's.
+pub fn set_sub_pref_lang(ps: &mut PlaybackSession, lang: &str) {
+    ps.cur_sub_pref_lang = (!lang.is_empty()).then(|| lang.to_owned());
+}
+
 pub fn set_hud_title(ps: &mut PlaybackSession, title: &str, ctxline: &str) {
     // SAFETY: the buffers and their lengths come from the same arrays, as in `request_play`.
     unsafe {

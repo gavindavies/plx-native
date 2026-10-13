@@ -269,6 +269,63 @@ pub fn scan(dir: &Path) -> std::io::Result<Vec<Entry>> {
     Ok(entries)
 }
 
+/// A subtitle file beside a video ([`sidecars`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SidecarFile {
+    pub path: PathBuf,
+    /// The format, as its extension names it: `srt`, `ass`, `ssa` or `vtt`.
+    pub codec: String,
+    /// The language its name carries (`Film.en.srt`, `Film.eng.srt`), as written; empty when none.
+    pub lang: String,
+    pub forced: bool,
+    pub sdh: bool,
+    /// The rest of its name between the video's and the extension (`Film.Director's cut.srt`).
+    pub title: String,
+}
+
+const SIDECAR_EXTENSIONS: [&str; 4] = ["srt", "ass", "ssa", "vtt"];
+
+/// The subtitle files beside `video`, by the naming every media player reads: the video's own
+/// name, then any of a language (`en`, `eng`), `forced`, `sdh` / `cc` / `hi`, and free words, then
+/// a text-subtitle extension. Blocking (it lists the folder); sorted by name.
+pub fn sidecars(video: &Path) -> Vec<SidecarFile> {
+    let (Some(dir), Some(stem)) = (video.parent(), video.file_stem().and_then(|s| s.to_str())) else {
+        return Vec::new();
+    };
+    let mut names = child_names(dir).unwrap_or_default();
+    names.sort_by(|a, b| natural_cmp(a, b));
+    names.iter().filter_map(|name| sidecar_of(stem, name).map(|mut s| { s.path = dir.join(name); s })).collect()
+}
+
+/// Whether `name` is a subtitle for the video named `stem`, and what its name says about it.
+fn sidecar_of(stem: &str, name: &str) -> Option<SidecarFile> {
+    let rest = name.strip_prefix(stem)?;
+    let (middle, ext) = rest.rsplit_once('.')?;
+    let codec = ext.to_ascii_lowercase();
+    if !SIDECAR_EXTENSIONS.contains(&codec.as_str()) || !(middle.is_empty() || middle.starts_with('.')) {
+        return None;
+    }
+    let mut out = SidecarFile { path: PathBuf::new(), codec, lang: String::new(), forced: false, sdh: false, title: String::new() };
+    let mut words = Vec::new();
+    for token in middle.split('.').filter(|t| !t.is_empty()) {
+        match token.to_ascii_lowercase().as_str() {
+            "forced" => out.forced = true,
+            "sdh" | "cc" | "hi" => out.sdh = true,
+            "default" => {}
+            t if out.lang.is_empty() && is_language(t) => out.lang = token.to_string(),
+            _ => words.push(token),
+        }
+    }
+    out.title = words.join(" ");
+    Some(out)
+}
+
+/// A two-letter code, or a three-letter one the language table knows (`eng`, `ger`, `deu`).
+fn is_language(token: &str) -> bool {
+    let alpha = token.bytes().all(|b| b.is_ascii_alphabetic());
+    alpha && (token.len() == 2 || (token.len() == 3 && crate::metadata::two_letter_code(token).is_some_and(|c| c != token)))
+}
+
 /// Case-insensitive order in which a run of digits compares by its value, so `Episode 2` sorts
 /// before `Episode 10`.
 pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
@@ -310,6 +367,21 @@ pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_subtitle_file_is_read_by_its_name() {
+        let f = |name| sidecar_of("Alien (1979)", name);
+        assert_eq!(f("Alien (1979).srt").map(|s| (s.codec, s.lang)), Some(("srt".into(), String::new())));
+        let en = f("Alien (1979).en.forced.ass").unwrap();
+        assert_eq!((en.codec.as_str(), en.lang.as_str(), en.forced, en.sdh), ("ass", "en", true, false));
+        let de = f("Alien (1979).ger.SDH.srt").unwrap();
+        assert_eq!((de.lang.as_str(), de.sdh), ("ger", true));
+        assert_eq!(f("Alien (1979).Commentary.srt").unwrap().title, "Commentary");
+        assert_eq!(f("Alien (1979).mkv"), None, "not a subtitle");
+        assert_eq!(f("Alien (1979) 2.srt"), None, "another video's subtitle");
+        assert_eq!(f("Alien (1979).sup"), None, "an image subtitle is not offered");
+        assert_eq!(f("Alien (1979).the.srt").unwrap().lang, "", "a word is not a language");
+    }
 
     fn tree(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("plx-local-{name}-{}", std::process::id()));

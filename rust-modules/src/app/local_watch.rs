@@ -69,17 +69,24 @@ pub(crate) fn play(
         return;
     }
     plx_media::route::clear_url(ps);
-    if let Err(e) = plx_media::localplay::prepare(ps, path) {
-        plx_base::eventlog::log(&format!("local play: refused: {e}"));
-        super::toast::raise(e.message());
-        return;
-    }
+    let probe = match plx_media::localplay::prepare(ps, path) {
+        Ok(probe) => probe,
+        Err(e) => {
+            plx_base::eventlog::log(&format!("local play: refused: {e}"));
+            super::toast::raise(e.message());
+            return;
+        }
+    };
     // The probe just read this file, so the size is a cached stat away.
     let size = std::fs::metadata(path).map_or(0, |m| m.len());
     let resume_ms = if from_start { 0 } else { local_progress::resume_ms(path, size) };
     begin(path.to_path_buf(), size);
+    // The subtitles the track menu offers: the file's own tracks and the files beside it.
+    let item = plx_media::localplay::playing_item(path, &probe, &plx_data::local::sidecars(path));
     super::playback::start_playback(ps, pa, resume_ms.saturating_mul(1_000_000) as i64,
         super::playback::Origin::Here, plx_appkit::player_hud::LINGER_MS, ret, pages, bridge);
+    // After the start: a new play retires the previous item's store as it begins.
+    bridge.metadata_mut().run(plx_data::stores::metadata::MetadataCmd::InstallPlaying(Some(item)));
 }
 
 /// The item menu's rows for a local video (`ItemMenuKind::Local`): its `rk` is the file's path.

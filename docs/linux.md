@@ -72,6 +72,13 @@ Unwatched**. The records are this machine's own — `$PLXNATIVE_RUNTIME_DIR/stat
 (by default `~/.local/state/plxnative/state/`), keyed by the file's path and size, so a file
 replaced by another of the same name starts fresh.
 
+## Subtitles
+
+The player's subtitle menu lists the file's own subtitle tracks (text and image) and the subtitle
+files beside it: `<video name>.srt` (or `.ass`, `.ssa`, `.vtt`), optionally with a language and
+flags in between — `Film.en.srt`, `Film.ger.forced.srt`, `Film.en.sdh.ass`. ASS/SSA keeps its
+styling. Tracks in the interface's language are listed first. Subtitles start Off.
+
 ## What plays
 
 Video: H.264, HEVC, AV1 and VP9, each when this machine's GStreamer has a decoder for it.
@@ -82,6 +89,7 @@ build draws the toasts a television would show) and written to the event log.
 
 ## What does not work yet
 
-- No external subtitles, no HDMI-CEC remote.
+- No HDMI-CEC remote yet, and the player's audio menu is empty for a local file (the first playable
+  track plays; switching tracks is still to come).
 - Video is copied to the GPU as RGBA each frame, scaled to fit 1920×1080 first: fine for 1080p on a
   PC, not yet measured on a small ARM board.

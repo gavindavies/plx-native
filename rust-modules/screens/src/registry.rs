@@ -1883,7 +1883,9 @@ where
             AppArg::ItemMenu(arg) => Box::new(crate::item_menu::ItemMenuScreen::new(entry, arg.clone())),
             AppArg::PlayerOverlay(arg) => Box::new(
                 crate::player::overlay::PlayerOverlayScreen::new_with(
-                    H::session(cx), H::metadata(cx), entry, arg.kind, H::subtitle_search(cx).is_some()),
+                    H::session(cx), H::metadata(cx), entry, arg.kind,
+                    // The search asks the playing item's SERVER; a local file has none.
+                    H::subtitle_search(cx).is_some() && !plx_media::localfile::is_file_url(&plx_media::route::url(H::session(cx)))),
             ),
             AppArg::AltSources(arg) => Box::new(
                 crate::alt_sources::AltSourcesScreen::new(entry, arg.clone(), H::metadata(cx)),
