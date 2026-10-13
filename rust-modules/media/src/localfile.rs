@@ -1,9 +1,6 @@
 //! **The local-file media plane: a file on this machine's own disk, read by byte offset.**
 //!
-//! The third source under `ff.rs`'s AVIO, beside `plx_net::stream`'s plaintext socket and
-//! [`crate::curlio`]'s HTTPS transfer, for the Linux build that plays a library on its own disk.
-//! It is the simplest of the three by construction: positional reads (`pread(2)`) on one open
-//! descriptor, so a seek moves an offset and reopens nothing, and there is no connection to lose,
+//! The one source under `ff.rs`'s AVIO: positional reads (`pread(2)`) on one open descriptor, so a seek moves an offset and reopens nothing, and there is no connection to lose,
 //! heal or wake. Teardown needs no transport-specific interrupt either: a local read returns in
 //! milliseconds, and the demuxer re-checks the AU lane's abort flag around every one.
 //!

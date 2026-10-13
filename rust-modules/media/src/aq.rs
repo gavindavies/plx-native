@@ -68,8 +68,8 @@ pub unsafe fn au_fields(n: *mut AuNode) -> (c_int, c_int, i64, c_int, *const u8)
     )
 }
 
-/// allocate + initialize a boxed queue with an explicit backpressure byte cap (mirrors
-/// `stream::http_stream_boxed`; the two-lane feed gives each ES its own cap).
+/// allocate + initialize a boxed queue with an explicit backpressure byte cap (the two-lane feed
+/// gives each ES its own cap).
 pub fn aq_new(cap: c_long) -> Box<AuQueue> {
     let mut q: Box<AuQueue> = Box::new(unsafe { std::mem::zeroed() });
     aq_init_cap(&mut *q, cap);

@@ -2616,7 +2616,6 @@ mod style_page_tests {
 
     fn teardown(ps: &plx_media::playback::PlaybackSession) {
         reset_player_control_for_test(ps);
-        plx_plex::plex::reset_servers_for_test();
     }
 
 
@@ -2780,7 +2779,6 @@ mod language_page_tests {
 
     fn teardown(ps: &plx_media::playback::PlaybackSession) {
         reset_player_control_for_test(ps);
-        plx_plex::plex::reset_servers_for_test();
     }
 
     fn pgs(mut s: metadata::Stream) -> metadata::Stream {
@@ -3273,7 +3271,6 @@ mod motion_tests {
 
     fn teardown(ps: &plx_media::playback::PlaybackSession) {
         reset_player_control_for_test(ps);
-        plx_plex::plex::reset_servers_for_test();
     }
 
     fn subs() -> Vec<metadata::Stream> {

@@ -10,7 +10,7 @@
 //! path or a token) — and writes two kinds of line:
 //!
 //! ```text
-//! imgtrace: k=1a2b3c4d shown n=1 frames=9 ms=141 probes=4 maxgap=5f unknown=1 moving=0 why=declined_new:1,loading:2 claim=+1f/+16ms worker=+17ms disk=hit decode=+29ms handoff=+3f draw=+9f after=first
+//! imgtrace: k=1a2b3c4d shown n=1 frames=9 ms=141 probes=4 maxgap=5f unknown=1 moving=0 why=declined_new:1,loading:2 claim=+1f/+16ms worker=+17ms decode=+29ms handoff=+3f draw=+9f after=first
 //! imgtrace: k=1a2b3c4d HIDDEN n=1 shown_frames=212 gap=1f cause=grant_epoch
 //! ```
 //!
@@ -74,7 +74,6 @@ struct Tile {
     why: Vec<(&'static str, u32)>,
     claim: Option<(u64, u64)>,
     worker_ms: Option<u64>,
-    disk: Option<&'static str>,
     decoded_ms: Option<u64>,
     handoff: Option<u64>,
     /// Frame + ms the current shown episode began, if the last probe had a texture.
@@ -152,8 +151,8 @@ impl Tracker {
                 let old = std::mem::take(t);
                 *t = Tile { key, last_probe: frame, loss: old.loss, episodes: old.episodes, ..Tile::default() };
                 if fresh {
-                    (t.claim, t.worker_ms, t.disk, t.decoded_ms, t.handoff) =
-                        (old.claim, old.worker_ms, old.disk, old.decoded_ms, old.handoff);
+                    (t.claim, t.worker_ms, t.decoded_ms, t.handoff) =
+                        (old.claim, old.worker_ms, old.decoded_ms, old.handoff);
                 }
                 self.emit(&mut out, line);
             }
@@ -162,7 +161,7 @@ impl Tracker {
                 let rel_f = |f: Option<u64>| f.map_or("-".to_string(), |f| format!("+{}f", f.saturating_sub(f0)));
                 let rel_ms = |m: Option<u64>| m.map_or("-".to_string(), |m| format!("+{}ms", m.saturating_sub(m0)));
                 let line = format!(
-                    "imgtrace: k={:08x} shown n={} frames={} ms={} probes={} maxgap={}f unknown={} moving={} why={} claim={}/{} worker={} disk={} decode={} handoff={} draw=+{}f after={}",
+                    "imgtrace: k={:08x} shown n={} frames={} ms={} probes={} maxgap={}f unknown={} moving={} why={} claim={}/{} worker={} decode={} handoff={} draw=+{}f after={}",
                     id as u32,
                     t.episodes + 1,
                     frame.saturating_sub(f0),
@@ -177,7 +176,6 @@ impl Tracker {
                     rel_f(t.claim.map(|c| c.0)),
                     rel_ms(t.claim.map(|c| c.1)),
                     rel_ms(t.worker_ms),
-                    t.disk.unwrap_or("-"),
                     rel_ms(t.decoded_ms),
                     rel_f(t.handoff),
                     frame.saturating_sub(f0),
@@ -223,16 +221,12 @@ impl Tracker {
         let t = self.tiles.entry(id).or_default();
         t.claim = Some((frame, ms));
         t.worker_ms = None;
-        t.disk = None;
         t.decoded_ms = None;
         t.handoff = None;
     }
 
     pub(super) fn worker_start(&mut self, slot: usize, gen: u32, ms: u64) {
         if let Some(t) = self.bound(slot, gen) { t.worker_ms = Some(ms); }
-    }
-    pub(super) fn disk(&mut self, slot: usize, gen: u32, what: &'static str) {
-        if let Some(t) = self.bound(slot, gen) { t.disk.get_or_insert(what); }
     }
     pub(super) fn decoded(&mut self, slot: usize, gen: u32, ms: u64) {
         if let Some(t) = self.bound(slot, gen) { t.decoded_ms = Some(ms); }
@@ -321,10 +315,6 @@ pub(super) fn worker_start(slot: usize, gen: u32) {
     if !armed() { return; }
     with(|t, _, ms| t.worker_start(slot, gen, ms));
 }
-pub(super) fn disk(slot: usize, gen: u32, what: &'static str) {
-    if !armed() { return; }
-    with(|t, _, _| t.disk(slot, gen, what));
-}
 pub(super) fn decoded(slot: usize, gen: u32) {
     if !armed() { return; }
     with(|t, _, ms| t.decoded(slot, gen, ms));
@@ -353,7 +343,6 @@ mod tests {
         assert!(t.probe(7, 70, false, Gate::Open, 11, 1016).is_empty());
         t.claim(7, 3, 1, 11, 1016);
         t.worker_start(3, 1, 1020);
-        t.disk(3, 1, "hit");
         t.decoded(3, 1, 1040);
         t.handoff(3, 1, 13);
         assert!(t.probe(7, 70, false, Gate::Open, 13, 1050).is_empty());
@@ -361,7 +350,7 @@ mod tests {
         assert_eq!(l.len(), 1);
         assert_eq!(
             l[0],
-            "imgtrace: k=00000007 shown n=1 frames=4 ms=66 probes=3 maxgap=2f unknown=1 moving=0 why=- claim=+1f/+16ms worker=+20ms disk=hit decode=+40ms handoff=+3f draw=+4f after=first"
+            "imgtrace: k=00000007 shown n=1 frames=4 ms=66 probes=3 maxgap=2f unknown=1 moving=0 why=- claim=+1f/+16ms worker=+20ms decode=+40ms handoff=+3f draw=+4f after=first"
         );
         // steady state writes nothing
         assert!(t.probe(7, 70, true, Gate::Open, 15, 1082).is_empty());

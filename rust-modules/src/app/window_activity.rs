@@ -25,18 +25,10 @@ impl WindowActivity {
         self.active && requested
     }
 
-    pub(crate) fn begin_present(&self, playing: bool) {
-        if self.first_frame {
-            plx_telemetry::telemetry::window::record(plx_telemetry::telemetry::window::Observation::step(
-                plx_telemetry::telemetry::window::Stage::FirstFrame, Some(playing)));
-        }
-    }
-
-    pub(crate) fn presented(&mut self, playing: bool) {
+    pub(crate) fn presented(&mut self) {
         if self.first_frame {
             self.first_frame = false;
-            plx_telemetry::telemetry::window::record(plx_telemetry::telemetry::window::Observation::step(
-                plx_telemetry::telemetry::window::Stage::FirstSwapComplete, Some(playing)));
+            plx_base::eventlog::log("window: first frame presented");
         }
     }
 }

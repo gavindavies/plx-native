@@ -289,9 +289,9 @@ macro_rules! dynlib {
             }
         }
     };
-    // `dynlib! { pub curl: [...] { ... } }`: the table's module, its cells and its wrappers are
-    // `pub`, for a layer crate whose callers in another crate bind the same library (`plx_net`'s
-    // `net::curl_easy_*`, which `curlio` calls). Nothing else about the expansion differs.
+    // `dynlib! { pub name: [...] { ... } }`: the table's module, its cells and its wrappers are
+    // `pub`, for a layer crate whose callers in another crate bind the same library. Nothing else
+    // about the expansion differs.
     (
         $(#[$meta:meta])*
         pub $modname:ident : [ $($cand:literal),+ $(,)? ] {

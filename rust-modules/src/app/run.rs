@@ -256,9 +256,6 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
     // inactive window would not have presented either way. (`should_present` is deliberately not
     // asked: it takes-and-clears the damage the deferred frame still needs.)
     fr.deferred = !fr.present && plx_gfx::gfx::snapshot_pending() && app.window_activity.allow_present(true);
-    if fr.present {
-        app.window_activity.begin_present(fr.player);
-    }
     // ---- step 9's UPLOAD, on the presenting side of the decision ---------------------
     //
     // The render cache's upload step under the frame budget (§3.3 step 9, §10: "a frame that
@@ -367,7 +364,7 @@ unsafe fn present_and_swap(
             plx_platform::tv::window::frame_probe_request();
             SDL_GL_SwapWindow(app.win);
         }
-        app.window_activity.presented(fr.player);
+        app.window_activity.presented();
         // One increment, then nothing: re-ask EGL for the back buffer's AGE after real
         // presents have happened. The boot reading is 0 by construction. See `egl.rs`.
         plx_gfx::egl::late_probe();
