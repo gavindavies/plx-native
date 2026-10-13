@@ -17,6 +17,11 @@
 //!   of a finished film again keeps both the tick and the new place.
 //!
 //! [`revision`] moves on every change, so a screen drawing the marks redraws when one lands.
+//!
+//! Beside each place the file keeps the viewer's own **choices** for that file ([`Choices`]: the
+//! audio track, the subtitle and its timing), Kodi-style, so reopening a film plays it the way it
+//! was left. They are a separate map, never folded into the watch rules: marking a film unwatched
+//! forgets where it was, not which language it is watched in.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -43,13 +48,44 @@ pub struct Progress {
     pub size: u64,
 }
 
+/// The subtitle a file was left on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SubtitleChoice {
+    Off,
+    /// The file's own subtitle track, by its position among them (file order).
+    Track(u32),
+    /// A subtitle file beside it, by file name.
+    File(String),
+}
+
+/// What the viewer chose for one file. `None` is "never chosen": the file's own default then.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Choices {
+    /// The audio track, by its position among the file's audio tracks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<SubtitleChoice>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub subtitle_offset_ms: i64,
+    /// The file's size when chosen, as [`Progress::size`].
+    pub size: u64,
+}
+
+fn is_zero(v: &i64) -> bool {
+    *v == 0
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Disk {
     version: u32,
     items: HashMap<String, Progress>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    choices: HashMap<String, Choices>,
 }
 
 static ITEMS: Mutex<Option<HashMap<String, Progress>>> = Mutex::new(None);
+static CHOICES: Mutex<Option<HashMap<String, Choices>>> = Mutex::new(None);
 static REVISION: AtomicU64 = AtomicU64::new(0);
 /// Serializes the file writes, so an older snapshot can never land after a newer one.
 static WRITER: Mutex<()> = Mutex::new(());
@@ -66,22 +102,23 @@ fn key(path: &Path) -> String {
 /// unreadable file is an empty library, logged when it is not simply absent.
 pub fn load() {
     let _block = plx_base::task::assert_may_block(const { &plx_base::task::BlockingLabel::new("local progress load") });
-    let items = match std::fs::read(file()) {
+    let disk = match std::fs::read(file()) {
         Ok(bytes) => match serde_json::from_slice::<Disk>(&bytes) {
-            Ok(d) => d.items,
+            Ok(d) => d,
             Err(e) => {
                 plx_base::eventlog::log(&format!("local progress: {FILE_NAME} unreadable ({e}); starting empty"));
-                HashMap::new()
+                Disk::default()
             }
         },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Disk::default(),
         Err(e) => {
             plx_base::eventlog::log(&format!("local progress: {FILE_NAME} unreadable ({e}); starting empty"));
-            HashMap::new()
+            Disk::default()
         }
     };
-    plx_base::eventlog::log(&format!("local progress: {} record(s)", items.len()));
-    *ITEMS.lock().unwrap_or_else(|e| e.into_inner()) = Some(items);
+    plx_base::eventlog::log(&format!("local progress: {} record(s), {} with choices", disk.items.len(), disk.choices.len()));
+    *ITEMS.lock().unwrap_or_else(|e| e.into_inner()) = Some(disk.items);
+    *CHOICES.lock().unwrap_or_else(|e| e.into_inner()) = Some(disk.choices);
     REVISION.fetch_add(1, Relaxed);
 }
 
@@ -131,6 +168,26 @@ pub fn set_watched(path: &Path, size: u64, watched: bool) {
     put(path, Progress { offset_ms: 0, duration_ms, watched, size });
 }
 
+/// The viewer's choices for the file now at `path` (`size` bytes), when any were made.
+pub fn choices(path: &Path, size: u64) -> Option<Choices> {
+    let choices = CHOICES.lock().unwrap_or_else(|e| e.into_inner());
+    let c = choices.as_ref()?.get(&key(path))?.clone();
+    (size == 0 || c.size == 0 || c.size == size).then_some(c)
+}
+
+/// Keep the viewer's choices for `path`. Saved like a place: on a worker, the whole file.
+pub fn set_choices(path: &Path, choices: Choices) {
+    {
+        let mut all = CHOICES.lock().unwrap_or_else(|e| e.into_inner());
+        let all = all.get_or_insert_with(HashMap::new);
+        if all.get(&key(path)) == Some(&choices) {
+            return;
+        }
+        all.insert(key(path), choices);
+    }
+    save();
+}
+
 fn put(path: &Path, p: Progress) {
     {
         let mut items = ITEMS.lock().unwrap_or_else(|e| e.into_inner());
@@ -157,6 +214,7 @@ fn save() {
         let disk = Disk {
             version: 1,
             items: ITEMS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default(),
+            choices: CHOICES.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default(),
         };
         let json = match serde_json::to_vec_pretty(&disk) {
             Ok(j) => j,
@@ -232,6 +290,10 @@ mod tests {
         assert_eq!(resume_ms(&film, 10), 0);
         set_watched(&film, 10, false);
         assert_eq!(get(&film, 10), None, "unwatched and unstarted is no record at all");
+        let chosen = Choices { audio: Some(1), subtitle: Some(SubtitleChoice::File("film.de.srt".into())), subtitle_offset_ms: -500, size: 10 };
+        set_choices(&film, chosen.clone());
+        assert_eq!(choices(&film, 10), Some(chosen), "choices outlive the watch record");
+        assert_eq!(choices(&film, 11), None, "…for this file only");
         plx_base::paths::redirect_persistent_state_root_for_test(None);
     }
 }

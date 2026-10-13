@@ -78,12 +78,19 @@ The player's audio button lists every audio track in the file, with its language
 starts on its first track the player can decode; picking another switches to it in place, where it
 was. A track it cannot decode (WMA, for one) is refused with a message.
 
+## Remembered per file
+
+Each file keeps the audio track, subtitle and subtitle timing you last chose for it, and plays with
+them the next time it is opened (in the same `local-progress.json`). A file you never changed
+starts on its first playable audio track with subtitles off.
+
 ## Subtitles
 
 The player's subtitle menu lists the file's own subtitle tracks (text and image) and the subtitle
 files beside it: `<video name>.srt` (or `.ass`, `.ssa`, `.vtt`), optionally with a language and
 flags in between — `Film.en.srt`, `Film.ger.forced.srt`, `Film.en.sdh.ass`. ASS/SSA keeps its
-styling. Tracks in the interface's language are listed first. Subtitles start Off.
+styling. Tracks in the interface's language are listed first. Subtitles start Off unless you chose one
+for that file before.
 
 ## What plays
 
