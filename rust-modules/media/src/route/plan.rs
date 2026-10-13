@@ -2581,11 +2581,20 @@ pub(super) fn pick_dp_audio_pref(
 }
 
 pub(super) fn audio_direct_plays(mode: DirectPlayMode, codec: &str, channels: i64) -> bool {
-    if mode == DirectPlayMode::Forced {
+    // The Linux build plays what its GStreamer sink decodes, in FFmpeg's codec names (its tracks
+    // come from the file, `localplay::playing_item`); there is no server to convert the rest.
+    #[cfg(feature = "gst")]
+    let direct = {
+        let _ = (mode, channels);
+        crate::player::engine::audio_payload_codec(codec).is_some()
+    };
+    #[cfg(not(feature = "gst"))]
+    let direct = if mode == DirectPlayMode::Forced {
         plx_plex::plex::DP_AUDIO_CODECS.split(',').any(|c| c.eq_ignore_ascii_case(codec))
     } else {
         plx_plex::plex::is_dp_audio_track(codec, channels)
-    }
+    };
+    direct
 }
 
 #[cfg(test)]

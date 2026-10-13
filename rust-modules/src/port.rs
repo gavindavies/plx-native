@@ -8,8 +8,10 @@ use std::os::raw::{c_char, c_int};
 
 #[cfg(all(not(feature = "hostsim"), not(test)))]
 const SINK: &dyn plx_platform::tv::sink::VideoSink = &plx_media::player::ffi::StarfishSink;
-#[cfg(feature = "hostsim")]
+#[cfg(all(feature = "hostsim", not(feature = "gst")))]
 const SINK: &dyn plx_platform::tv::sink::VideoSink = &plx_media::player::ffi_host::HostSink;
+#[cfg(feature = "gst")]
+const SINK: &dyn plx_platform::tv::sink::VideoSink = &plx_media::player::gst_sink::GstSink;
 #[cfg(all(not(feature = "hostsim"), test))]
 const SINK: &dyn plx_platform::tv::sink::VideoSink = &plx_platform::tv::sink::NoSink;
 
@@ -23,7 +25,10 @@ static PORT: plx_platform::tv::Port = plx_platform::tv::Port {
     system_locale: plx_platform::webos::system_locale,
     go_home: plx_platform::webos::go_home,
     poll_home: plx_platform::webos::poll_home,
+    #[cfg(not(feature = "gst"))]
     deliver_toast: plx_platform::webos::toast::deliver,
+    #[cfg(feature = "gst")]
+    deliver_toast: crate::app::toast::deliver,
     bind_window: plx_platform::webos::bind_window,
     grab_surface: crate::system::sys_grab_wayland,
     release_surface: crate::system::sys_release_wayland,

@@ -188,6 +188,8 @@ fn content_request(request: &plx_screens::registry::ContentReq) -> Result<Value,
         }}),
         // Full playback still needs its own controlled bootstrap and resource/result contract.
         ContentReq::Play { .. } => return Err("unsupported controlled playback effect"),
+        #[cfg(feature = "gst")]
+        ContentReq::LocalOpen(_) | ContentReq::LocalPlay(_) => return Err("unsupported controlled local library effect"),
     })
 }
 

@@ -186,6 +186,10 @@ pub(crate) unsafe fn run(app: &mut App) {
             let _ = plx_base::diag::spans::take();
             continue;
         }
+        #[cfg(feature = "gst")]
+        crate::app::local_launch::tick(app, fr.now);
+        #[cfg(feature = "gst")]
+        crate::app::local_watch::tick(app, fr.now);
         plx_base::diag::spans::span("pump", || unsafe { playback_tick(app, fr) });
         clock_and_press(app, fr);
         plx_base::diag::spans::span("land", || unsafe { land_results(app, fr) });
@@ -563,6 +567,11 @@ unsafe fn present_and_swap(
         #[cfg(feature = "hostsim")]
         if fr.player {
             plx_media::player::sim_video::composite_under();
+        }
+        // The Linux build's decoded picture, under the UI the same way (`player::gst_sink`).
+        #[cfg(feature = "gst")]
+        if fr.player {
+            plx_media::player::gst_sink::composite_under();
         }
         // Before the swap, never after: the back buffer is undefined once presented.
         // A dump decides here whether this frame is written (`dev::framedump`); otherwise the
@@ -1596,6 +1605,9 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
         // the player (back to the detail page or home, whichever is behind), instead of freezing
         // on the last frame.
         if playback_may_run(app) && super::bridge::player(&app.pages).is_some() && plx_media::player::ended() {
+            // A local file's record is settled as finished (`finish_playback` clears the flag).
+            #[cfg(feature = "gst")]
+            super::local_watch::note_ended();
             let handed_off_to_up_next = finish_playback(&mut app.player.session,
                 &mut app.adapters.player,
                 &mut app.refresh_hubs_at,
@@ -2211,6 +2223,8 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         app.diagnostics.update(&app.player.session, fr.now);
         // …and the lab upload's toast, which expires on a clock rather than a spring.
         crate::lab::update(fr.now);
+        #[cfg(feature = "gst")]
+        super::toast::update(fr.now);
         #[cfg(feature = "threadcheck")]
         plx_ui::runtime_warning::update(app.boot_initial.is_some());
         // The Up Next countdown and the control row's focus pop are the PLAYER INSTANCE's and
@@ -2608,6 +2622,8 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                                                      // The lab upload read-out, over everything, on every route — including the
                                                      // player, where the two branches above diverge and this one must not.
                     crate::lab::draw(app.diagnostics.frame_if_shown());
+                    #[cfg(feature = "gst")]
+                    super::toast::draw();
                     #[cfg(feature = "threadcheck")]
                     plx_ui::runtime_warning::draw(app.boot_initial.is_some());
                 });
@@ -2705,6 +2721,8 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
                 AppArg::Content(plx_screens::registry::ContentArg::Collection(_)) =>
                     crate::focusprobe::Screen::Collection,
                 AppArg::Search => crate::focusprobe::Screen::Search,
+                #[cfg(feature = "gst")]
+                AppArg::Local(_) => crate::focusprobe::Screen::Local,
                 // The same words the heartbeat's `overlay=` uses, and — since phase 9 — from the
                 // same place: the SURFACE that is up. There is no second table; see
                 // `heartbeat_word_tests::focusprobe_player_overlay_delegates_to_the_shared_overlay_word_function`.

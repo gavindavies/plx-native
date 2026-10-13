@@ -3,7 +3,8 @@
 //! The demuxer only ever sees the streams INSIDE the container it opened, so a sidecar was
 //! unreachable on direct play and the track menu hid it (`docs/parity-gaps.md`, "Sidecar
 //! (external) subtitle streams are unreachable on the direct-play path"). This is the missing
-//! producer: fetch the whole file from PMS once. Plain captions answer [`active`]; ASS/SSA
+//! producer: fetch the whole file from PMS once (or, for the Linux build's local files, read it
+//! from disk: [`select_file`]). Plain captions answer [`active`]; ASS/SSA
 //! keeps its complete script for [`ass_source`] and the native styled renderer. Styles,
 //! overlapping events, drawings and embedded fonts must never pass through plain-text parsing.
 //!
@@ -119,6 +120,17 @@ pub fn select(server: plx_plex::plex::ServerId, stream_id: i64, key: String, cod
         client.sidecar_subtitle_detailed(key, codec)
             .map_err(|why| super::log(&format!("sidecar: fetch failed: {why}")))
             .ok()
+    });
+}
+
+/// Select a subtitle FILE on this machine's disk (the Linux build's local library: `key` is its
+/// path). The same store and the same worker as a server's sidecar, reading the file instead.
+/// MAIN THREAD.
+#[cfg(feature = "gst")]
+pub fn select_file(stream_id: i64, key: String, codec: String) {
+    let server = plx_plex::plex::ServerId::from_raw(plx_data::local::ART_SRV);
+    select_with_fetch(server, stream_id, key, codec, |_, path, _| {
+        std::fs::read(path).map_err(|why| super::log(&format!("sidecar: could not read the file ({why})"))).ok()
     });
 }
 

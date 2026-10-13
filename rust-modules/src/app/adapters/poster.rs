@@ -617,6 +617,17 @@ fn built_key(srv: ServerId, path: &str, w: c_int, h: c_int, png: bool) -> Option
     if path.is_empty() {
         return None;
     }
+    // Local library artwork (the Linux build): no server and no transcoder — the key names the
+    // image file's token and the box it is decoded into.
+    #[cfg(feature = "gst")]
+    if srv.raw() == plx_data::local::ART_SRV {
+        // SAFETY: as below — main-thread only, consumed before the memo is touched again.
+        let memo = unsafe {
+            (*std::ptr::addr_of_mut!(KEY_MEMO)).get_or_insert_with(|| KeyMemo { map: std::collections::HashMap::new() })
+        };
+        let n = plx_base::surface::render_scale() as c_int;
+        return Some(memo.get_or_build(srv.raw(), path, w, h, png, 0, || local_art_key(path, w * n, h * n)));
+    }
     let c = plx_plex::plex::client_for(srv)?;
     // SAFETY: main-thread only (every caller is a draw path), and the borrow is consumed by the
     // caller before the memo can be touched again; the `'static` is that discipline, not a fact.
@@ -1912,6 +1923,23 @@ fn bake_fan(
     fan::bake(&mut WorkerFanIo { client, srv, rk, cache_gen, disk, token_gen, profile })
 }
 
+/// The store key of a local artwork token decoded into a `w`×`h` box (device pixels).
+#[cfg(feature = "gst")]
+fn local_art_key(token: &str, w: c_int, h: c_int) -> String {
+    format!("local:{w}x{h}:{token}")
+}
+
+/// Read and decode the image a [`local_art_key`] names, fitted to its box. Off the frame thread.
+#[cfg(feature = "gst")]
+fn load_local_art(key: &str) -> Option<(u32, u32, Vec<u8>)> {
+    let rest = key.strip_prefix("local:")?;
+    let (bx, token) = rest.split_once(':')?;
+    let (bw, bh) = bx.split_once('x')?;
+    let path = plx_data::local::art_path(token)?;
+    let bytes = std::fs::read(&path).ok()?;
+    img::img_decode_fit(&bytes, bw.parse().ok()?, bh.parse().ok()?)
+}
+
 /// BACKGROUND worker: claim a request, read disk or fetch and decode off-lock, publish pixels.
 /// RAM/GPU residency stays bounded independently of the number of persistent images.
 fn poster_worker() {
@@ -1936,9 +1964,25 @@ fn poster_worker() {
         let mut px = std::ptr::null_mut();
         let mut stale = None;
         let mut transient = false;
+        #[cfg(feature = "gst")]
+        if srv.raw() == plx_data::local::ART_SRV {
+            match load_local_art(&key_s) {
+                Some((lw, lh, rgba)) => {
+                    px = img::img_malloc_copy(&rgba, || format!("{lw}x{lh} local artwork"));
+                    (w, h) = (lw as c_int, lh as c_int);
+                }
+                None => transient = false,
+            }
+        }
+        #[cfg(feature = "gst")]
+        let local = srv.raw() == plx_data::local::ART_SRV;
+        #[cfg(not(feature = "gst"))]
+        let local = false;
         // Revoked servers cannot use disk as a route around sign-out. Keep this client snapshot
         // for both identity and transport; a later registry repoint must not mix the two.
-        if let Some(client) = plx_plex::plex::client_for(srv)
+        if local {
+            // Settled above.
+        } else if let Some(client) = plx_plex::plex::client_for(srv)
             .filter(|c| cache_gen == plx_platform::imgcache::generation() && c.token_gen() == token_gen)
         {
             if let Some((rk, stamp)) = fan::parse_fan_key(&key_s) {
@@ -4130,7 +4174,7 @@ mod tests {
                 let k = key(n);
                 g.slots.iter().any(|s| s.state == P_READY && key_bytes(s) == k.as_bytes())
             };
-            for &n in showing.iter().filter(|n| on_screen.contains(n)) {
+            for &n in showing.iter().filter(|&&n| on_screen.contains(&n)) {
                 if !is_ready(&g, n) {
                     lost.push((frame, n));
                 }

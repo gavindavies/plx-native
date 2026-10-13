@@ -105,6 +105,21 @@ const OFF_STREAM_TIME_BASE: usize = 32;
 const OFF_STREAM_METADATA: usize = 72;
 #[cfg(target_pointer_width = "64")]
 const OFF_STREAM_METADATA: usize = 80;
+/// `AVStream.disposition` (the `AV_DISPOSITION_*` flags), after the 8-aligned `nb_frames`: which
+/// track a local file marks default, forced or for the hard of hearing (`probe_local`).
+#[cfg(target_pointer_width = "32")]
+const OFF_STREAM_DISPOSITION: usize = 56;
+#[cfg(target_pointer_width = "64")]
+const OFF_STREAM_DISPOSITION: usize = 64;
+const AV_DISPOSITION_DEFAULT: c_int = 0x0001;
+const AV_DISPOSITION_FORCED: c_int = 0x0040;
+const AV_DISPOSITION_HEARING_IMPAIRED: c_int = 0x0080;
+/// `AVStream.avg_frame_rate`, directly after `metadata` — the frame rate a local file declares when
+/// its demuxer leaves `codecpar.framerate` unset (`probe_local`).
+#[cfg(target_pointer_width = "32")]
+const OFF_STREAM_AVG_FRAME_RATE: usize = 76;
+#[cfg(target_pointer_width = "64")]
+const OFF_STREAM_AVG_FRAME_RATE: usize = 88;
 /// `AVFormatContext.duration`, in AV_TIME_BASE units. By offset — see the struct's closing note.
 #[cfg(target_pointer_width = "32")]
 const OFF_FMT_DURATION: usize = 64;
@@ -659,6 +674,24 @@ unsafe fn stream_name(s: *mut AVStream) -> String {
     String::new()
 }
 
+/// One tag of the stream's own dictionary (`language`, `title`, ...), trimmed; empty when absent.
+unsafe fn stream_tag(s: *mut AVStream, key: &std::ffi::CStr) -> String {
+    let dict = *((s as *const u8).add(OFF_STREAM_METADATA) as *const *const AVDictionary);
+    if dict.is_null() {
+        return String::new();
+    }
+    let e = av_dict_get(dict, key.as_ptr(), std::ptr::null(), 0);
+    if e.is_null() || (*e).value.is_null() {
+        return String::new();
+    }
+    std::ffi::CStr::from_ptr((*e).value).to_string_lossy().trim().to_string()
+}
+
+#[inline]
+unsafe fn stream_disposition(s: *mut AVStream) -> c_int {
+    *((s as *const u8).add(OFF_STREAM_DISPOSITION) as *const c_int)
+}
+
 /// Every track's container name, by TYPE, in file order — the two lists
 /// `metadata::audio_ordinal` / `metadata::sub_render_ordinal` index into.
 ///
@@ -680,6 +713,11 @@ unsafe fn track_names(fmt: *mut AVFormatContext) -> (Vec<String>, Vec<String>) {
         }
     }
     (audio, subs)
+}
+
+#[inline]
+unsafe fn stream_avg_frame_rate(s: *mut AVStream) -> AVRational {
+    *((s as *const u8).add(OFF_STREAM_AVG_FRAME_RATE) as *const AVRational)
 }
 
 #[inline]
@@ -1472,6 +1510,117 @@ fn probe(url: &str) {
     }
 }
 
+/// One audio or subtitle track of a local file, as its container describes it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LocalTrack {
+    /// FFmpeg's codec name (`eac3`, `subrip`, `hdmv_pgs_subtitle`, ...).
+    pub codec: String,
+    /// The `language` tag — an ISO 639-2 code (`eng`) in Matroska and MP4; empty when untagged.
+    pub lang: String,
+    /// The track's own name ([`stream_name`]).
+    pub title: String,
+    pub channels: i32,
+    pub default: bool,
+    pub forced: bool,
+    pub sdh: bool,
+}
+
+/// What [`probe_local`] learned about a file on this machine's disk: everything the Load
+/// declaration needs, which for a Plex item comes from the server's decision instead.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LocalProbe {
+    /// FFmpeg's codec name of the video stream the demuxer will pick (`h264`, `hevc`, ...).
+    pub vcodec: String,
+    /// FFmpeg's codec name of the first audio stream, in file order, that the pipeline can carry
+    /// (`engine::audio_payload_codec` names it); empty when the file has none.
+    pub acodec: String,
+    /// Every audio stream's codec name, in file order — what the refusal names when none fits.
+    pub audio_codecs: Vec<String>,
+    /// Every audio and subtitle track, in file order: what the player's track menu lists.
+    pub audio: Vec<LocalTrack>,
+    pub subs: Vec<LocalTrack>,
+    pub width: u16,
+    pub height: u16,
+    /// Frames per second, 0 when the container does not say.
+    pub fps: f64,
+    pub duration_ns: i64,
+}
+
+/// Open a local file with the bundled libavformat (its one protocol is `file`) and read what a
+/// Load declaration needs. Blocking — call it off the frame thread.
+pub fn probe_local(path: &std::path::Path) -> Result<LocalProbe, String> {
+    if !ABI_OK.load(Ordering::Relaxed) {
+        return Err("FFmpeg is unavailable".into());
+    }
+    ensure_registered();
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| "path contains a NUL byte".to_string())?;
+    unsafe {
+        let mut fmt: *mut AVFormatContext = std::ptr::null_mut();
+        let r = avformat_open_input(&mut fmt, c.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut());
+        if r < 0 || fmt.is_null() {
+            return Err(format!("not a readable media file (avformat_open_input {r})"));
+        }
+        let result = (|| {
+            if avformat_find_stream_info(fmt, std::ptr::null_mut()) < 0 {
+                return Err("could not read the streams".to_string());
+            }
+            let vi = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, std::ptr::null_mut(), 0);
+            if vi < 0 {
+                return Err("no video stream".to_string());
+            }
+            let vcp = stream_codecpar(*(*fmt).streams.add(vi as usize));
+            let name = |id: c_int| std::ffi::CStr::from_ptr(avcodec_get_name(id)).to_string_lossy().into_owned();
+            let (mut audio, mut subs) = (Vec::new(), Vec::new());
+            for i in 0..(*fmt).nb_streams {
+                let st = *(*fmt).streams.add(i as usize);
+                let cp = stream_codecpar(st);
+                let disposition = stream_disposition(st);
+                let track = || LocalTrack {
+                    codec: name((*cp).codec_id),
+                    lang: stream_tag(st, c"language"),
+                    title: stream_name(st),
+                    channels: (*cp).ch_layout.nb_channels,
+                    default: disposition & AV_DISPOSITION_DEFAULT != 0,
+                    forced: disposition & AV_DISPOSITION_FORCED != 0,
+                    sdh: disposition & AV_DISPOSITION_HEARING_IMPAIRED != 0,
+                };
+                match (*cp).codec_type {
+                    AVMEDIA_TYPE_AUDIO => audio.push(track()),
+                    AVMEDIA_TYPE_SUBTITLE => subs.push(track()),
+                    _ => {}
+                }
+            }
+            let audio_codecs: Vec<String> = audio.iter().map(|t: &LocalTrack| t.codec.clone()).collect();
+            // FILE order, not codec preference: the first track is the one the file's author
+            // put first (usually the main mix), and a commentary must never win on its codec.
+            let acodec = audio_codecs
+                .iter()
+                .find(|a| crate::player::engine::audio_payload_codec(a).is_some())
+                .cloned()
+                .unwrap_or_default();
+            let as_fps = |r: AVRational| (r.num > 0 && r.den > 0).then(|| r.num as f64 / r.den as f64);
+            let fps = as_fps((*vcp).framerate)
+                .or_else(|| as_fps(stream_avg_frame_rate(*(*fmt).streams.add(vi as usize))))
+                .unwrap_or(0.0);
+            let clamp = |v: c_int| u16::try_from(v.max(0)).unwrap_or(u16::MAX);
+            Ok(LocalProbe {
+                vcodec: name((*vcp).codec_id),
+                acodec,
+                audio_codecs,
+                audio,
+                subs,
+                width: clamp((*vcp).width),
+                height: clamp((*vcp).height),
+                fps,
+                duration_ns: fmt_duration(fmt).max(0).saturating_mul(1_000),
+            })
+        })();
+        avformat_close_input(&mut fmt);
+        result
+    }
+}
+
 // ==== the demuxer (Phases B–D) ===================================================
 
 // whence values for the AVIO seek callback
@@ -1508,6 +1657,9 @@ enum Src {
     /// `curlio`'s registry instead of a pointer the engine holds. `curlio`'s module doc says why
     /// that is not the accident it looks like.
     Curl(Box<crate::curlio::CurlSource>),
+    /// A file on this machine's disk ([`crate::localfile`]): positional reads, so a seek moves
+    /// `AvioState::off` and reopens nothing, and nothing is ever in flight between two reads.
+    File(Box<crate::localfile::LocalFile>),
     Idle,
 }
 
@@ -1518,7 +1670,7 @@ impl Src {
         match self {
             Src::Socket { hs, .. } => plx_net::stream::http_body_receipt(*hs),
             Src::Curl(cs) => cs.body_receipt(),
-            Src::Idle => plx_net::stream::BodyReceipt {
+            Src::File(_) | Src::Idle => plx_net::stream::BodyReceipt {
                 ahead: 0,
                 finished: false,
                 stepped: false,
@@ -2231,7 +2383,7 @@ impl AvioState {
 
     fn transfer_finished(&self) -> bool {
         match &self.src {
-            Src::Idle => true,
+            Src::Idle | Src::File(_) => true,
             Src::Socket { hs, .. } => plx_net::stream::http_body_done(*hs),
             Src::Curl(cs) => cs.body_complete(),
         }
@@ -2247,7 +2399,7 @@ impl AvioState {
     /// redials on `Transport`. Do not raise CAP.
     fn drain_wire(&mut self) -> bool {
         const CAP: usize = 384 * 1024;
-        if matches!(self.src, Src::Idle) {
+        if matches!(self.src, Src::Idle | Src::File(_)) {
             return false;
         }
         if unsafe { crate::aq::aq_is_aborted(self.aq) } {
@@ -2277,7 +2429,7 @@ impl AvioState {
                     plx_net::stream::http_drain_available(*hs, &mut self.bounce[start..])
                 }
                 Src::Curl(cs) => cs.drain_available(&mut self.bounce[start..]),
-                Src::Idle => 0,
+                Src::File(_) | Src::Idle => 0,
             };
             if n > 0 {
                 self.bounce.truncate(start + n as usize);
@@ -2465,6 +2617,14 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
                     live_deadline,
                     checkpoint,
                 ),
+                Src::File(_) if dst.is_null() || n <= 0 => 0,
+                Src::File(f) => {
+                    let r = f.read_at(std::slice::from_raw_parts_mut(dst, n as usize), s.off);
+                    if r < 0 {
+                        crate::player::log(&format!("ff: local read FAILED at {} (errno {})", s.off, -r));
+                    }
+                    r
+                }
                 Src::Idle => return AVERROR_EOF,
             };
             let wake =
@@ -2668,6 +2828,8 @@ extern "C" fn seek_cb(op: *mut c_void, offset: i64, whence: c_int) -> i64 {
             // deliberate: bytes from the head of the file, delivered as though they were the bytes
             // at `target`, are corruption that looks like success.
             Src::Curl(cs) => cs.seek(target),
+            // Positional reads: the next one simply starts at `target`.
+            Src::File(_) => true,
             Src::Idle => false,
         };
         if let Some(cs) = hopped_to_tls {
@@ -3879,6 +4041,7 @@ fn hls_source_read(
             &mut plx_base::checkpoint::NoCheckpoint,
         ),
         Src::Curl(cs) => cs.read_until(dst, deadline, &mut plx_base::checkpoint::NoCheckpoint),
+        Src::File(_) => return Err(HlsExit::Failed("HLS over a local file")),
         Src::Idle => return Err(HlsExit::Failed("HLS source idle")),
     };
     // The wake used to interrupt a blocked body read is deliberately transport-shaped (EOF for
@@ -8150,6 +8313,12 @@ mod pre_audio_headroom_tests {
     }
 }
 
+/// What [`demux`] reads: a PMS part over http(s), or a file on this machine's disk.
+pub enum MediaInput {
+    Http { origin: plx_plex::plex::Origin, path: String },
+    File(std::path::PathBuf),
+}
+
 /// The demux thread body (spawned by `engine::start_bufferfeed`).
 ///
 /// Takes an [`Origin`](plx_plex::plex::Origin) rather than a `(host, port)` pair because **the scheme
@@ -8160,8 +8329,7 @@ mod pre_audio_headroom_tests {
 /// unused (fd = -1, published as `SHARED.hs_ptr`) when the origin turns out to be https.
 pub fn demux(
     off: &plx_base::task::OffFrame,
-    origin: plx_plex::plex::Origin,
-    path: String,
+    input: MediaInput,
     acodec: String,
     abr: Option<(crate::route::HlsAbrControl, crate::route::WorkerTicket)>,
     auto_original: Option<crate::route::AutoOriginalWatch>,
@@ -8185,15 +8353,21 @@ pub fn demux(
     let aq_p = aq.0; // VIDEO lane (also the AVIO abort ptr + EOF marker)
     let aqa_p = aqa.0; // AUDIO lane (es=2) — always a distinct queue on the ff (two-lane) path
     let hs_p = hs.0;
-    if path
+    // A local file reads through `localfile` and never touches the network or the HLS arm; an
+    // http(s) part keeps every line below exactly as it was.
+    let (origin, path, local) = match input {
+        MediaInput::Http { origin, path } => (Some(origin), path, None),
+        MediaInput::File(p) => (None, String::new(), Some(p)),
+    };
+    if let Some(origin) = origin.as_ref().filter(|_| path
         .split_once('?')
         .map_or(path.as_str(), |(plain, _)| plain)
         .to_ascii_lowercase()
-        .ends_with(".m3u8")
+        .ends_with(".m3u8"))
     {
         crate::player::log("hls: segmented demux start");
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            hls_demux(off, &origin, &path, &acodec, abr, aq_p, aqa_p, hs_p)
+            hls_demux(off, origin, &path, &acodec, abr, aq_p, aqa_p, hs_p)
         }));
         match outcome {
             Ok(Ok(())) | Ok(Err(HlsExit::Aborted)) => {}
@@ -8279,7 +8453,12 @@ pub fn demux(
     let mut original_since = std::time::Instant::now();
     // `base()` re-brackets a v6 host, which is what a URL needs; the plaintext arm hands the
     // `Origin` itself to `open_plain_progressive`, which dials its BARE `host()`.
-    let url = format!("{}{}", origin.base(), path); // delivery identity; may carry a token, never logged
+    // delivery identity; may carry a token, never logged
+    let url = match (&origin, &local) {
+        (_, Some(p)) => crate::localfile::file_url(p),
+        (Some(origin), None) => format!("{}{}", origin.base(), path),
+        (None, None) => unreachable!("a demux input is http(s) or a file"),
+    };
 
     // PANIC BARRIER around the whole producer body. Not about the unwind itself — this thread is
     // started by `task::spawn`, so std already catches a panic at the thread boundary and turns it
@@ -8316,7 +8495,8 @@ pub fn demux(
                 // aborts the lane first and this check refuses to start I/O. Creating/registering the
                 // source only after the check leaves a window where teardown's one wake sees nothing
                 // and the demuxer then opens a fresh connection under the main thread's join.
-                let mut curl_open = if origin.is_tls() {
+                let tls = origin.as_ref().is_some_and(|o| o.is_tls());
+                let mut curl_open = if tls {
                     match crate::curlio::CurlSource::reserve_open() {
                         Ok(r) => Some(r),
                         Err(e) => {
@@ -8339,7 +8519,21 @@ pub fn demux(
                 // redirected to https, which `open_plain_progressive` hands to curl. Both arms publish the same two diagnostics (`dg_http_status`, `file_size`)
                 // before anything else can fail, because the read-out panel is the first thing anybody
                 // looks at when a part will not play and it must mean the same thing either way.
-                let (src, size) = if origin.is_tls() {
+                let (src, size) = if let Some(p) = &local {
+                    match crate::localfile::LocalFile::open(p) {
+                        Ok(f) => {
+                            let size = f.size();
+                            SHARED.file_size.store(size, Ordering::Release);
+                            crate::player::log(&format!("ff: open local size={size}"));
+                            (Src::File(Box::new(f)), size)
+                        }
+                        Err(e) => {
+                            crate::player::log(&format!("ff: local open FAILED: {e}"));
+                            SHARED.demux_failed.store(true, Ordering::Release);
+                            break;
+                        }
+                    }
+                } else if tls {
                     let reservation = curl_open
                         .take()
                         .expect("TLS reserved its abort handle above");
@@ -8364,7 +8558,8 @@ pub fn demux(
                     }
                 } else {
                     // Redirects followed; an https hop comes back as the curl source.
-                    match open_plain_progressive(hs_p, &origin, &path, aq_p) {
+                    let origin = origin.as_ref().expect("a non-file input has an origin");
+                    match open_plain_progressive(hs_p, origin, &path, aq_p) {
                         Ok(opened) => opened,
                         Err(MediaOpenFail::Aborted) => {
                             crate::player::log("ff: aborted during open");
@@ -8530,6 +8725,19 @@ pub fn demux(
                     crate::player::log(&format!(
                         "ff: AAC → ADTS reframing on (freq_idx={fi} ch={ch})"
                     ));
+                }
+                // The GStreamer sink describes FLAC, Opus, Vorbis and PCM from the stream's own
+                // parameters rather than a codec name; hand them over before any audio is pushed.
+                #[cfg(feature = "gst")]
+                if ai >= 0 {
+                    let acp = stream_codecpar(*streams.add(ai as usize));
+                    let (ed, n) = ((*acp).extradata, (*acp).extradata_size);
+                    crate::player::gst_sink::note_audio(crate::player::gst_sink::AudioParams {
+                        codec: std::ffi::CStr::from_ptr(avcodec_get_name((*acp).codec_id)).to_string_lossy().into_owned(),
+                        extradata: if ed.is_null() || n <= 0 { Vec::new() } else { std::slice::from_raw_parts(ed, n as usize).to_vec() },
+                        rate: (*acp).sample_rate,
+                        channels: (*acp).ch_layout.nb_channels,
+                    });
                 }
                 let dur = fmt_duration(fmt);
                 if dur > 0 {

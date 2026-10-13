@@ -554,6 +554,15 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                     if crate::dev::scenarios::detailplay_forces_headless_hud() { HUD_HEADLESS_MS } else { HUD_LINGER_MS },
                     Some(ret), &mut app.pages, &mut app.bridge);
             }
+            #[cfg(feature = "gst")]
+            ContentReq::LocalOpen(arg) => {
+                bridge::nav_push_with_return(&mut app.pages, AppArg::Local(arg), ret);
+            }
+            #[cfg(feature = "gst")]
+            ContentReq::LocalPlay(path) => {
+                super::local_watch::play(&mut app.player.session, &mut app.adapters.player, std::path::Path::new(&path),
+                    false, Some(ret), &mut app.pages, &mut app.bridge);
+            }
             ContentReq::PreviewStart { sid, rk, part, vcodec, acodec, title } => {
                 if part.is_empty() {
                     plx_media::player::preview::note_no_extra(sid, &rk);

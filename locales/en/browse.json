@@ -1971,6 +1971,44 @@
     "value": "Its library isn’t shared with you, or the server owner has restricted it.",
     "description": "Reason under the collection page's unavailable verdict"
   },
+  "browse.local.title": {
+    "value": "Library",
+    "description": "Heading of the local library's top level (the Linux build's folder browser)"
+  },
+  "browse.local.folder": {
+    "value": "Folder",
+    "description": "Caption under a focused folder card in the local library"
+  },
+  "browse.local.loading": {
+    "value": "Reading folder…",
+    "description": "Local library read-out while a folder's listing is pending"
+  },
+  "browse.local.empty": {
+    "value": "No videos or folders here",
+    "description": "Local library read-out for a folder with no videos and no subfolders"
+  },
+  "browse.local.failed": {
+    "value": "This folder can’t be read",
+    "description": "Local library read-out when a folder cannot be listed (missing, unmounted or no permission)"
+  },
+  "browse.local.unplayable": {
+    "value": "This file can’t be played.",
+    "description": "Toast when a video in the local library cannot be opened or read as media. Keep it under 80 characters."
+  },
+  "browse.local.video_unsupported": {
+    "value": "{codec} video can’t be played here.",
+    "args": {
+      "codec": "str"
+    },
+    "description": "Toast when a local video's picture is in a format this machine cannot decode. {codec} is the format's short technical name in capitals, such as MPEG2VIDEO or VC1. Keep it under 80 characters."
+  },
+  "browse.local.audio_unsupported": {
+    "value": "Its audio ({codecs}) can’t be played here.",
+    "args": {
+      "codecs": "str"
+    },
+    "description": "Toast when none of a local video's sound tracks is in a format the player can decode. {codecs} lists the tracks' short technical format names in capitals, comma-separated, such as COOK, WMAV2. Keep it under 80 characters."
+  },
   "browse.collection.kind": {
     "value": "Collection",
     "description": "The collection page meta line before its size is known; the kind of page shown"

@@ -988,6 +988,14 @@ impl Bridge {
         // ordinary card row, which is exactly what `MenuHost::Related` existed to say. Only a
         // content page's route: Home, Library and Search cards open their menus through their own
         // requests, which carry the `from_deck` / `from_home` bits this arm would drop.
+        // The local library's video: its path is the menu's key, and its record is the app's own.
+        #[cfg(feature = "gst")]
+        if let Some(page) = screen.downcast_ref::<plx_screens::local::LocalScreen>() {
+            let (path, _size, mark) = page.focused_video(ret.focus)?;
+            let rect = real.focused_card_rect(&cx, ret.focus, At::Drawn);
+            return Some(strip_menu_arg(plx_plex::plex::ServerId::from_raw(plx_data::local::ART_SRV), &path.to_string_lossy(), ItemMenuKind::Local { mark },
+                entry, ret.focus, rect));
+        }
         if !matches!(e.arg, AppArg::Content(_)) { return None; }
         let card = real.focused_card(&cx, ret.focus, Some(At::Drawn))?;
         let item = card.item.downcast_ref::<plx_data::pms::PmsMovie>().filter(|m| plx_screens::item_menu::has_actions(m))?;

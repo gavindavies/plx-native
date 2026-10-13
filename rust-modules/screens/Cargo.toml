@@ -28,6 +28,10 @@ default = []
 # has a `cfg` on it; it is declared so that `cargo test -p plx_screens` (which dev-depends on this
 # crate with it) builds the layers below with the dev trigger surface, as the Makefile's suite does.
 devtriggers = ["plx_base/devtriggers", "plx_machine/devtriggers", "plx_platform/devtriggers", "plx_gfx/devtriggers", "plx_net/devtriggers", "plx_ui/devtriggers", "plx_plex/devtriggers", "plx_telemetry/devtriggers", "plx_data/devtriggers", "plx_session/devtriggers", "plx_media/devtriggers", "plx_appkit/devtriggers"]
+# The Linux build's local library page (`local`, `AppArg::Local`, the two `ContentReq::Local*`
+# requests). A feature rather than unconditional so the television's and the simulator's recorded
+# shapes, and the replay fixtures pinned to them, are untouched. Set by the application's `gst`.
+local = []
 # The `cfg(test)` seams the application's tests use (`account_menu::overscan_rects`, the registry's
 # surface enumeration, the detail screen's read-backs, ...). Enabled from the dependents'
 # `[dev-dependencies]`; never in a shipped build. It enables the lower layers' own `test-support`

@@ -13,6 +13,8 @@
 //! crate enables it in `[dev-dependencies]` only, so no shipped build sees it.
 
 pub mod browse; // Library browse: per-section paged catalog (sparse store + off-thread page fetches)
+pub mod local; // the Linux build's library: folders of videos on this machine's disk, listed off the frame
+pub mod local_progress; // where each local file was left and whether it was finished, kept on disk
 pub mod collection; // collection page model: tag resolution, header metadata and paged members
 pub mod metadata; // item detail data layer (detail page): full metadata + seasons/episodes + cast + related
 pub mod person; // person/actor page data layer: the header handed in by the cast row + /library/people/{id}/media

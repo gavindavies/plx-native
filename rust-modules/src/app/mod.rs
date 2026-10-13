@@ -99,6 +99,12 @@ extern "C" {
     /// a window may actually occupy. The out parameter is an `SDL_Rect`: exactly four `c_int`.
     fn SDL_GetDisplayUsableBounds(display: c_int, rect: *mut c_int) -> c_int;
 }
+#[cfg(feature = "gst")]
+extern "C" {
+    /// `SDL_GetDisplayBounds` — the whole display, which the Linux build's full-screen window is
+    /// created at (`boot`).
+    fn SDL_GetDisplayBounds(display: c_int, rect: *mut c_int) -> c_int;
+}
 
 // Phase 1a of the UI restructure split this file: everything above `run_application` moved into
 // the submodules below as a PURE move (`pub(crate)` widening only), glob-imported here so the
@@ -120,6 +126,12 @@ mod window_activity;
 pub(crate) mod events;
 pub(crate) mod lifecycle;
 pub(crate) mod playback;
+#[cfg(feature = "gst")]
+pub(crate) mod local_launch; // `plxnative-sim <file>`: play a file from the command line
+#[cfg(feature = "gst")]
+pub(crate) mod toast;
+#[cfg(feature = "gst")]
+mod local_watch; // follows a local file's playback and keeps its place // the Linux build's toast, drawn by the app (the port delivers to it)
 mod preferences;
 pub(crate) mod input;
 pub(crate) mod bridge;

@@ -563,6 +563,13 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
     //
     // The empty-rk guard the head of this function used to carry is the SURFACE's now
     // (`ItemMenuScreen::activate`): a row with no target never becomes a request at all.
+    //
+    // A local video's menu names no server: its record is the app's own.
+    #[cfg(feature = "gst")]
+    if sid.raw() == plx_data::local::ART_SRV {
+        super::local_watch::apply_menu_action(ps, pa, act, pages, bridge);
+        return;
+    }
     match act {
         Action::GoToItem(rk) => {
             let _ = from_home; // see the note below `apply_item_action`

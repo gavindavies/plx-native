@@ -613,6 +613,8 @@ impl LoadVideo {
 /// True when the Load must be refused: an AV1 or VP9 stream on a set whose table lists no such
 /// decoder. Only reachable when a server ignores the profile we sent, so the refusal is a refusal
 /// to declare a codec the set may not have, never a fallback to H.264 for another bitstream.
+// The Linux build asks GStreamer instead (`gst_sink::decodes_video`); the tests still grade this.
+#[cfg_attr(feature = "gst", allow(dead_code))]
 pub(crate) fn load_video_refused(lv: LoadVideo, caps: &plx_platform::devcaps::Caps) -> bool {
     match lv {
         LoadVideo::Av1 => !caps.av1,
@@ -767,15 +769,36 @@ fn parse_sinkmax(spec: &str) -> Option<SinkEnvelope> {
 /// LG's buffer-feed vocabulary. libpf CustomPipeline::parseOptionStringSpi accepts DTS;
 /// getAudioCaps selects audio/x-dts and setAdecSinkInfo_ES configures dts-seamless (issue #221).
 /// Unsupported formats must never be mislabeled as AC3: that can stall the audio master clock.
-fn audio_payload_codec(codec: &str) -> Option<(&'static str, u8)> {
+///
+/// The Linux build's GStreamer sink (`gst_sink`) decodes more than LG's pipeline does, so there
+/// the vocabulary grows by [`GST_AUDIO_PAYLOAD_CODECS`]; the television's never does.
+pub fn audio_payload_codec(codec: &str) -> Option<(&'static str, u8)> {
     match codec {
         "ac3" => Some(("AC3", 1)),
         "eac3" => Some(("AC3 PLUS", 2)),
         "aac" => Some(("AAC", 3)),
         "dts" => Some(("DTS", 4)),
+        #[cfg(feature = "gst")]
+        _ => GST_AUDIO_PAYLOAD_CODECS.iter().find(|(f, _, _)| *f == codec || (*f == "pcm" && super::gst_sink::pcm_format(codec).is_some())).map(|&(_, p, d)| (p, d)),
+        #[cfg(not(feature = "gst"))]
         _ => None,
     }
 }
+
+/// `(FFmpeg name, payload name, diagnostic code)` for the audio only the GStreamer sink decodes.
+/// The sink reads the stream's parameters from the demuxer (`gst_sink::note_audio`), since these
+/// formats need more than a codec name to be described (FLAC's STREAMINFO, Opus's header, PCM's
+/// sample format). `pcm` stands for every plain interleaved `pcm_*` (`gst_sink::pcm_format`).
+#[cfg(feature = "gst")]
+pub const GST_AUDIO_PAYLOAD_CODECS: [(&str, &str, u8); 7] = [
+    ("flac", "FLAC", 5),
+    ("opus", "OPUS", 6),
+    ("vorbis", "VORBIS", 7),
+    ("truehd", "TRUEHD", 8),
+    ("mp3", "MP3", 9),
+    ("mp2", "MP2", 10),
+    ("pcm", "PCM", 11),
+];
 
 /// The pipeline reads the true dimensions from the SPS (Phase 0 HEVC probe), so mw/mh are only
 /// the sink envelope.
@@ -1261,6 +1284,10 @@ fn start_bufferfeed_inner(
     // dev A/B: /tmp/plxnative-noaudio feeds video only (needAudio:false + skip es=2) to isolate
     // whether the audio ES (E-AC3/Atmos) is what stalls the sink on 4K HEVC.
     let no_audio = plx_base::devtrig::flag("noaudio");
+    // On the Linux build a local file with no audio track at all plays silent
+    // (`localplay::admit`); its declaration carries no audio codec.
+    #[cfg(feature = "gst")]
+    let no_audio = no_audio || crate::route::stream_acodec(ps).is_empty();
     crate::ff::set_feed_audio(!no_audio);
     let stream_payload;
     // Every arm below assigns this — the static payloads through `static_envelope`, the streamed
@@ -1282,7 +1309,12 @@ fn start_bufferfeed_inner(
             SHARED.demux_failed.store(true, Ordering::Release);
             return Err(crate::route::RouteStartResult::StartFailed);
         };
-        if load_video_refused(lv, plx_platform::devcaps::caps()) {
+        // The Linux build's decoders are this machine's GStreamer's, not a television's table.
+        #[cfg(feature = "gst")]
+        let refused = !super::gst_sink::decodes_video(lv.payload_name());
+        #[cfg(not(feature = "gst"))]
+        let refused = load_video_refused(lv, plx_platform::devcaps::caps());
+        if refused {
             log(&format!(
                 "start_bufferfeed: {} stream but the device table lists no such decoder; refusing the Load",
                 lv.payload_name()
@@ -1406,22 +1438,33 @@ fn start_bufferfeed_inner(
     let side_target = if stream { crate::route::side_reader_target(ps) } else { None };
 
     if stream {
-        let su = plx_plex::plex::StreamUrl::parse(&url); // the typed layer's URL splitter
-                                                      // **The whole ORIGIN goes down, not a `(host, port)` pair, because the SCHEME chooses the
-                                                      // transport**: `ff::demux` reads http through `plx_net::stream`'s cleartext socket and https
-                                                      // through `crate::curlio`. This used to REFUSE an https origin outright — cleartext to a
-                                                      // TLS port is a hang or a garbage response with nothing in the log — and that refusal is
-                                                      // what a remote QA reviewer, with no PMS on their LAN, would have hit on every Play.
-                                                      // Rebuilding the origin from an address would put the refusal back in a subtler form: the
-                                                      // certificate is issued for the `plex.direct` NAME, so a TLS connection to the dotted quad
-                                                      // behind it fails validation however well the packets flow (`net/origin.rs`).
-        if !plx_plex::http::credential_transport_allowed(&su.origin, &su.path, &[]) {
-            plx_base::eventlog::log("stream: refused insecure credential transport");
-            return Err(crate::route::RouteStartResult::StartFailed);
-        }
-        let path = su.path;
-        log(&stream_open_log_line(&su.origin.log_form(), &path));
-        let origin = su.origin;
+        // A `file://` location is this machine's own disk (`crate::localfile`), read by the
+        // demuxer directly; there is no origin, credential or transport choice to make for it.
+        let input = if let Some(local) = crate::localfile::path_of(&url) {
+            log(&format!(
+                "stream: local file {}",
+                local.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+            ));
+            crate::ff::MediaInput::File(local)
+        } else {
+            // **The whole ORIGIN goes down, not a `(host, port)` pair, because the SCHEME chooses the
+            // transport**: `ff::demux` reads http through `plx_net::stream`'s cleartext socket and https
+            // through `crate::curlio`. This used to REFUSE an https origin outright — cleartext to a
+            // TLS port is a hang or a garbage response with nothing in the log — and that refusal is
+            // what a remote QA reviewer, with no PMS on their LAN, would have hit on every Play.
+            // Rebuilding the origin from an address would put the refusal back in a subtler form: the
+            // certificate is issued for the `plex.direct` NAME, so a TLS connection to the dotted quad
+            // behind it fails validation however well the packets flow (`net/origin.rs`).
+            let su = plx_plex::plex::StreamUrl::parse(&url); // the typed layer's URL splitter
+            if !plx_plex::http::credential_transport_allowed(&su.origin, &su.path, &[]) {
+                plx_base::eventlog::log("stream: refused insecure credential transport");
+                return Err(crate::route::RouteStartResult::StartFailed);
+            }
+            let path = su.path;
+            log(&stream_open_log_line(&su.origin.log_form(), &path));
+            let origin = su.origin;
+            crate::ff::MediaInput::Http { origin, path }
+        };
         // Two-lane feed: the demuxer routes es=1 video to aq_video and es=2 audio to
         // aq_audio, each with its own cap + feeder.
         let mut qv = crate::aq::aq_new(AQ_VIDEO_BYTES);
@@ -1447,7 +1490,7 @@ fn start_bufferfeed_inner(
             let auto_original = crate::route::auto_original_watch(ps);
             SHARED.side_subs_owner.store(side_target.is_some(), Ordering::Release);
             stream_th = plx_base::task::spawn_off_frame_keeping("demux", move |off| {
-                crate::ff::demux(off, origin, path, acodec, abr, auto_original, aqp, aqap, hsp)
+                crate::ff::demux(off, input, acodec, abr, auto_original, aqp, aqap, hsp)
             });
             if stream_th.is_none() {
                 SHARED.side_subs_owner.store(false, Ordering::Release);
@@ -5586,8 +5629,17 @@ mod sink_envelope_tests {
     fn audio_payload_names_dts_and_refuses_unsupported_formats() {
         assert_eq!(audio_payload_codec("dts"), Some(("DTS", 4)));
         assert_eq!(audio_payload_codec("eac3"), Some(("AC3 PLUS", 2)));
+        #[cfg(not(feature = "gst"))]
         for codec in ["truehd", "flac", "", "unknown"] {
             assert_eq!(audio_payload_codec(codec), None);
+        }
+        #[cfg(feature = "gst")]
+        {
+            assert_eq!(audio_payload_codec("flac"), Some(("FLAC", 5)));
+            assert_eq!(audio_payload_codec("pcm_s24le"), Some(("PCM", 11)));
+            for codec in ["", "unknown", "mlp", "pcm_bluray"] {
+                assert_eq!(audio_payload_codec(codec), None);
+            }
         }
         let ps = crate::route::PlaybackSession::IDLE;
         let payload = build_av_payload(&ps, "H264", "DTS", ENVELOPE_FHD60);

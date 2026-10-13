@@ -3897,9 +3897,10 @@ mod enhancement_menu_tests {
         assert_eq!(audio_sub_line_for("Dolby Digital 5.1".into(), false), "Dolby Digital 5.1");
         assert_eq!(audio_sub_line_for(String::new(), true), "", "no descriptor, nothing to extend");
         // the capability answer it is fed: TrueHD is outside the profile's audio list, AC-3 is not
+        // (and the Linux build, which has no server, converts nothing)
         let truehd = metadata::Stream { codec: "truehd".into(), channels: 8, ..Default::default() };
         let ac3 = metadata::Stream { codec: "ac3".into(), channels: 6, ..Default::default() };
-        assert!(plx_media::route::audio_converted_by_server(&truehd.codec, truehd.channels));
+        assert_eq!(plx_media::route::audio_converted_by_server(&truehd.codec, truehd.channels), plx_media::route::CONVERTS_AUDIO);
         assert!(!plx_media::route::audio_converted_by_server(&ac3.codec, ac3.channels));
     }
 

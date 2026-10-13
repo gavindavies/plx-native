@@ -77,6 +77,14 @@ SAME64(offsetof(AVStream, time_base), 32, "OFF_STREAM_TIME_BASE != 20 [host]");
    AVFrame.pts carries below. */
 SAME32(offsetof(AVStream, metadata), 72, "OFF_STREAM_METADATA != 72");
 SAME64(offsetof(AVStream, metadata), 80, "OFF_STREAM_METADATA != 72 [host]");
+/* The stream's average frame rate, right after metadata: what a local file's Load declares when
+   the demuxer leaves codecpar->framerate unset (Matroska does). */
+SAME32(offsetof(AVStream, avg_frame_rate), 76, "OFF_STREAM_AVG_FRAME_RATE != 76");
+SAME64(offsetof(AVStream, avg_frame_rate), 88, "OFF_STREAM_AVG_FRAME_RATE != 76 [host]");
+/* The stream's AV_DISPOSITION_* flags, after nb_frames: which track a local file marks default
+   and which forced, for the Linux build's track menu (ff.rs probe_local). */
+SAME32(offsetof(AVStream, disposition), 56, "OFF_STREAM_DISPOSITION != 56");
+SAME64(offsetof(AVStream, disposition), 64, "OFF_STREAM_DISPOSITION != 56 [host]");
 SAME(offsetof(AVDictionaryEntry, key), 0, "AVDictionaryEntry.key moved");
 SAME32(offsetof(AVDictionaryEntry, value), 4, "AVDictionaryEntry.value moved");
 SAME64(offsetof(AVDictionaryEntry, value), 8, "AVDictionaryEntry.value moved [host]");

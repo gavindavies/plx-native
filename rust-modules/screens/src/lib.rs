@@ -18,6 +18,8 @@ pub mod alt_sources;
 pub mod tracks_panel;
 pub mod consent;
 pub mod collection;
+#[cfg(feature = "local")]
+pub mod local; // the Linux build's folder browser: one folder of the local library per page
 #[cfg(test)]
 mod cards_conformance_tests; // shared-card-sections Tier 2: every card screen through one black-box suite
 pub mod detail;

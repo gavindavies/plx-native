@@ -106,6 +106,22 @@ pub fn img_decode_owned(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     }
 }
 
+/// [`img_decode_owned`], then scaled down to fit inside `max_w`×`max_h` (aspect kept; a smaller
+/// image is returned as it is). For artwork read off a local disk, where a folder's poster is
+/// often a camera-sized JPEG and nothing upstream has resized it the way a server's transcoder
+/// does for its own posters.
+pub fn img_decode_fit(data: &[u8], max_w: u32, max_h: u32) -> Option<(u32, u32, Vec<u8>)> {
+    let (w, h, px) = img_decode_owned(data)?;
+    if max_w == 0 || max_h == 0 || (w <= max_w && h <= max_h) {
+        return Some((w, h, px));
+    }
+    let scale = (max_w as f64 / w as f64).min(max_h as f64 / h as f64);
+    let (nw, nh) = (((w as f64 * scale).round() as u32).max(1), ((h as f64 * scale).round() as u32).max(1));
+    let src = image::RgbaImage::from_raw(w, h, px)?;
+    let out = image::imageops::resize(&src, nw, nh, image::imageops::FilterType::Triangle);
+    Some((nw, nh, out.into_raw()))
+}
+
 /// The first six bytes as hex, for a failure line only — never built on the success path.
 fn magic(data: &[u8]) -> String {
     data.iter().take(6).map(|b| format!("{b:02x}")).collect()
