@@ -99,12 +99,27 @@ fn log(s: &str) {
     plx_base::eventlog::log(&format!("gst: {s}"));
 }
 
+/// Rank FFmpeg's DTS decoder above every other. GStreamer ranks libdca's `dtsdec` PRIMARY and
+/// gst-libav's `avdec_dca` MARGINAL, but `dtsdec` decodes the DTS CORE only: a DTS-HD Master Audio
+/// track would play lossy and at most 5.1. `avdec_dca` decodes the XLL extension, so the track
+/// plays lossless at its own channel count. This process's registry only; nothing is persisted.
+fn prefer_lossless_dts() {
+    match gst::ElementFactory::find("avdec_dca") {
+        Some(factory) => {
+            factory.set_rank(gst::Rank::PRIMARY + 1);
+            log("DTS: avdec_dca preferred (decodes DTS-HD MA losslessly)");
+        }
+        None => log("DTS: avdec_dca missing (install gstreamer1.0-libav); DTS-HD plays as its core"),
+    }
+}
+
 fn gst_ready() -> bool {
     static INIT: OnceLock<bool> = OnceLock::new();
     *INIT.get_or_init(|| match gst::init() {
         Ok(()) => {
             let (major, minor, micro, _) = gst::version();
             log(&format!("GStreamer {major}.{minor}.{micro} initialised"));
+            prefer_lossless_dts();
             true
         }
         Err(e) => {
@@ -374,7 +389,8 @@ fn describe(video: (&str, &str), audio: Option<AudioLane>, audio_sink: &str) -> 
         video.0, video.1
     );
     let head = format!("appsrc name=a format=time is-live=false stream-type=stream block=false max-bytes={AUDIO_QUEUE_BYTES}");
-    let tail = format!("decodebin ! audioconvert ! audioresample ! {audio_sink}");
+    // `adec` is where the decoded format is read for the log (`log_audio_decoder`).
+    let tail = format!("decodebin name=adecbin ! identity name=adec silent=true ! audioconvert ! audioresample ! {audio_sink}");
     match audio {
         Some(AudioLane::Named { caps, parser }) => d.push_str(&format!(" {head} caps=\"{caps}\" ! {parser} ! {tail}")),
         Some(AudioLane::Described) => d.push_str(&format!(" {head} ! {tail}")),
@@ -523,12 +539,33 @@ fn build_session(payload: &str) -> Result<Session, String> {
 }
 
 /// The session's own thread: the 5 Hz position report and the bus.
+/// Say once which decoder GStreamer chose for the audio and what it produced — the format and
+/// channel count that reach the speakers (a DTS-HD MA track decodes losslessly to its own channel
+/// count, its core to at most 5.1). `true` once said, or when there is no audio lane.
+fn log_audio_decoder(pipeline: &gst::Pipeline) -> bool {
+    let Some(identity) = pipeline.by_name("adec") else { return true };
+    let Some(caps) = identity.static_pad("src").and_then(|p| p.current_caps()) else { return false };
+    let decoder = pipeline
+        .by_name("adecbin")
+        .and_then(|b| b.downcast::<gst::Bin>().ok())
+        .and_then(|bin| {
+            bin.iterate_recurse().into_iter().flatten().find_map(|e| {
+                let factory = e.factory()?;
+                factory.metadata("klass").is_some_and(|k| k.contains("Decoder") && k.contains("Audio")).then(|| factory.name().to_string())
+            })
+        })
+        .unwrap_or_else(|| "none (raw PCM)".to_owned());
+    log(&format!("audio decoded by {decoder}: {caps}"));
+    true
+}
+
 fn start_ticker(pipeline: gst::Pipeline, base: Arc<AtomicI64>, generation: u64) {
     let spawned = std::thread::Builder::new().name("gstsink".into()).spawn(move || {
         let bus = match pipeline.bus() {
             Some(b) => b,
             None => return,
         };
+        let mut audio_logged = false;
         while GENERATION.load(Relaxed) == generation {
             let wait = gst::ClockTime::from_mseconds(TICK_MS);
             if let Some(msg) = bus.timed_pop_filtered(wait, &[gst::MessageType::Error, gst::MessageType::Eos, gst::MessageType::Warning]) {
@@ -562,6 +599,9 @@ fn start_ticker(pipeline: gst::Pipeline, base: Arc<AtomicI64>, generation: u64) 
             let position = pipeline.query_position::<gst::ClockTime>().map(|pos| b.saturating_add(pos.nseconds() as i64));
             if let Some(p) = position {
                 callback(0, p, c"");
+            }
+            if !audio_logged {
+                audio_logged = log_audio_decoder(&pipeline);
             }
             end_drained_audio(generation, position);
         }
@@ -887,7 +927,7 @@ mod tests {
     fn a_described_audio_lane_leaves_its_caps_and_parser_to_the_feed() {
         let d = describe(video_branch("H264").unwrap(), audio_branch("OPUS"), "fakesink");
         let lane = &d[d.find("appsrc name=a").unwrap()..];
-        assert!(!lane.contains("caps=") && lane.contains("! decodebin ! audioconvert"), "{lane}");
+        assert!(!lane.contains("caps=") && lane.contains("! decodebin name=adecbin ! identity name=adec"), "{lane}");
     }
 
     #[test]

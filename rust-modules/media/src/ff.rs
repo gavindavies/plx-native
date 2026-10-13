@@ -3401,6 +3401,20 @@ unsafe fn packet_to_annexb(
 
 static DIAG_FIRST: AtomicBool = AtomicBool::new(true);
 
+/// A DTS stream's profile (`AV_PROFILE_DTS_*` in `libavcodec/defs.h`), named for the log.
+fn dts_profile_name(profile: c_int) -> &'static str {
+    match profile {
+        30 => "DTS-ES",
+        40 => "DTS 96/24",
+        50 => "DTS-HD HRA",
+        60 => "DTS-HD MA",
+        61 => "DTS-HD MA + DTS:X",
+        62 => "DTS-HD MA + DTS:X IMAX",
+        70 => "DTS Express",
+        _ => "DTS",
+    }
+}
+
 /// Extract one DTS core access unit, dropping the DTS-HD extension substream. Matroska and
 /// MOV demux return the complete packet; our bundled FFmpeg 9.0 has neither the dca parser nor
 /// dca_core BSF enabled. The core size is the 14-bit FSIZE + 1 from its normalized header
@@ -3455,6 +3469,14 @@ mod dts_core_tests {
         let mut frame = vec![0x55; 128];
         frame[..10].copy_from_slice(&[0x7f, 0xfe, 0x80, 0x01, 0xfc, 0x00, 0x07, 0xf0, 0, 0]);
         frame
+    }
+
+    #[test]
+    fn the_log_names_the_dts_profile_by_ffmpegs_numbers() {
+        assert_eq!(super::dts_profile_name(60), "DTS-HD MA");
+        assert_eq!(super::dts_profile_name(50), "DTS-HD HRA");
+        assert_eq!(super::dts_profile_name(20), "DTS");
+        assert_eq!(super::dts_profile_name(-99), "DTS", "FF_PROFILE_UNKNOWN");
     }
 
     #[test]
@@ -8715,11 +8737,21 @@ pub fn demux(
                 } else {
                     None
                 };
-                let dts_audio = ai >= 0 && std::ffi::CStr::from_ptr(avcodec_get_name(
+                let is_dts = ai >= 0 && std::ffi::CStr::from_ptr(avcodec_get_name(
                     (*stream_codecpar(*streams.add(ai as usize))).codec_id
                 )).to_bytes() == b"dts";
-                if dts_audio {
-                    crate::player::log("ff: DTS core extraction on (DTS-HD extensions discarded)");
+                // The television's decoder takes the DTS core only, so a DTS-HD packet is cut
+                // down to it. The Linux build's GStreamer decodes the whole stream (FFmpeg's DCA
+                // decoder reads the XLL lossless extension), so there it is fed as it is: a DTS-HD
+                // MA track plays lossless, at its own channel count.
+                let dts_audio = is_dts && !cfg!(feature = "gst");
+                if is_dts {
+                    let profile = dts_profile_name((*stream_codecpar(*streams.add(ai as usize))).profile);
+                    crate::player::log(&if dts_audio {
+                        format!("ff: {profile}: DTS core extraction on (DTS-HD extensions discarded)")
+                    } else {
+                        format!("ff: {profile}: fed whole (extensions decoded by the sink)")
+                    });
                 }
                 if let Some((fi, ch)) = aac_adts {
                     crate::player::log(&format!(

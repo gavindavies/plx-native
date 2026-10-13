@@ -95,8 +95,11 @@ for that file before.
 ## What plays
 
 Video: H.264, HEVC, AV1 and VP9, each when this machine's GStreamer has a decoder for it.
-Audio: AC3, E-AC3, DTS (core), AAC, FLAC, Opus, Vorbis, TrueHD, MP3, MP2 and plain PCM, decoded
-to PCM. A file with no audio track
+Audio: AC3, E-AC3, DTS, AAC, FLAC, Opus, Vorbis, TrueHD, MP3, MP2 and plain PCM, decoded to PCM.
+DTS-HD Master Audio plays lossless at its own channel count: the whole stream goes to GStreamer's
+FFmpeg decoder (`avdec_dca`, from `gstreamer1.0-libav`), which the app ranks above `dtsdec` (that one
+decodes only the lossy core). The event log names the DTS profile and the decoded format
+(`ff: DTS-HD MA: fed whole`, `gst: audio decoded by avdec_dca: … channels=8`). A file with no audio track
 plays silent. A file that cannot play is refused with the reason shown on screen (the Linux
 build draws the toasts a television would show) and written to the event log.
 
