@@ -158,8 +158,11 @@ impl<H: Host<Elem = u32>> CardSource<H> for Items<'_> {
             };
             plx_ui::icons::draw(p, icon, glyph, theme::TEXT_SECONDARY);
         }
-        // Local files rarely carry artwork, so every card names itself on the art.
-        widgets::poster_label(p, tile.rect, tile.radius, &entry.title, measure);
+        // A card with no artwork names itself on its ground; artwork carries its own title (a
+        // poster, a folder.jpg), and the focused card's caption names it either way.
+        if entry.art.is_none() {
+            widgets::poster_label(p, tile.rect, tile.radius, &entry.title, measure);
+        }
     }
 }
 

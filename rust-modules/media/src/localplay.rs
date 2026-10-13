@@ -95,6 +95,20 @@ pub fn prepare(ps: &mut crate::route::PlaybackSession, path: &Path) -> Result<cr
     Ok(probe)
 }
 
+/// The line above the title in the player: the folder the file is in, or — when that folder is
+/// named as the file is (`Alien (1979)/Alien (1979).mkv`, a film's own folder) — the one above
+/// it, so the line never just repeats the title.
+fn context_line(path: &Path) -> String {
+    let name = |p: Option<&Path>| p.and_then(|p| p.file_name()).map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let parent = path.parent();
+    let folder = name(parent);
+    if folder == title_of(path) {
+        name(parent.and_then(Path::parent))
+    } else {
+        folder
+    }
+}
+
 /// Install an already-probed file on `ps`: the declaration, the source raster, the HUD title and
 /// the `file://` URL — in that order, so a refused declaration never leaves a URL behind for a
 /// later Play to pick up without it.
@@ -106,10 +120,7 @@ pub fn install(ps: &mut crate::route::PlaybackSession, path: &Path, probe: &crat
     if probe.width > 0 && probe.height > 0 {
         crate::route::set_stream_source_raster(ps, probe.width, probe.height);
     }
-    let folder = path
-        .parent()
-        .and_then(|p| p.file_name())
-        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let folder = context_line(path);
     crate::route::set_hud_title(ps, &title_of(path), &folder);
     // No account to say which subtitles are the viewer's: the interface's language leads the menu.
     crate::route::set_sub_pref_lang(ps, plx_platform::i18n::current().language().tag());
@@ -276,6 +287,12 @@ mod tests {
         assert_eq!(item.audio.iter().map(|s| s.codec.as_str()).collect::<Vec<_>>(), ["truehd", "ac3"]);
         let start = starting_audio(&item, &p).unwrap();
         assert_eq!((start.sid, start.ordinal, start.codec.as_str()), (item.audio[1].id, 1, "ac3"));
+    }
+
+    #[test]
+    fn the_player_names_the_folder_above_a_films_own() {
+        assert_eq!(context_line(Path::new("/m/Films/Alien (1979)/Alien (1979).mkv")), "Films");
+        assert_eq!(context_line(Path::new("/m/Show/Season 1/Show - S01E01.mkv")), "Season 1");
     }
 
     #[test]

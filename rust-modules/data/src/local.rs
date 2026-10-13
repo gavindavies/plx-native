@@ -229,8 +229,36 @@ fn folder_art(dir: &Path) -> Option<PathBuf> {
     pick_art(dir, &names, &FOLDER_ART_NAMES.map(String::from))
 }
 
+/// What a subfolder shows as: its artwork, and — when it holds exactly one video and no folder
+/// (the usual layout of a film: `Alien (1979)/Alien (1979).mkv` beside its poster) — that video,
+/// which the folder's card then plays. Blocking; only a folder with one video is looked into
+/// further than its names.
+fn folder_entry(path: PathBuf, name: &str) -> Entry {
+    let names = child_names(&path).unwrap_or_default();
+    let folder_art = pick_art(&path, &names, &FOLDER_ART_NAMES.map(String::from));
+    let mut videos = names.iter().filter(|n| !is_hidden(n) && extension_in(Path::new(n.as_str()), &VIDEO_EXTENSIONS));
+    let lone = match (videos.next(), videos.next()) {
+        (Some(video), None) => Some(video),
+        _ => None,
+    };
+    let film = lone.and_then(|video| {
+        let has_folder = names.iter().any(|n| !is_hidden(n) && path.join(n).is_dir());
+        let meta = std::fs::metadata(path.join(video)).ok().filter(|m| m.is_file())?;
+        (!has_folder).then(|| (video, meta.len()))
+    });
+    match film {
+        Some((video, size)) => {
+            let stem = Path::new(video.as_str()).file_stem().map_or_else(|| video.clone(), |s| s.to_string_lossy().into_owned());
+            let art = folder_art.or_else(|| pick_art(&path, &names, &[format!("{stem}-poster"), stem]));
+            Entry { title: name.to_owned(), path: path.join(video), kind: EntryKind::Video, art: art.map(|p| art_token(&p)), size }
+        }
+        None => Entry { title: name.to_owned(), path, kind: EntryKind::Folder, art: folder_art.map(|p| art_token(&p)), size: 0 },
+    }
+}
+
 /// Read one folder: its subfolders and videos, sorted folders first then by natural order, with
-/// their artwork resolved. Blocking.
+/// their artwork resolved. A subfolder holding a single video is listed as that video
+/// ([`folder_entry`]). Blocking.
 pub fn scan(dir: &Path) -> std::io::Result<Vec<Entry>> {
     let names = child_names(dir)?;
     let videos: Vec<&String> = names
@@ -251,8 +279,7 @@ pub fn scan(dir: &Path) -> std::io::Result<Vec<Entry>> {
         // Follows symlinks: a library assembled from links is a common layout.
         let Ok(meta) = std::fs::metadata(&path) else { continue };
         if meta.is_dir() {
-            let art = folder_art(&path).map(|p| art_token(&p));
-            entries.push(Entry { title: name.clone(), path, kind: EntryKind::Folder, art, size: 0 });
+            entries.push(folder_entry(path, name));
         } else if meta.is_file() && extension_in(&path, &VIDEO_EXTENSIONS) {
             let stem = Path::new(name).file_stem().map_or_else(|| name.clone(), |s| s.to_string_lossy().into_owned());
             let art = pick_art(dir, &names, &[format!("{stem}-poster"), stem.clone()])
@@ -367,6 +394,27 @@ pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_holding_one_video_is_that_video() {
+        let root = plx_base::testscratch::process_dir("local-film-folders");
+        let film = root.join("Alien (1979)");
+        let show = root.join("Show A");
+        std::fs::create_dir_all(&film).unwrap();
+        std::fs::create_dir_all(show.join("Season 1")).unwrap();
+        std::fs::write(film.join("Alien.1979.1080p.mkv"), [0u8; 3]).unwrap();
+        std::fs::write(film.join("poster.jpg"), [0u8; 1]).unwrap();
+        std::fs::write(film.join("Alien.1979.1080p.en.srt"), [0u8; 1]).unwrap();
+        std::fs::write(show.join("Trailer.mkv"), [0u8; 1]).unwrap();
+        let entries = scan(&root).unwrap();
+        let alien = entries.iter().find(|e| e.title == "Alien (1979)").unwrap();
+        assert_eq!(alien.kind, EntryKind::Video, "one video and no folder: the film itself");
+        assert_eq!(alien.path, film.join("Alien.1979.1080p.mkv"));
+        assert_eq!(alien.size, 3);
+        assert!(alien.art.is_some(), "it keeps the folder's poster");
+        let show_entry = entries.iter().find(|e| e.title == "Show A").unwrap();
+        assert_eq!(show_entry.kind, EntryKind::Folder, "a folder with a subfolder stays a folder, however few videos");
+    }
 
     #[test]
     fn a_subtitle_file_is_read_by_its_name() {
