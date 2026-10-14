@@ -39,7 +39,7 @@ machine under the TV (a Raspberry Pi, or any PC), browsed as a library of folder
 | [`icons/`](icons/) | The UI's glyphs: SVG masks authored in white, compiled into the app (`rust-modules/ui/src/icons.rs` embeds them by path). |
 | [`brand/`](brand/) | The logo and splash masters the app icon and splash screen were cut from (PlxNative's; see `TRADEMARKS.md`). |
 | [`screenshots/linux/`](screenshots/linux/) | Pictures of the product, taken on the demo library below. |
-| [`demo-library/`](demo-library/) | The demo library: [`build.py`](demo-library/build.py) builds 27 films and two shows from the openly licensed catalog in [`catalog.json`](demo-library/catalog.json) / [`assets.json`](demo-library/assets.json) (every source pinned by hash, credits written beside the library) into `demo-library/library/` (not committed). [`generate.sh`](demo-library/generate.sh) is the offline alternative: invented titles made from `ffmpeg` alone. |
+| [`demo-library/`](demo-library/) | The demo library: [`build.py`](demo-library/build.py) builds 27 films and two shows from the openly licensed catalog in [`catalog.json`](demo-library/catalog.json) / [`assets.json`](demo-library/assets.json) (every source committed under `demo-library/sources/` and pinned by hash; credits written beside the library) into `demo-library/library/` (not committed). [`generate.sh`](demo-library/generate.sh) makes a much smaller library of invented titles from `ffmpeg` alone. |
 
 ## Where the design system lives in code
 

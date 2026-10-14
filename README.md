@@ -66,19 +66,23 @@ and Up reaches the subtitle and audio buttons; a remote's media keys work too. L
 `design/demo-library/build.py` builds a library from PlxNative's openly licensed demo catalog:
 Blender Studio's open films (Sintel, Spring, Big Buck Bunny, Sprite Fright, ...), public-domain
 classics (Nosferatu, Metropolis, The General, ...) and two shows (Caminandes, ESA's Hubblecast).
-It downloads each poster, backdrop and still from its pinned source (checking every file's hash),
-cuts them to PiTV's folder layout and writes a `CREDITS.md` with each one's licence and
-attribution. Sintel is the real film (282 MB; `--no-films` skips it); every other title gets a
-short clip panning across its own key art, with its synopsis as an English subtitle file.
+Every source it needs is committed under `design/demo-library/sources/`, so nothing is
+downloaded: the posters, backdrops and stills, and Sintel itself (282 MB, stored as three parts to
+stay under GitHub's file-size limit). It cuts them to PiTV's folder layout and writes a
+`CREDITS.md` with each one's licence and attribution. Sintel is the real film (`--no-films` leaves
+it out); every other title gets a short clip panning across its own key art, with its synopsis as
+an English subtitle file.
 
 ```sh
 design/demo-library/build.py             # into design/demo-library/library (not committed)
 PITV_MEDIA_DIRS=design/demo-library/library dist/linux/pitv/pitv
 ```
 
-The catalog and its sources are `design/demo-library/catalog.json` and `assets.json`.
-`design/demo-library/generate.sh` makes a smaller library of invented titles from nothing but
-`ffmpeg`, for a machine without network access.
+The catalog is `design/demo-library/catalog.json`; `assets.json` pins every source (URL, hash,
+licence, author, attribution). Where Wikimedia refused a bulk download of the original, the stored
+file is its standard 1280-pixel thumbnail, pinned in the asset's `file` entry.
+`design/demo-library/generate.sh` makes a much smaller library of invented titles from nothing but
+`ffmpeg`.
 
 ## Status
 
