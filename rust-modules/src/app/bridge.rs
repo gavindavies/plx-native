@@ -488,8 +488,8 @@ pub(crate) fn frame_with_tap(
 /// **Open one of the player's panels on the PLAYER PAGE's own `ModalStack`** (§6.2).
 ///
 /// Idempotent per KIND while that kind is up, for `open_settings`'s reason: a second press on the
-/// disc that opened it must not stack a second copy. Opening a DIFFERENT kind over an open one is
-/// allowed and is what the transport's own tab row does — the container's `input_owner()` gives
+/// menu item that opened it must not stack a second copy. Opening a DIFFERENT kind over an open
+/// one is allowed and is what the transport's top menu does — the container's `input_owner()` gives
 /// the topmost surface the keys, so the stack is the answer to "which panel owns the frame".
 ///
 /// The style is `PlayerPanel { survives_failure }`, whose host policy is `(Live, Live)`: what is
@@ -501,8 +501,8 @@ pub(crate) fn open_player_overlay(
     d: &mut Dispatcher<AppHost>,
     kind: plx_screens::player::overlay::OverlayKind,
 ) {
-    // Already up? Then this press is a re-ADDRESS of the entry that exists — the Audio disc
-    // pressed while the Subtitles tab is showing — and never a second surface of the same kind.
+    // Already up? Then this press is a re-ADDRESS of the entry that exists — the menu's Audio
+    // item pressed while the Subtitles tab is showing — and never a second surface of the same kind.
     if player_overlay_kind(d).is_some_and(|up| up.slot() == kind.slot()) {
         if let Some(surface) = player_overlay_mut(d) {
             surface.retarget(meta, kind);

@@ -1005,9 +1005,8 @@ impl PlayerScreen {
     }
 }
 
-/// **The four registered regions, as real `Focusable` groups** (restructure phase 12, D2): the
-/// scrubber, the control row, the bottom tabs and — only while it is drawn — the failure read-out's
-/// own escape. `neighbour` still declines the engine's own geometric stepping (`Step::Edge`
+/// **The three registered regions, as real `Focusable` groups** (restructure phase 12, D2): the
+/// scrubber, the top menu and — only while it is drawn — the failure read-out's own escape. `neighbour` still declines the engine's own geometric stepping (`Step::Edge`
 /// unconditionally): every direction this screen cares about is intercepted first by its own
 /// `Machine::step` (`ui/dispatch.rs`'s `handled == Handled::No && engine` guard never sees one this
 /// screen answers `Handled::Yes` for), so `HudNav` stays the single source of truth for WHICH of
@@ -1016,7 +1015,7 @@ impl PlayerScreen {
 ///
 /// **The order `groups` pushes in is the pointer's z-order**, lowest first: `record_stops`
 /// registers in it, and the hit map resolves the last stop under the pointer. The scrubber's tall
-/// grab band therefore comes FIRST, under the control row and tabs it overlaps (issue #162).
+/// grab band therefore comes FIRST, so any control placed over it is clickable (issue #162).
 impl<H: PlayerLike + crate::registry::MetadataLike> Focusable<H> for PlayerScreen {
     fn groups(&self, cx: &Cx<'_, H>, out: &mut Vec<GroupSpec>) {
         out.push(GroupSpec {

@@ -9,6 +9,9 @@
 //! the cheap seek and the one trick-play thumbnails are made from everywhere else — and pulls the
 //! preroll frame.
 //!
+//! A strip of stills (the Chapters strip's) asks for all of its frames at once
+//! ([`Thumbnailer::prefetch`]); they are made in order behind any scrub.
+//!
 //! Frames are kept by [`BUCKET_NS`] so a bar that wanders back over ground it has covered shows
 //! a picture at once; the cache is bounded ([`KEEP`]) and the oldest frames go first. Nothing here
 //! touches GL: the player screen uploads the frame it shows (`screens::player`).
@@ -40,6 +43,9 @@ pub struct Frame {
 struct State {
     /// The newest time asked for, not yet served.
     wanted: Option<i64>,
+    /// Times asked for ahead of need ([`Thumbnailer::prefetch`]), served in order once no
+    /// `wanted` is waiting.
+    backlog: VecDeque<i64>,
     /// Frames, oldest first.
     frames: VecDeque<Arc<Frame>>,
     /// The file could not be opened or decoded: ask no more.
@@ -81,6 +87,28 @@ impl Thumbnailer {
         }
         st.wanted = Some(ns.max(0));
         self.shared.wake.notify_one();
+    }
+
+    /// Ask for the frames at each of `times`, in order, behind any scrub request — a strip of
+    /// chapter stills, which wants every one rather than only the newest.
+    pub fn prefetch(&self, times: &[i64]) {
+        let mut st = lock(&self.shared);
+        if st.failed {
+            return;
+        }
+        for &ns in times {
+            let bucket = bucket_of(ns);
+            if !st.frames.iter().any(|f| f.bucket == bucket) && !st.backlog.iter().any(|&b| bucket_of(b) == bucket) {
+                st.backlog.push_back(ns.max(0));
+            }
+        }
+        self.shared.wake.notify_one();
+    }
+
+    /// The frame of `ns`'s own bucket, `None` until it is decoded.
+    pub fn frame_exact(&self, ns: i64) -> Option<Arc<Frame>> {
+        let bucket = bucket_of(ns);
+        lock(&self.shared).frames.iter().find(|f| f.bucket == bucket).cloned()
     }
 
     /// The best frame to show for `ns`: its own bucket's when that is decoded, else the frame
@@ -144,7 +172,7 @@ fn run(path: &Path, shared: &Shared) {
                 if st.closed || st.failed {
                     return;
                 }
-                if let Some(ns) = st.wanted.take() {
+                if let Some(ns) = st.wanted.take().or_else(|| st.backlog.pop_front()) {
                     break ns;
                 }
                 st = shared.wake.wait(st).unwrap_or_else(|e| e.into_inner());

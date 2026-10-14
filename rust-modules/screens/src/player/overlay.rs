@@ -29,7 +29,7 @@
 //! `neighbour`/`EdgeRule` unless this panel's own cadence gate is still waiting
 //! ([`PANEL_REPEAT_MS`]) or the engine has just reached this panel's group EDGE and re-delivered
 //! the key (`edge_key`, the one place a panel still decides something outside its own scope — a
-//! tab switch, or dropping focus onto the HUD tabs below). OK is answered the same way: the
+//! tab switch, or handing focus UP to the transport's top menu the panel was opened from). OK is answered the same way: the
 //! engine's own `Activate`/press machinery (§7.4) fires `ScreenEvent::Activate`/`PressCommit`,
 //! which [`PlayerOverlayScreen::activate`] spends. A click resolves against the real per-row hit
 //! map [`PlayerOverlayScreen::draw`] registers, not a hand-rolled pixel scan.
@@ -72,8 +72,8 @@ pub const SHAPE: &str =
 /// for the whole life of the entry — the identity `ScreenArg::same_instance` compares.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OverlayKind {
-    /// The audio/subtitle picker (`appkit/track_menu.rs`). `tab` is the panel it opens on: the two
-    /// on-screen discs open it directly on theirs.
+    /// The audio/subtitle picker (`appkit/track_menu.rs`). `tab` is the panel it opens on: the top
+    /// menu's Subtitles and Audio items open it directly on theirs.
     Tracks { tab: c_int },
     /// The chapter strip (`appkit/chapters_panel.rs`).
     Chapters,
@@ -105,7 +105,7 @@ impl OverlayKind {
     /// **WHICH panel this is, with the parameter thrown away** — the identity
     /// `ScreenArg::same_instance` compares, and the reason it is not the whole `OverlayKind`.
     ///
-    /// The two on-screen discs open the SAME track menu on their own tab. So `tab` is
+    /// The top menu's Subtitles and Audio items open the SAME track menu on their own tab. So `tab` is
     /// a boot ADDRESS, not an identity — exactly as `AppArg::Settings`'s root page is — and a
     /// container that compared them would stack a second track menu on top of the first when the
     /// viewer moved from Subtitles to Audio.
@@ -257,8 +257,8 @@ impl PlayerOverlayScreen {
         self.kind
     }
 
-    /// **Re-address a panel that is already up.** The two disc icons open the one track menu on
-    /// their own tab, so the second press has to move the tab of the entry that exists rather than
+    /// **Re-address a panel that is already up.** The top menu's Subtitles and Audio items open the
+    /// one track menu on their own tab, so the second press has to move the tab of the entry that exists rather than
     /// present a second one — `same_instance` says they ARE the same instance, and this is the
     /// other half of that: what "the same instance, at a different address" does.
     pub fn retarget(&mut self, meta: plx_data::metadata::MetadataView<'_>, kind: OverlayKind) {

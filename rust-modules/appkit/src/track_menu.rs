@@ -807,8 +807,8 @@ pub fn new(
         self.root_tracks.iter().copied().chain(self.other.iter().flat_map(|o| o.tracks.iter().map(|t| t.i))).nth(n)
     }
 
-    /// Show `tab` (0=Audio, 1=Subtitles) on a menu that is ALREADY open — the second disc pressed
-    /// while the first one's tab is showing. Same body as the LEFT/RIGHT arm below, which is why
+    /// Show `tab` (0=Audio, 1=Subtitles) on a menu that is ALREADY open — the top menu's other
+    /// track item pressed while the first one's tab is showing. Same body as the LEFT/RIGHT arm below, which is why
     /// that arm calls this rather than repeating it.
     pub fn focus_tab(&mut self, meta: metadata::MetadataView<'_>, tab: c_int) {
         if tab != self.tab {

@@ -1,5 +1,8 @@
-//! The **item context menu** — a registered `Style::Compact` surface on the shared `ModalStack`,
-//! opened by a press-and-hold on a video in the library.
+//! The **item context menu** — a registered `Style::Compact` surface on the shared `ModalStack`.
+//! Two kinds ([`crate::registry::MenuKind`]): **Watch**, opened by a press-and-hold on a video in
+//! the library (the watch-state rows, then Play from Start — described below), and **Tracks**,
+//! opened by the local title page's subtitle and audio discs: one row per choice, the one that
+//! will play checked, the pick kept with the file's `local_progress::Choices`.
 //!
 //! A panel anchored BESIDE the focused card (the card and the rest of the shelf stay where they
 //! are, visible behind it), rows of `[leading icon] [label]`, the focused row a filled light pill

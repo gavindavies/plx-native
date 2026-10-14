@@ -2,8 +2,10 @@
 //! the transport, opened from the HUD's top menu. LEFT/RIGHT pick a chapter, OK seeks to its
 //! start. Card layout mirrors the detail-page episode picker; modal wiring mirrors info_panel.
 //!
-//! Data comes from the PLAYING leaf (`metadata::playing_chapters`, loaded with `?includeChapters=1`
-//! on the same fetch the track store already makes), never from `metadata::current()` — the same
+//! Data comes from the PLAYING leaf (`metadata::playing_chapters`: a server item's come with
+//! `?includeChapters=1` on the track store's fetch, a local file's from FFmpeg's probe
+//! (`localplay`), with stills made from its frames by `plx_media::thumbs`), never from
+//! `metadata::current()` — the same
 //! identity rule `appkit/track_menu.rs` and `appkit/skip_pill.rs` state. Reading `current()` is what made
 //! the Chapters tab vanish for every episode started from a show detail page: `current()` is then
 //! the SHOW, and a show container carries no `Chapter[]`.
@@ -42,6 +44,18 @@ pub struct ChaptersState {
     sel: c_int,
     scroll: Spring, // horizontal scroll offset (px)
     scale: Spring,  // focused-card pop (springs 1.0 → FOCUS_SCALE on each move)
+    /// A local file's chapter stills: the frame each chapter opens on, made by a
+    /// [`plx_media::thumbs`] worker, and the textures already uploaded (by bucket).
+    stills: Option<plx_media::thumbs::Thumbnailer>,
+    still_tex: Vec<(i64, std::os::raw::c_uint)>,
+}
+
+impl Drop for ChaptersState {
+    fn drop(&mut self) {
+        for (_, tex) in self.still_tex.drain(..) {
+            plx_gfx::gfx::delete_tex(tex);
+        }
+    }
 }
 
 impl ChaptersState {
@@ -52,10 +66,19 @@ impl ChaptersState {
             .iter()
             .rposition(|c| c.start_ms <= pos_ms)
             .unwrap_or(0) as c_int;
+        // A file on this machine's disk has no chapter stills of its own: make them from its frames.
+        let path = meta.playing().map(|p| std::path::Path::new(p.rk.as_str())).filter(|p| p.is_absolute());
+        let stills = path.and_then(plx_media::thumbs::Thumbnailer::new);
+        if let Some(t) = &stills {
+            let starts: Vec<i64> = chapters(meta).iter().map(|c| c.start_ms * 1_000_000).collect();
+            t.prefetch(&starts);
+        }
         ChaptersState {
             sel,
             scroll: Spring::at(scroll_target(sel)),
             scale: Spring::at(1.0), // pop in
+            stills,
+            still_tex: Vec::new(),
         }
     }
 
@@ -142,12 +165,17 @@ impl ChaptersState {
                 p,
                 card,
                 0,
-                "", // a local file carries no chapter stills
+                "", // a local file carries no chapter stills: its frame is drawn over the ground
                 (480, 270),
                 CH_RAD,
                 focused,
                 scale,
             );
+            if let Some(tex) = self.still(ch.start_ms * 1_000_000) {
+                let r = if focused { card.scaled(scale) } else { card };
+                let (w, h) = (plx_media::thumbs::W as f32, plx_media::thumbs::H as f32);
+                p.tex_uv(tex, r.cover_uv(w, h, plx_gfx::gfx::Crop::Centre), r, CH_RAD, theme::white(1.0));
+            }
             if focused {
                 // Same scaled frame `card()` draws into, so the rim rides the focus pop rather than
                 // lagging a resting box. Full strength whenever focused — the pop already animates the
@@ -176,6 +204,22 @@ impl ChaptersState {
                 p.text(sc.as_ptr(), x, ty + 34.0, theme::size::CAPTION, dimc, 0, 0);
             }
         }
+    }
+}
+
+impl ChaptersState {
+    /// The texture of the still at `ns`, uploading it the first time its frame is there. Runs in
+    /// the draw, on the GL thread.
+    fn still(&mut self, ns: i64) -> Option<std::os::raw::c_uint> {
+        let bucket = plx_media::thumbs::bucket_of(ns);
+        if let Some(&(_, tex)) = self.still_tex.iter().find(|(b, _)| *b == bucket) {
+            return Some(tex);
+        }
+        let frame = self.stills.as_ref()?.frame_exact(ns)?;
+        let (w, h) = (plx_media::thumbs::W as c_int, plx_media::thumbs::H as c_int);
+        let tex = plx_gfx::gfx::upload_rgba(0, w, h, frame.rgba.as_ptr());
+        self.still_tex.push((bucket, tex));
+        Some(tex)
     }
 }
 
@@ -445,6 +489,8 @@ mod focus_tests {
             sel: 1,
             scroll: Spring::at(0.0),
             scale: Spring::at(1.0),
+            stills: None,
+            still_tex: Vec::new(),
         };
         let part = ChaptersPart { state: &st, entry: e, group: GroupId(0), count: chapter_count(test_store().view()) };
         with_cx(e, |cx| {

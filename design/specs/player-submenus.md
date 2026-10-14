@@ -129,8 +129,10 @@ re-recorded.
   state immediately (a push during a push retargets; push then pop mid-slide reverses).
   Built as `ui::panel_motion::PanelMotion`, owned by `TrackMenuState` and `MoreMenuState`: the
   natural layout is cached against `TableView::layout_rev` (re-stamped by every content change) and
-  only recomputed then; springs animate the panel's top and left edges (bottom and right stay
-  anchored, so the card grows and shrinks away from the HUD); a push or pop hands the OUTGOING page's
+  only recomputed then; springs animate the panel's bottom and left edges (top and right stay
+  anchored: since the 2026-10 redesign the card hangs from the transport's top menu,
+  `player_hud::MENU_BOTTOM`, and grows downward — it was bottom-anchored over the old control row
+  before); a push or pop hands the OUTGOING page's
   table to `begin_slide` (stored without its focus pill: only the arriving page draws one), and
   `draw` paints one background, opens `ClipScope::open_in` at the animated rect pulled in by
   `CLIP_INSET` (the scissor is rectangular and cannot follow the card's rounded corners), and draws

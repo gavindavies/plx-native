@@ -357,8 +357,9 @@ presentation in a design pass.
    HUD keeps the small transport *state indicator* past the elapsed clock: a pause glyph while
    paused, a seek spinner while the transport owns the busy signal, nothing at all while playing.
    Transport is driven by REMOTE KEYS, which must genuinely work. Any `<<` / `>>` added must be a
-   small glyph in that same indicator slot at the clock's cap height — never a control, and never a
-   fourth entry in the HUD control row (`appkit/player_hud.rs`'s `BTN_N`, currently 3).
+   small glyph in that same indicator slot at the clock's cap height — never a control, and never an
+   entry in the transport's top menu (`appkit/player_hud.rs`'s `menu_items`: Info, Chapters,
+   Subtitles, Audio — panels, not transport).
 
 4. **Failure read-outs are never red — the app does not scold.** A failed verdict is inked bold at
    `size::TITLE` in `theme::TEXT_SECONDARY`, per the design system's `StatusOverlay` contract.

@@ -1267,10 +1267,10 @@ impl FailureReadout {
 // old `app/run.rs` ladder calling `icon_hit`/`scrub_hit` on the raw pointer position by hand. The
 // GEOMETRY those functions describe is unchanged — only how a caller LEARNS it: a registered `Stop`
 // (and its mirror in `PlayerScreen`'s own `Focusable::place`) rather than a bare function the
-// frame loop had to know to call. `scrub_hit` is GONE for that reason (phase 12); `icon_hit`
-// survives as the geometry its own tests grade. Kept as plain `u32` constants,
-// not an enum, so `PlayerScreen` can address a control-row/tab-row ITEM by `BASE + index` exactly
-// as `icon_hit`'s `0..BTN_N` scan already did.
+// frame loop had to know to call. `scrub_hit` and `icon_hit` are both gone; the top menu's rects
+// come from `menu_layout`, one definition for the draw, the hit map and the focus engine. Kept as
+// plain `u32` constants, not an enum, so `PlayerScreen` can address a menu ITEM as
+// `ELEM_ROW_BASE + index` in `menu_items` order.
 pub const ELEM_SCRUB: u32 = 0;
 /// `+ 0..BTN_N` — the top menu's items, in [`menu_items`] order.
 pub const ELEM_ROW_BASE: u32 = 10;
@@ -1701,7 +1701,7 @@ pub fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn plx_machine::machine
     // transport state indicator just past the elapsed clock — the four-state READ-OUT resolved by
     // [`transport_mark`] (rewind / pause / fast-forward / play, plus the narrowed spinner), and
     // NOTHING while playing steadily. A read-out, not an action toggle: nothing here is focusable
-    // or hit-tested, and the control row stays the three discs it has always been.
+    // or hit-tested; the transport's only controls are the top menu.
     // Gated on `busy`, not on `loading()`: with `loading()` the transport lit the same spinner the
     // centred read-out was already showing, for the whole of every load AND every seek. Centered on
     // the clock's line box; drops to the clock's LEFT when the right side is against the remaining
@@ -1974,11 +1974,9 @@ pub fn draw_hud(
 /// ([`plx_ui::consts::SAFE`]). Private geometry, so the rects are built where they are drawn
 /// rather than restated in the module that grades them.
 ///
-/// The bottom tab row is measured at its widest — `Chapters`, which an item with chapters draws —
-/// because a pill's width is the label's and the audit has to grade the widest
-/// state a screen can be in, not the one a screenshot happened to catch. That measurement needs a
-/// font, which the host suite cannot link, so it is bounded by the row's OWN height instead: what
-/// the audit is about here is the row's left edge and its BOTTOM, and both are font-independent.
+/// The top menu's width is its labels', which needs a font the host suite cannot link, so it is
+/// graded on its top edge and height only (`MENU_TOP`, `MENU_BOTTOM`) — the font-independent part
+/// the overscan audit is about.
 #[cfg(any(test, feature = "test-support"))]
 pub fn overscan_rects(out: &mut Vec<(&'static str, Rect)>) {
     out.push(("player scrubber", Rect::new(SB_X, SB_Y, sb_w(), SB_H)));

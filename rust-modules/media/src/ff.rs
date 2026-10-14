@@ -159,7 +159,8 @@ pub struct AVDictionaryEntry {
     value: *const c_char,
 }
 
-/// The only field this app reads past `AVFormatContext.streams`.
+/// `AVFormatContext.duration` — read by offset, like the chapter table ([`chapters`]); these are
+/// the fields this app reads past `AVFormatContext.streams`.
 #[inline]
 unsafe fn fmt_duration(fmt: *const AVFormatContext) -> i64 {
     *((fmt as *const u8).add(OFF_FMT_DURATION) as *const i64)
@@ -324,9 +325,10 @@ pub struct AVChannelLayout {
 //
 // It STOPS at `filename` because that is where the two majors stop agreeing: FFmpeg 4.0 inserted
 // `char *url` at +1056, pushing start_time to +1064 and duration to +1072. Everything above is
-// identical on 3.3 and 4.x. `duration` — the only field past that point this app reads — is
-// reached through [`fmt_duration`] at the offset the runtime ABI table gives, rather than by
-// declaring it here at an offset that is right on exactly one of the two.
+// identical on 3.3 and 4.x. The fields past that point this app reads — `duration`, `nb_chapters`
+// and `chapters` — are reached through the `OFF_FMT_*` constants ([`fmt_duration`], [`chapters`]),
+// which hold for the one FFmpeg the `ABI_OK` major-version gate admits, rather than by declaring
+// them here at offsets that are right on exactly one version.
 #[repr(C)]
 pub struct AVFormatContext {
     pub av_class: *const AVClass,    // +0
@@ -339,9 +341,9 @@ pub struct AVFormatContext {
     pub streams: *mut *mut AVStream, // +28
                                      // STOPS HERE. Everything past `streams` shifts between majors — `duration` is at +48 on
                                      // FFmpeg 6, +64 on 9, and +1064 on the n3.3 the televisions ship, because 5.0 deleted
-                                     // `filename[1024]` and later releases kept rearranging what replaced it. It is the only field
-                                     // beyond this point the app reads, so it is read at OFF_FMT_DURATION rather than declared at
-                                     // a position that would be quietly wrong after a version bump.
+                                     // `filename[1024]` and later releases kept rearranging what replaced it. The fields beyond
+                                     // this point the app reads (`duration`, `nb_chapters`, `chapters`) are read at the OFF_FMT_*
+                                     // offsets rather than declared at positions that would be quietly wrong after a version bump.
 }
 
 // AVBSFContext is NOT modelled. The app does its own AVCC->Annex-B conversion in Rust, so the
