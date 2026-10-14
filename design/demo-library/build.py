@@ -63,14 +63,22 @@ def sha256(path):
     return h.hexdigest()
 
 
+def stored(asset):
+    """What is actually stored for an asset: its `file` pin where the original could not be fetched
+    (Wikimedia refuses bulk original-size downloads; those are its 1280-px thumbnails), else the
+    original itself. Licence, author and source page are the original's either way."""
+    return asset.get("file", asset)
+
+
 def source_path(aid, asset):
-    ext = pathlib.PurePosixPath(urllib.request.urlparse(asset["url"]).path).suffix.lower() or ".bin"
+    ext = pathlib.PurePosixPath(urllib.request.urlparse(stored(asset)["url"]).path).suffix.lower() or ".bin"
     return cache_dir() / "sources" / f"{aid}{ext}"
 
 
 def fetch(aid, asset):
     """The verified local copy of one asset, downloading it if it is missing or wrong."""
     dst = source_path(aid, asset)
+    asset = stored(asset)
     if dst.exists() and dst.stat().st_size == asset["bytes"] and sha256(dst) == asset["sha256"]:
         return dst
     dst.parent.mkdir(parents=True, exist_ok=True)
