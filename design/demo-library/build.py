@@ -8,8 +8,8 @@
 and ESA/Hubble's Hubblecast. `assets.json` pins every picture they use (URL, sha256, byte size,
 pixel size, licence, author, attribution). This script
 
-  * fetches each asset into a cache ($PITV_DEMO_CACHE, default ~/.cache/pitv-demo) and refuses a
-    file whose hash or size differs from the pin;
+  * reads each asset from `sources/` beside this script (committed, so nothing is downloaded), or
+    fetches one that is missing from its pinned URL, refusing a file whose hash or size differs;
   * writes the folder layout PiTV reads (`rust-modules/data/src/local.rs`):
         Films/poster.jpg, TV Shows/poster.jpg   (mosaics of the posters inside)
         Films/<Title> (<Year>)/poster.jpg  and  <Title> (<Year>).mkv
@@ -21,8 +21,8 @@ pixel size, licence, author, attribution). This script
     an English subtitle file holding its synopsis;
   * writes CREDITS.md (licence and attribution for every asset used) at the library's root.
 
-Needs python3 and ffmpeg/ffprobe; nothing else. Re-running skips what already exists; delete a
-file to remake it. Takes ~400 MB of downloads with the film, a few minutes of encoding.
+Needs python3, ffmpeg/ffprobe and (only to fetch a missing source) curl. Re-running skips what already exists; delete a
+file to remake it. Takes a few minutes of encoding.
 """
 import argparse
 import hashlib
@@ -35,19 +35,24 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.error
 import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
-UA = "PiTV-demo-library/1.0 (https://github.com/gavindavies/plx-native)"
+UA = "PiTV/1.0 (https://github.com/gavindavies/plx-native)"
 FONT = HERE.parent.parent / "pkg" / "appfont.ttf"
 POSTER = (1000, 1500)
+POLITE_HOSTS = ("upload.wikimedia.org",)
+POLITE_PAUSE = 6.0
+RETRY_AFTER_CAP = 600
+ATTEMPTS = 6
 STILL = (1280, 720)
 
 
 def cache_dir():
+    """Where the sources live: `sources/` beside this script, committed (Sintel through Git LFS),
+    so a checkout builds the library without a download. `PITV_DEMO_CACHE` points elsewhere."""
     env = os.environ.get("PITV_DEMO_CACHE")
-    return pathlib.Path(env) if env else pathlib.Path.home() / ".cache" / "pitv-demo"
+    return pathlib.Path(env) if env else HERE
 
 
 def sha256(path):
@@ -60,7 +65,7 @@ def sha256(path):
 
 def source_path(aid, asset):
     ext = pathlib.PurePosixPath(urllib.request.urlparse(asset["url"]).path).suffix.lower() or ".bin"
-    return cache_dir() / "src" / f"{aid}{ext}"
+    return cache_dir() / "sources" / f"{aid}{ext}"
 
 
 def fetch(aid, asset):
@@ -70,19 +75,25 @@ def fetch(aid, asset):
         return dst
     dst.parent.mkdir(parents=True, exist_ok=True)
     print(f"fetch {aid} ({asset['bytes']:,} bytes)", flush=True)
-    req = urllib.request.Request(asset["url"], headers={"User-Agent": UA})
+    if urllib.request.urlparse(asset["url"]).hostname in POLITE_HOSTS:
+        time.sleep(POLITE_PAUSE)  # Wikimedia answers a burst with 429
     fd, tmp = tempfile.mkstemp(dir=dst.parent)
     os.close(fd)
     try:  # the partial download never survives: a failed request, a bad hash, a ^C
-        for attempt in range(4):
-            try:
-                with open(tmp, "wb") as f, urllib.request.urlopen(req, timeout=120) as r:
-                    shutil.copyfileobj(r, f)
+        # curl rather than urllib: Wikimedia refuses urllib's requests (403/429) whatever the UA.
+        for attempt in range(1, ATTEMPTS + 1):
+            r = subprocess.run(["curl", "-sSL", "-A", UA, "--max-time", "1800", "-o", tmp,
+                                "-D", "-", "-w", "%{http_code}", asset["url"]],
+                               capture_output=True, text=True)
+            code = r.stdout[-3:]
+            if r.returncode == 0 and code == "200":
                 break
-            except urllib.error.HTTPError as e:
-                if (e.code != 429 and e.code < 500) or attempt == 3:
-                    raise
-                time.sleep(5 * 2 ** attempt)
+            if attempt == ATTEMPTS or (code not in ("429", "000") and not code.startswith("5")):
+                sys.exit(f"{aid}: HTTP {code} {r.stderr.strip()} ({asset['url']})")
+            m = re.findall(r"(?im)^retry-after:\s*(\d+)", r.stdout)
+            wait = min(int(m[-1]) if m else 5 * 2 ** attempt, RETRY_AFTER_CAP)
+            print(f"  HTTP {code}; retry {attempt}/{ATTEMPTS - 1} in {wait}s", flush=True)
+            time.sleep(wait)
         got = sha256(tmp)
         if got != asset["sha256"] or os.path.getsize(tmp) != asset["bytes"]:
             sys.exit(f"{aid}: sha256 {got} does not match the pin ({asset['url']})")
@@ -277,7 +288,7 @@ def main():
     p.add_argument("--film-seconds", type=int, default=60)
     p.add_argument("--episode-seconds", type=int, default=30)
     args = p.parse_args()
-    for tool in ("ffmpeg", "ffprobe"):
+    for tool in ("ffmpeg", "ffprobe", "curl"):
         if not shutil.which(tool):
             sys.exit(f"{tool} is required")
     Builder(pathlib.Path(args.out), not args.no_films, args.film_seconds, args.episode_seconds).build()
