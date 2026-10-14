@@ -56,6 +56,12 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                 super::local_watch::play(&mut app.player.session, &mut app.adapters.player, std::path::Path::new(&path),
                     from_start, Some(ret), &mut app.pages, &mut app.bridge);
             }
+            ContentReq::TrackMenu(kind) => {
+                if let Some(arg) = app.bridge.track_menu_arg(&app.pages, entry, &ret, kind) {
+                    bridge::open_item_menu(&mut app.pages, arg);
+                    app.ok_armed = false;
+                }
+            }
             ContentReq::ItemMenu => {
                 // The page does not move: a surface is presented over the top page and never
                 // replaces it.

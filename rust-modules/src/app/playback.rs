@@ -245,9 +245,13 @@ pub(crate) fn player_requests(
                     player.publish();
                 }
             }
-            PlayerReq::FocusTabs => {
+            PlayerReq::FocusMenu => {
+                let has_chapters = plx_appkit::chapters_panel::has_chapters(bridge.metadata_view());
                 if let Some(player) = super::bridge::player_mut(pages) {
-                    player.hud.nav.focus = 2;
+                    player.hud.nav.focus = 1;
+                    if let Some(item) = player.menu_open.and_then(|m| plx_appkit::player_hud::menu_index(m, has_chapters)) {
+                        player.hud.nav.btn = item;
+                    }
                 }
             }
             // The fall-through a surface cannot perform (`screens::player::overlay`'s module doc):
@@ -267,8 +271,8 @@ pub(crate) fn player_requests(
             // `repause_at` is an `App` field, which is exactly why this is a request.
             PlayerReq::CommitSeek(ns) => commit_seek(ns, repause_at),
             PlayerReq::CommitTrack(commit) => commit_track(ps, commit),
-            // The tabs row's OK: presents a panel immediately rather than through the deferred
-            // press `ArmControlRow` uses.
+            // A panel presented immediately rather than through the deferred press
+            // `ArmControlRow` uses (the Tracks panel handing off to Timing).
             PlayerReq::OpenOverlay(kind) => {
                 super::bridge::open_player_overlay(bridge.metadata_view(), pages, kind);
             }
@@ -328,14 +332,20 @@ pub(crate) unsafe fn activate_player_row(
     pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
     bridge: &mut super::bridge::Bridge,
 ) {
+    use plx_appkit::player_hud::MenuItem;
+    use plx_screens::player::overlay::OverlayKind;
     // The cursor is the instance's; read the one field this dispatch turns on, so the container
     // is borrowed once and the arms below are free to present a panel on it.
     let btn = super::bridge::player(pages).map_or(0, |player| player.hud.nav.btn);
-    super::bridge::open_player_overlay(
-        bridge.metadata_view(),
-        pages,
-        plx_screens::player::overlay::OverlayKind::Tracks { tab: if btn == 0 { 1 } else { 0 } },
-    );
+    let has_chapters = plx_appkit::chapters_panel::has_chapters(bridge.metadata_view());
+    let kind = match plx_appkit::player_hud::menu_item(btn, has_chapters) {
+        Some(MenuItem::Info) => OverlayKind::Info,
+        Some(MenuItem::Chapters) => OverlayKind::Chapters,
+        Some(MenuItem::Subtitles) => OverlayKind::Tracks { tab: 1 },
+        Some(MenuItem::Audio) => OverlayKind::Tracks { tab: 0 },
+        None => return,
+    };
+    super::bridge::open_player_overlay(bridge.metadata_view(), pages, kind);
     if let Some(player) = super::bridge::player_mut(pages) {
         player.hud.extend(now, HUD_LINGER_MS);
         player.publish();

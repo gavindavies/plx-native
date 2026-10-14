@@ -513,31 +513,37 @@ What it contains, over a scrim that fades up from the bottom of the screen:
 
 - **the title**, left, with an episode kicker above it for a series (*"S24, E4 · Bringing Up Brady"*
   over *Family Guy*);
-- **the scrubber** — a full-width bar with a playhead knob that grows and glows when it has focus;
-- **the elapsed clock**, which travels under the knob, and the **remaining clock**, right-aligned —
-  the remaining clock hides itself if the travelling elapsed label would collide with it;
+- the **playing tracks**, right, level with the title (*"[CC] English · [5.1] English Dolby
+  Digital"*);
+- **the scrubber** — a full-width 12 px bar with a line playhead that gains a soft halo when it has
+  focus;
+- **the elapsed clock**, bold under the bar's left end, and the **remaining clock** (*−7:26*) under
+  its right end;
 - **the state mark**, next to the elapsed clock — §6.5;
-- the **Info** / **Chapters** tabs, bottom left;
-- the **control row**, top right — §6.7.
+- the **top menu**, a capsule centred at the top of the screen: **Info**, **Chapters** (only when
+  the item has chapters), **Subtitles**, **Audio** — §6.7, §6.8.
+
+While a seek preview is up, a card above the playhead shows the picture at the previewed time (for a
+file on this machine) over a pill with the time and the chapter it falls in; the title row steps
+aside for it.
 
 Both clocks are laid out on a `0`-digit template so the numbers do not wobble as they change.
 
 **The scrubber rail is deliberately bare** — no chapter ticks, no marker bands. Both were built and
 removed.
 
-**Focus inside the HUD is three bands.** UP and DOWN walk them in this screen order:
+**Focus inside the HUD is two bands.** UP and DOWN walk them in this screen order:
 
 | position | band | LEFT/RIGHT there |
 |---|---|---|
-| top | the **control row** | move between its items |
-| middle | the **scrubber** | seek (§6.6) |
-| bottom | the **Info / Chapters** tabs | move between them (*Chapters* is present only when the item has chapters) |
+| top | the **top menu** | move between its items |
+| bottom | the **scrubber** | seek (§6.6) |
 
-Two edges are worth knowing: **UP from the control row hides the HUD** — there is nothing above it,
-and dismissing is the useful answer — and **DOWN from the tabs does nothing**, since they are the
+Two edges are worth knowing: **UP from the top menu hides the HUD** — there is nothing above it,
+and dismissing is the useful answer — and **DOWN from the scrubber does nothing**, since it is the
 bottom. Leaving the scrubber cancels any seek preview that was in progress rather than committing it.
 
-Everything in the control row and the tab row is focusable and activates with OK. **The state mark
+Every item of the top menu is focusable and activates with OK. **The state mark
 is not focusable and is not hit-tested** — it is a read-out, not a control, which is exactly the
 distinction §6.1 draws.
 
@@ -549,7 +555,7 @@ distinction §6.1 draws.
 | **Play** / **Pause** / **Play-Pause** | the corresponding transition, from anywhere |
 | **LEFT / RIGHT** | seek, or move within the focused band — §6.6 |
 | **Rewind / Fast-forward** | the same as LEFT / RIGHT (§1.2) |
-| **UP / DOWN** | move between the HUD's three bands; a press on a hidden HUD is spent raising it |
+| **UP / DOWN** | move between the HUD's two bands; a press on a hidden HUD is spent raising it |
 | **Stop** | leave the player |
 | **BACK** | leave the player |
 | **EXIT** | terminate the app (§2.3) |
@@ -623,6 +629,9 @@ The pointer can drag the scrubber directly, under the same commit rule.
 
 ### 6.7 The control row — subtitles and audio, and what replaces them
 
+*(Since the 2026-10 redesign the Subtitles and Audio entries are items of the top menu, §6.3, not
+discs at the top right; what they open is unchanged.)*
+
 The row at the HUD's top right has **three mutually exclusive occupants**, decided by what is under
 the playhead. It is one row, not three stacked controls, and the choice is made once per frame.
 
@@ -682,16 +691,15 @@ is no full-screen post-play interstitial** — one was built and is deliberately
 
 ### 6.8 Info and Chapters
 
-The two tabs at the HUD's bottom left. Both are modal panels on the live player, and BACK closes
-either back to the plain HUD; **DOWN past the end of either drops focus back onto the tab row**,
-which is the way out without BACK.
+Two items of the top menu. Both are modal panels on the live player, and BACK closes either back
+to the plain HUD; **UP returns focus to the top menu**, which is the way out without BACK.
 
-- **Info** — the episode still, title, synopsis and a metadata line with capability badges, beside a
-  column of two actions: **From Beginning** and **Go to Show** / **Go to Movie**. UP/DOWN walks them,
-  OK activates.
+- **Info** — a card under the menu: the title, its facts (year, runtime, genres), the synopsis and
+  the picture and sound playing. It holds no focus; BACK or OK puts it away.
 - **Chapters** — a horizontal strip of chapter cards, each a thumbnail with its name and timestamp.
   It opens focused on the chapter containing the playhead; LEFT/RIGHT picks, OK seeks there and
-  resumes. The tab exists only when the playing item has chapters.
+  resumes. A file on this machine has its stills made from its own frames. The item exists only when
+  the playing item has chapters.
 
 ---
 

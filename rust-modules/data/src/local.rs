@@ -182,6 +182,21 @@ pub fn listing(dir: &Path) -> Listing {
     state().dirs.get(dir).map_or(Listing::Loading, |s| s.listing.clone())
 }
 
+/// The listed entry for the file at `path` — its title, `.nfo` and artwork — from its folder's
+/// listing. `None` until that folder has been scanned, in which case the scan is asked for and a
+/// later read finds it.
+pub fn entry_for(path: &Path) -> Option<Entry> {
+    let dir = path.parent()?;
+    match listing(dir) {
+        Listing::Ready(entries) => entries.iter().find(|e| e.path == path).cloned(),
+        Listing::Loading => {
+            request(dir);
+            None
+        }
+        Listing::Failed(_) => None,
+    }
+}
+
 /// Scan `dir` unless a scan is in flight or the last one is fresh.
 pub fn request(dir: &Path) {
     {

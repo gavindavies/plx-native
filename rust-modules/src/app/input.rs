@@ -290,7 +290,6 @@ pub(crate) unsafe fn key_ok(
     ok_armed: &mut bool,
     press: &mut plx_ui::press::Press,
     pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
-    bridge: &mut super::bridge::Bridge,
 ) {
     if super::bridge::player(pages).is_some() {
         // The cursor and the pre-press visibility are the mounted screen's, read ONCE into copies
@@ -299,24 +298,19 @@ pub(crate) unsafe fn key_ok(
         // `begin_fresh_press` has already cleared `dismissed`, so re-asking calls a hand-hidden
         // transport visible and this arm would open a panel from behind it
         // (`HudState::visible_at_press`).
-        let Some((vis, focus, tab)) = super::bridge::player(pages)
-            .map(|player| (player.hud.visible_at_press, player.hud.nav.focus, player.hud.nav.tab))
+        let Some((vis, focus)) = super::bridge::player(pages)
+            .map(|player| (player.hud.visible_at_press, player.hud.nav.focus))
         else {
             return;
         };
-        // Row 1 is the transport's CONTROL ROW — the Subtitles / Audio / ⋯ discs, or whichever
-        // stand-in has taken their place (Skip, Up Next). Every occupant is a control FACE with a
-        // pop of its own (`player_hud::ROW_POP`), so OK takes the tvOS press: dip now, act on the
-        // spring-back, in `activate_player_row` from the per-frame loop. Both of its arms open
-        // something OVER this HUD rather than leaving the route, which makes this the one control
-        // row in the app where the whole dip → ring is on screen either side of the activation.
+        // Row 1 is the transport's TOP MENU — Info, Chapters, Subtitles, Audio. Every item is a
+        // control FACE with a pop of its own (`player_hud::RowPop`), so OK takes the tvOS press:
+        // dip now, act on the spring-back, in `activate_player_row` from the per-frame loop. Every
+        // arm opens a panel OVER this HUD rather than leaving the route, which makes this the one
+        // control row in the app where the whole dip → ring is on screen either side of it.
         if vis && focus == 1 {
             press.begin_ctl(now);
             *ok_armed = true;
-        } else if vis && focus == 2 {
-            if tab == 0 {
-                super::bridge::open_player_overlay(bridge.metadata_view(), pages, plx_screens::player::overlay::OverlayKind::Chapters);
-            }
         } else {
             let np = !super::lifecycle::viewer_paused();
             if np {

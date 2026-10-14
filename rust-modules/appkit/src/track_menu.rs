@@ -257,26 +257,28 @@ type TrackForm = Form<TrackRow, (), TrackPage>;
 type TrackTable = FormTable<TrackRow, (), TrackPage>;
 
 
+/// The panel's top edge: under the transport's top menu, with the menu's own air.
+const PANEL_TOP: f32 = crate::player_hud::MENU_BOTTOM + 16.0;
+
 /// **A tab root's natural panel rect** — the layout of `table` as the panel would hug it. Each
 /// tab hugs its own rows (shared menu rule); the right edge is fixed, so switching tabs moves only
 /// the left edge.
 fn table_natural(table: &TableView, measure: &dyn plx_machine::machine::Measure) -> Rect {
     let pw = table.menu_panel_width(measure);
-    // the transport control row's own right edge — one number for the discs and both panels
+    // the panels' right edge, the app's side margin
     let px = crate::player_hud::CTRL_RIGHT - pw;
-    // Bottom-anchored just above the control-button row (buttons top at SCR_H-288) with a clear gap.
-    // The panel grows UPWARD from this fixed bottom edge, and its height is capped so the top never
-    // crosses `top_min` — so a long list (an item with many audio dubs) SCROLLS inside the panel
-    // instead of the panel itself spilling down over the buttons. Switching Audio↔Subtitles keeps
-    // the bottom edge steady.
-    let bottom = theme::layout::PLAYER_MENU_BOTTOM; // 764 — ~28px above the buttons
+    // The panel HANGS from the transport's top menu (the Subtitles and Audio items that open it),
+    // a clear gap under the capsule. It grows DOWNWARD from that fixed top edge, and its height is
+    // capped so the bottom never crosses `PLAYER_MENU_BOTTOM`, clear of the title block — so a
+    // long list (an item with many audio dubs) SCROLLS inside the panel instead of the panel
+    // itself spilling over the transport. Switching Audio↔Subtitles keeps the top edge steady.
+    let bottom = theme::layout::PLAYER_MENU_BOTTOM;
     // A note row wraps, so its line count depends on the width: it is resolved HERE, against the
     // same `measure` and `pw` the panel is sized with, so no caller (`update`, hit-testing,
     // `draw`) can read the count a rebuild left stale. Idempotent and a few short strings.
     table.fit_notes(pw, measure);
-    let top_min = 60.0;
-    let ph = table.measured_height().clamp(160.0, bottom - top_min);
-    let py = bottom - ph; // ≥ top_min by construction
+    let py = PANEL_TOP;
+    let ph = table.measured_height().clamp(160.0, bottom - py);
     Rect::new(px, py, pw, ph)
 }
 
@@ -805,8 +807,8 @@ pub fn new(
         self.root_tracks.iter().copied().chain(self.other.iter().flat_map(|o| o.tracks.iter().map(|t| t.i))).nth(n)
     }
 
-    /// Show `tab` (0=Audio, 1=Subtitles) on a menu that is ALREADY open — the second disc pressed
-    /// while the first one's tab is showing. Same body as the LEFT/RIGHT arm below, which is why
+    /// Show `tab` (0=Audio, 1=Subtitles) on a menu that is ALREADY open — the top menu's other
+    /// track item pressed while the first one's tab is showing. Same body as the LEFT/RIGHT arm below, which is why
     /// that arm calls this rather than repeating it.
     pub fn focus_tab(&mut self, meta: metadata::MetadataView<'_>, tab: c_int) {
         if tab != self.tab {
@@ -1551,8 +1553,10 @@ use plx_data::metadata::friendly_codec; // the ONE codec→display-name map (sha
 use plx_data::metadata::track_label::Kind;
 
 
-/// "AC-3 5.1", "Dolby TrueHD 7.1", "DTS 5.1" — a compact codec + channel-layout descriptor.
-fn audio_descriptor(s: &metadata::Stream) -> String {
+/// "AC-3 5.1", "Dolby TrueHD 7.1", "DTS 5.1" — a compact codec + channel-layout descriptor. Public
+/// for the title page's audio picker (`screens::local_detail`), which names a track the way this
+/// menu does.
+pub fn audio_descriptor(s: &metadata::Stream) -> String {
     let codec = friendly_codec(&s.codec);
     let ch = if s.channels > 0 {
         match s.channels {
@@ -1715,7 +1719,7 @@ fn table_form(
 /// measure.
 #[cfg(any(test, feature = "test-support"))]
 pub fn overscan_rects(out: &mut Vec<(&'static str, Rect)>) {
-    let (bottom, top_min) = (theme::layout::PLAYER_MENU_BOTTOM, 60.0);
+    let (bottom, top_min) = (theme::layout::PLAYER_MENU_BOTTOM, PANEL_TOP);
     let pw = plx_ui::table::MENU_MAX_W;
     out.push((
         "track menu panel (widest)",
@@ -3506,7 +3510,7 @@ mod motion_tests {
         menu.focus_tab(store.view(), 0);
         let short = natural(&menu);
         assert!(short.h < tall.h, "the empty Audio tab is shorter than the Subtitles tab: {} < {}", short.h, tall.h);
-        assert_eq!(short.y + short.h, tall.y + tall.h, "the bottom edge is the anchor");
+        assert_eq!(short.y, tall.y, "the top edge is the anchor: the panel hangs from the menu");
         assert_eq!(short.x + short.w, tall.x + tall.w, "and so is the right edge");
         assert!(frame(&mut menu, &ps, &store), "the resize is motion");
         let first = shown(&menu);

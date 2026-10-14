@@ -59,7 +59,7 @@ pub const WORD: &str = "player";
 
 /// The fields [`PlayerScreen::write`] canonicalises, for the recorder's shape pin (§5.4).
 pub const SHAPE: &str =
-    "PlayerScreen{hud:{focus:i32,btn:i32,tab:i32,until:u32,dismissed:bool,visible_at_press:bool},\
+    "PlayerScreen{hud:{focus:i32,btn:i32,until:u32,dismissed:bool,visible_at_press:bool},\
      scrub:{dir:i32,hold:bool,reveal:bool,drag:bool,ns:i64,commit_at:u32},origin:Option<u32>}";
 
 /// **The page this playback was launched from**, as the container's own identity.
@@ -84,6 +84,8 @@ pub struct PlayerRender {
     pub ass: ass_subtitles::AssSubtitles,
     /// The text cue on screen, wrapped and fitted once, and which page of it is showing.
     pub captions: player_hud::CaptionPager,
+    /// The scrub preview's frames and the texture the card shows.
+    pub scrub_frames: player_hud::ScrubFrames,
 }
 
 /// **What the surfaces over the player page do to the transport this frame** — one value
@@ -130,6 +132,10 @@ pub struct PlayerScreen {
     /// Is the transport's MIDDLE drawn at all this frame? False while the Chapters
     /// strip has taken it — which panel is up is the container's answer, so the loop pushes it.
     pub transport: bool,
+    /// The top-menu item whose panel is up this frame, which keeps its selected plate while the
+    /// panel holds the focus — the container's answer again, pushed by the loop beside
+    /// `transport`.
+    pub menu_open: Option<player_hud::MenuItem>,
     /// What the surfaces over this page do to the transport this frame — see [`HudPolicy`].
     /// Pushed once per frame by `app/run.rs` through [`Self::set_hud_policy`].
     hud_policy: HudPolicy,
@@ -155,6 +161,7 @@ impl PlayerScreen {
             row: TransportRow::new(),
             busy: plx_appkit::player_hud::Busy::None,
             transport: true,
+            menu_open: None,
             hud_policy: HudPolicy::Normal,
             origin: None,
             render: PlayerRender::default(),
@@ -213,15 +220,23 @@ impl PlayerScreen {
         measure: &dyn plx_machine::machine::Measure,
         meta: plx_data::metadata::MetadataView<'_>,
     ) {
+        // The preview's picture, while a scrub is previewing — a local file's frame at the bar.
+        let thumb = if self.scrub.ns >= 0 && self.transport {
+            let path = meta.playing().map(|p| std::path::Path::new(p.rk.as_str())).filter(|p| p.is_absolute());
+            self.render.scrub_frames.resolve(path, self.scrub.ns)
+        } else {
+            player_hud::Thumb::None
+        };
         plx_appkit::player_hud::draw_hud(
             ps,
             &mut self.row,
             self.busy,
             self.hud.nav.focus,
             self.hud.nav.btn,
-            self.hud.nav.tab,
+            self.menu_open,
             now,
             self.transport,
+            thumb,
             measure,
             meta,
         );
@@ -271,14 +286,14 @@ impl PlayerScreen {
     }
 
     /// Is group `g` on screen this frame — the same gates `player_hud::draw_hud`/`draw_readout`
-    /// paint behind. A failure owns the frame outright; the scrubber and control row are the
-    /// transport's MIDDLE, which an open Chapters strip hides.
+    /// paint behind. A failure owns the frame outright; the scrubber is the transport's MIDDLE,
+    /// which an open Chapters strip hides, and the top menu stays over it.
     fn group_drawn(&self, g: GroupId, hud_drawn: bool) -> bool {
         let failed = player_hud::readout_owns_frame(self.busy);
         match g {
             GROUP_FAILURE => player_hud::failure_row_drawn(self.busy),
-            GROUP_SCRUB | GROUP_ROW => hud_drawn && !failed && self.transport,
-            GROUP_TABS => hud_drawn && !failed,
+            GROUP_SCRUB => hud_drawn && !failed && self.transport,
+            GROUP_ROW => hud_drawn && !failed,
             _ => false,
         }
     }
@@ -288,7 +303,6 @@ impl PlayerScreen {
         match g {
             GROUP_SCRUB => player_hud::ELEM_SCRUB,
             GROUP_ROW => player_hud::ELEM_ROW_BASE + i,
-            GROUP_TABS => player_hud::ELEM_TAB_BASE + i,
             _ => player_hud::ELEM_FAILURE_BASE + i,
         }
     }
@@ -401,14 +415,13 @@ impl PlayerScreen {
     }
 }
 
-/// The four focus groups [`PlayerScreen`] registers (restructure phase 12, D2): the scrubber, the
-/// control row (the Subtitles and Audio discs), the bottom tab, and —
-/// only while a failure owns the frame — the read-out's row of actions. Element addresses
-/// within each are [`player_hud::ELEM_SCRUB`]/[`player_hud::ELEM_ROW_BASE`]/
-/// [`player_hud::ELEM_TAB_BASE`]/[`player_hud::ELEM_FAILURE_BASE`].
+/// The focus groups [`PlayerScreen`] registers (restructure phase 12, D2): the scrubber, the top
+/// menu (Info, Chapters, Subtitles, Audio), and — only while a failure owns the frame — the
+/// read-out's row of actions. Element addresses within each are
+/// [`player_hud::ELEM_SCRUB`]/[`player_hud::ELEM_ROW_BASE`]/[`player_hud::ELEM_FAILURE_BASE`].
+/// (GroupId 2 was the bottom tab row, retired with the 1d redesign.)
 const GROUP_SCRUB: GroupId = GroupId(0);
 const GROUP_ROW: GroupId = GroupId(1);
-const GROUP_TABS: GroupId = GroupId(2);
 const GROUP_FAILURE: GroupId = GroupId(3);
 
 
@@ -557,7 +570,7 @@ impl PlayerScreen {
         now: u32,
         fx: &mut Effects<'_, H>,
     ) -> Handled {
-        use player_hud::{ELEM_FAILURE_BASE, ELEM_FAILURE_END, ELEM_ROW_BASE, ELEM_SCRUB, ELEM_TAB_BASE};
+        use player_hud::{ELEM_FAILURE_BASE, ELEM_FAILURE_END, ELEM_ROW_BASE, ELEM_ROW_END, ELEM_SCRUB};
         let failed = plx_appkit::player_hud::transport_hidden(ps);
         let Some(elem) = hit else {
             // **A click that lands on no control at all toggles play/pause** — the `else` arm of
@@ -601,16 +614,10 @@ impl PlayerScreen {
                 }
                 Handled::Yes
             }
-            e if (ELEM_ROW_BASE..ELEM_TAB_BASE).contains(&e) => {
+            e if (ELEM_ROW_BASE..ELEM_ROW_END).contains(&e) => {
                 self.hud.nav.focus = 1;
                 self.hud.nav.btn = (e - ELEM_ROW_BASE) as i32;
                 Self::ask(fx, PlayerReq::ArmControlRow);
-                Handled::Yes
-            }
-            e if (ELEM_TAB_BASE..ELEM_FAILURE_BASE).contains(&e) => {
-                self.hud.nav.focus = 2;
-                self.hud.nav.tab = (e - ELEM_TAB_BASE) as i32;
-                Self::ask(fx, PlayerReq::OpenOverlay(overlay::OverlayKind::Chapters));
                 Handled::Yes
             }
             _ => Handled::No,
@@ -732,7 +739,7 @@ impl PlayerScreen {
             }
             Key::Up | Key::Down => {
                 if edge == Edge::Down {
-                    self.key_updown(key, now);
+                    self.key_updown(key, now, plx_appkit::chapters_panel::has_chapters(meta));
                 }
                 Handled::Yes
             }
@@ -757,18 +764,14 @@ impl PlayerScreen {
         }
     }
 
-    /// **OK, off a panel** — the deferred press for the control row (`PlayerReq::ArmControlRow`,
-    /// which the loop's existing commit-frame dispatch resolves through `activate_player_row`), the
-    /// immediate tabs-row overlay open, or — everywhere else, exactly as the old ladder's `else`
-    /// arm — a plain play/pause toggle. Port of `key_ok`'s `Route::Player` arm.
+    /// **OK, off a panel** — the deferred press for the top menu (`PlayerReq::ArmControlRow`,
+    /// which the loop's existing commit-frame dispatch resolves through `activate_player_row`), or
+    /// — everywhere else, exactly as the old ladder's `else` arm — a plain play/pause toggle. Port
+    /// of `key_ok`'s `Route::Player` arm.
     fn key_ok<H: AppLike>(&mut self, now: u32, fx: &mut Effects<'_, H>) {
         let vis = self.hud.visible_at_press;
         if vis && self.hud.nav.focus == 1 {
             Self::ask(fx, PlayerReq::ArmControlRow);
-        } else if vis && self.hud.nav.focus == 2 {
-            if self.hud.nav.tab == 0 {
-                Self::ask(fx, PlayerReq::OpenOverlay(overlay::OverlayKind::Chapters));
-            }
         } else {
             Self::ask(fx, PlayerReq::Transport(None));
         }
@@ -776,28 +779,29 @@ impl PlayerScreen {
         self.publish();
     }
 
-    /// Port of `key_player_updown`: walk the HUD's ring (scrubber ↔ control row ↔ tabs), or reveal
-    /// a hidden transport and move nothing.
-    fn key_updown(&mut self, key: consts::Key, now: u32) {
+    /// Port of `key_player_updown`: walk the HUD's ring (scrubber ↔ the top menu), or reveal a
+    /// hidden transport and move nothing. UP past the menu has nothing above it and hides the
+    /// transport; DOWN from the scrubber has nothing below.
+    fn key_updown(&mut self, key: consts::Key, now: u32, has_chapters: bool) {
         let vis = self.hud.visible_at_press;
         let mut hide = false;
         if !vis {
             self.hud.nav.focus = 0;
         } else if matches!(key, consts::Key::Up) {
             match self.hud.nav.focus {
-                0 => self.hud.nav.focus = 1,
-                2 => self.hud.nav.focus = 0,
+                0 => {
+                    self.hud.nav.focus = 1;
+                    // the menu keeps its item across visits, inside what it offers now
+                    let last = player_hud::menu_items(has_chapters).len() as i32 - 1;
+                    self.hud.nav.btn = self.hud.nav.btn.clamp(0, last);
+                }
                 _ => {
                     hide = true;
                     self.hud.nav.focus = 0;
                 }
             }
-        } else {
-            match self.hud.nav.focus {
-                0 => self.hud.nav.focus = 2,
-                1 => self.hud.nav.focus = 0,
-                _ => {}
-            }
+        } else if self.hud.nav.focus == 1 {
+            self.hud.nav.focus = 0;
         }
         if self.hud.nav.focus != 0 || hide {
             self.scrub.ns = -1;
@@ -841,13 +845,8 @@ impl PlayerScreen {
                 }
             }
             input::ScrubPress::Row => {
-                self.hud.nav.btn =
-                    (self.hud.nav.btn + if fwd { 1 } else { -1 }).clamp(0, player_hud::BTN_N - 1);
-            }
-            input::ScrubPress::Tabs => {
-                // one tab (Chapters) at most: LEFT/RIGHT has nowhere to go
-                let _ = meta;
-                self.hud.nav.tab = 0;
+                let last = player_hud::menu_items(plx_appkit::chapters_panel::has_chapters(meta)).len() as i32 - 1;
+                self.hud.nav.btn = (self.hud.nav.btn + if fwd { 1 } else { -1 }).clamp(0, last);
             }
             input::ScrubPress::Jump => {
                 // scrubber focus, FRESH press: the Skip interval hop, and NOTHING committed. A held
@@ -1006,9 +1005,8 @@ impl PlayerScreen {
     }
 }
 
-/// **The four registered regions, as real `Focusable` groups** (restructure phase 12, D2): the
-/// scrubber, the control row, the bottom tabs and — only while it is drawn — the failure read-out's
-/// own escape. `neighbour` still declines the engine's own geometric stepping (`Step::Edge`
+/// **The three registered regions, as real `Focusable` groups** (restructure phase 12, D2): the
+/// scrubber, the top menu and — only while it is drawn — the failure read-out's own escape. `neighbour` still declines the engine's own geometric stepping (`Step::Edge`
 /// unconditionally): every direction this screen cares about is intercepted first by its own
 /// `Machine::step` (`ui/dispatch.rs`'s `handled == Handled::No && engine` guard never sees one this
 /// screen answers `Handled::Yes` for), so `HudNav` stays the single source of truth for WHICH of
@@ -1017,7 +1015,7 @@ impl PlayerScreen {
 ///
 /// **The order `groups` pushes in is the pointer's z-order**, lowest first: `record_stops`
 /// registers in it, and the hit map resolves the last stop under the pointer. The scrubber's tall
-/// grab band therefore comes FIRST, under the control row and tabs it overlaps (issue #162).
+/// grab band therefore comes FIRST, so any control placed over it is clickable (issue #162).
 impl<H: PlayerLike + crate::registry::MetadataLike> Focusable<H> for PlayerScreen {
     fn groups(&self, cx: &Cx<'_, H>, out: &mut Vec<GroupSpec>) {
         out.push(GroupSpec {
@@ -1030,26 +1028,15 @@ impl<H: PlayerLike + crate::registry::MetadataLike> Focusable<H> for PlayerScree
             len: 1,
             elem: plx_ui::screen::ElemKind::Control,
         });
-        let row_len = player_hud::BTN_N as usize;
+        let has_ch = plx_appkit::chapters_panel::has_chapters(H::metadata(cx));
         out.push(GroupSpec {
             id: GROUP_ROW,
             kind: GroupKind::Row { wrap: false },
             seat: Seat::First,
             reachable: AxisMask::BOTH,
             edge: [EdgeRule::Screen; 4],
-            extent: player_hud::ctrl_row_hit_rect(),
-            len: row_len,
-            elem: plx_ui::screen::ElemKind::Control,
-        });
-        let has_ch = plx_appkit::chapters_panel::has_chapters(H::metadata(cx));
-        out.push(GroupSpec {
-            id: GROUP_TABS,
-            kind: GroupKind::Row { wrap: false },
-            seat: Seat::First,
-            reachable: AxisMask::BOTH,
-            edge: [EdgeRule::Screen; 4],
-            extent: player_hud::tab_hit_rect(0, has_ch, cx.measure).unwrap_or(Rect::FULL),
-            len: usize::from(has_ch),
+            extent: player_hud::menu_rect(has_ch, cx.measure),
+            len: player_hud::menu_items(has_ch).len(),
             elem: plx_ui::screen::ElemKind::Control,
         });
         if matches!(
@@ -1071,11 +1058,10 @@ impl<H: PlayerLike + crate::registry::MetadataLike> Focusable<H> for PlayerScree
         }
     }
     fn group_of(&self, key: &u32, _cx: &Cx<'_, H>) -> Option<GroupId> {
-        use player_hud::{ELEM_FAILURE_BASE, ELEM_FAILURE_END, ELEM_ROW_BASE, ELEM_SCRUB, ELEM_TAB_BASE};
+        use player_hud::{ELEM_FAILURE_BASE, ELEM_FAILURE_END, ELEM_ROW_BASE, ELEM_ROW_END, ELEM_SCRUB};
         match *key {
             e if e == ELEM_SCRUB => Some(GROUP_SCRUB),
-            e if (ELEM_ROW_BASE..ELEM_TAB_BASE).contains(&e) => Some(GROUP_ROW),
-            e if (ELEM_TAB_BASE..ELEM_FAILURE_BASE).contains(&e) => Some(GROUP_TABS),
+            e if (ELEM_ROW_BASE..ELEM_ROW_END).contains(&e) => Some(GROUP_ROW),
             e if (ELEM_FAILURE_BASE..ELEM_FAILURE_END).contains(&e) => Some(GROUP_FAILURE),
             _ => None,
         }
@@ -1084,18 +1070,11 @@ impl<H: PlayerLike + crate::registry::MetadataLike> Focusable<H> for PlayerScree
         Step::Edge
     }
     fn place(&self, key: &u32, cx: &Cx<'_, H>, _at: At) -> Option<Placed> {
-        use player_hud::{ELEM_FAILURE_BASE, ELEM_FAILURE_END, ELEM_ROW_BASE, ELEM_SCRUB, ELEM_TAB_BASE};
+        use player_hud::{ELEM_FAILURE_BASE, ELEM_FAILURE_END, ELEM_ROW_BASE, ELEM_ROW_END, ELEM_SCRUB};
         let rect = match *key {
             e if e == ELEM_SCRUB => player_hud::scrub_hit_rect(),
-            e if (ELEM_ROW_BASE..ELEM_TAB_BASE).contains(&e) => {
-                let i = (e - ELEM_ROW_BASE) as i32;
-                if i >= player_hud::BTN_N {
-                    return None;
-                }
-                player_hud::disc_hit_rect(i)
-            }
-            e if (ELEM_TAB_BASE..ELEM_FAILURE_BASE).contains(&e) => player_hud::tab_hit_rect(
-                (e - ELEM_TAB_BASE) as i32,
+            e if (ELEM_ROW_BASE..ELEM_ROW_END).contains(&e) => player_hud::menu_item_rect(
+                (e - ELEM_ROW_BASE) as i32,
                 plx_appkit::chapters_panel::has_chapters(H::metadata(cx)),
                 cx.measure,
             )?,
@@ -1113,7 +1092,6 @@ impl<H: PlayerLike + crate::registry::MetadataLike> Focusable<H> for PlayerScree
         let elem = match g {
             GROUP_SCRUB => player_hud::ELEM_SCRUB,
             GROUP_ROW => player_hud::ELEM_ROW_BASE,
-            GROUP_TABS => player_hud::ELEM_TAB_BASE,
             GROUP_FAILURE => player_hud::ELEM_FAILURE_BASE,
             _ => player_hud::ELEM_SCRUB,
         };
@@ -1125,7 +1103,6 @@ impl LogicalState for PlayerScreen {
     fn write(&self, c: &mut Canon) {
         c.u32(self.hud.nav.focus as u32)
             .u32(self.hud.nav.btn as u32)
-            .u32(self.hud.nav.tab as u32)
             .u32(self.hud.until)
             .bool(self.hud.dismissed)
             .bool(self.hud.visible_at_press);
@@ -1530,8 +1507,8 @@ mod step_ladder_tests {
 
     /// The census's other half: a control the frame does NOT draw registers no stop, so a click
     /// there reaches the picture (play/pause) rather than a blind action. A hidden HUD registers
-    /// nothing; with the Chapters strip over the middle (`transport == false`) only the tabs
-    /// remain — and the test item has no chapters, so not even those.
+    /// nothing; with the Chapters strip over the middle (`transport == false`) only the top menu
+    /// remains.
     #[test]
     fn a_control_the_frame_does_not_draw_registers_no_stop() {
         use plx_ui::screen::DrawFrame;
@@ -1539,7 +1516,7 @@ mod step_ladder_tests {
         for (transport, hud_drawn, want) in [
             (true, false, Vec::<u32>::new()),
             (false, false, vec![]),
-            (false, true, vec![]),
+            (false, true, (0..player_hud::menu_items(false).len() as u32).map(|i| player_hud::ELEM_ROW_BASE + i).collect()),
         ] {
             let mut page = PlayerScreen::new(ENTRY);
             page.transport = transport;
@@ -1668,7 +1645,7 @@ mod step_ladder_tests {
         let failure_n = player_hud::FailureReadout::now(TestHost::session(&cx())).actions().len() as u32;
         assert!(failure_n >= 1, "Back is always offered");
         let cases: [(&str, Busy, Vec<u32>); 2] = [
-            ("discs", Busy::None, row(player_hud::BTN_N as u32)),
+            ("menu", Busy::None, row(player_hud::menu_items(false).len() as u32)),
             ("failed", failed, (0..failure_n).map(|i| ELEM_FAILURE_BASE + i).collect()),
         ];
         for (name, busy, controls) in cases {
@@ -1742,24 +1719,42 @@ mod step_ladder_tests {
         }
     }
 
-    /// Port of `key_player_updown`: from the scrubber, UP walks to the control row and DOWN to the
-    /// tabs; from either, the return trip goes back to the scrubber.
+    /// Port of `key_player_updown`: from the scrubber, UP walks to the top menu; from the menu,
+    /// DOWN comes back, and UP (nothing above it) hides the transport and reparks the ring.
     #[test]
-    fn updown_walks_the_huds_three_rows() {
+    fn updown_walks_between_the_scrubber_and_the_menu() {
         let _g = plx_base::testlock::serial();
         let mut page = PlayerScreen::new(ENTRY);
         fresh(&mut page);
         assert_eq!(page.hud.nav.focus, 0);
         press(&mut page, SDLK_UP, 0, Edge::Down);
-        assert_eq!(page.hud.nav.focus, 1, "scrubber -> control row");
-        press(&mut page, SDLK_UP, 0, Edge::Down);
-        assert_eq!(page.hud.nav.focus, 0, "control row has nothing above: hides+reparks");
+        assert_eq!(page.hud.nav.focus, 1, "scrubber -> menu");
         press(&mut page, SDLK_DOWN, 0, Edge::Down);
-        assert_eq!(page.hud.nav.focus, 2, "scrubber -> tabs");
+        assert_eq!(page.hud.nav.focus, 0, "menu -> scrubber");
         press(&mut page, SDLK_DOWN, 0, Edge::Down);
-        assert_eq!(page.hud.nav.focus, 2, "tabs has nothing below: stays");
+        assert_eq!(page.hud.nav.focus, 0, "nothing below the scrubber: stays");
         press(&mut page, SDLK_UP, 0, Edge::Down);
-        assert_eq!(page.hud.nav.focus, 0, "tabs -> scrubber");
+        press(&mut page, SDLK_UP, 0, Edge::Down);
+        assert_eq!(page.hud.nav.focus, 0, "the menu has nothing above: hides+reparks");
+        assert!(page.hud.dismissed);
+    }
+
+    /// The menu keeps its item across visits, inside what it offers: an item past the end (the
+    /// cursor left on Audio of a chaptered item, now playing one without chapters) clamps to the
+    /// last.
+    #[test]
+    fn the_menu_cursor_stays_inside_the_items_offered() {
+        let _g = plx_base::testlock::serial();
+        let mut page = PlayerScreen::new(ENTRY);
+        fresh(&mut page);
+        page.hud.nav.btn = 3;
+        press(&mut page, SDLK_UP, 0, Edge::Down);
+        assert_eq!((page.hud.nav.focus, page.hud.nav.btn), (1, 2), "no chapters: Info, Subtitles, Audio");
+        for _ in 0..5 {
+            press(&mut page, plx_ui::consts::SDLK_RIGHT, 0, Edge::Down);
+            press(&mut page, plx_ui::consts::SDLK_RIGHT, 0, Edge::Up);
+        }
+        assert_eq!(page.hud.nav.btn, 2, "RIGHT stops on the last item");
     }
 
     /// OK on the control row is the DEFERRED press (`ArmControlRow`), not an immediate action —
@@ -1773,21 +1768,6 @@ mod step_ladder_tests {
         let (handled, reqs) = press(&mut page, SDLK_RETURN, 0, Edge::Down);
         assert_eq!(handled, Handled::Yes);
         assert_eq!(reqs, vec![PlayerReq::ArmControlRow]);
-    }
-
-    /// OK on the tabs row opens the named overlay AT ONCE — port of `key_ok`'s `focus == 2` arm.
-    #[test]
-    fn ok_on_the_tabs_row_opens_the_named_overlay() {
-        let _g = plx_base::testlock::serial();
-        let mut page = PlayerScreen::new(ENTRY);
-        fresh(&mut page);
-        page.hud.nav.focus = 2;
-        page.hud.nav.tab = 0;
-        let (_, reqs) = press(&mut page, SDLK_RETURN, 0, Edge::Down);
-        assert_eq!(
-            reqs,
-            vec![PlayerReq::OpenOverlay(overlay::OverlayKind::Chapters)]
-        );
     }
 
     /// OK anywhere else (the scrubber, or a hidden transport) is a plain play/pause toggle —
@@ -1841,7 +1821,7 @@ mod step_ladder_tests {
         let page = PlayerScreen::new(ENTRY);
         let mut groups = Vec::new();
         Focusable::<TestHost>::groups(&page, &cx(), &mut groups);
-        assert!(groups.len() >= 3, "scrubber, control row, tabs at least");
+        assert!(groups.len() >= 2, "scrubber and top menu at least");
         for g in &groups {
             let seated = Focusable::<TestHost>::seat(
                 &page,
@@ -2295,7 +2275,9 @@ mod scrub_ownership_tests {
         let _g = plx_base::testlock::serial();
         let _f = Fixture::new(false);
         let was = plx_media::player::swap_state_for_test(plx_media::player::PlaybackState::Playing);
-        for y in [870.0, 890.0] {
+        // Session eight's coordinates were 870/890 on the bar as it stood then; these are the same
+        // two points of the grab band under the 1d bar (`player_hud::scrub_hit_rect`).
+        for y in [930.0, 960.0] {
             let mut page = page_on_the_bar();
             page.hud.dismissed = true;
             let mut map = HitMap::new();

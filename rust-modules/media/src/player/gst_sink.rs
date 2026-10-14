@@ -113,7 +113,7 @@ fn prefer_lossless_dts() {
     }
 }
 
-fn gst_ready() -> bool {
+pub(crate) fn gst_ready() -> bool {
     static INIT: OnceLock<bool> = OnceLock::new();
     *INIT.get_or_init(|| match gst::init() {
         Ok(()) => {

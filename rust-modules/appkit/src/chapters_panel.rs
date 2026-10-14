@@ -1,9 +1,11 @@
 //! In-player Chapters strip: a horizontal row of chapter cards (thumbnail + name + timestamp) over
-//! the transport, opened from the HUD's Chapters tab. LEFT/RIGHT pick a chapter, OK seeks to its
+//! the transport, opened from the HUD's top menu. LEFT/RIGHT pick a chapter, OK seeks to its
 //! start. Card layout mirrors the detail-page episode picker; modal wiring mirrors info_panel.
 //!
-//! Data comes from the PLAYING leaf (`metadata::playing_chapters`, loaded with `?includeChapters=1`
-//! on the same fetch the track store already makes), never from `metadata::current()` — the same
+//! Data comes from the PLAYING leaf (`metadata::playing_chapters`: a server item's come with
+//! `?includeChapters=1` on the track store's fetch, a local file's from FFmpeg's probe
+//! (`localplay`), with stills made from its frames by `plx_media::thumbs`), never from
+//! `metadata::current()` — the same
 //! identity rule `appkit/track_menu.rs` and `appkit/skip_pill.rs` state. Reading `current()` is what made
 //! the Chapters tab vanish for every episode started from a show detail page: `current()` is then
 //! the SHOW, and a show container carries no `Chapter[]`.
@@ -42,6 +44,18 @@ pub struct ChaptersState {
     sel: c_int,
     scroll: Spring, // horizontal scroll offset (px)
     scale: Spring,  // focused-card pop (springs 1.0 → FOCUS_SCALE on each move)
+    /// A local file's chapter stills: the frame each chapter opens on, made by a
+    /// [`plx_media::thumbs`] worker, and the textures already uploaded (by bucket).
+    stills: Option<plx_media::thumbs::Thumbnailer>,
+    still_tex: Vec<(i64, std::os::raw::c_uint)>,
+}
+
+impl Drop for ChaptersState {
+    fn drop(&mut self) {
+        for (_, tex) in self.still_tex.drain(..) {
+            plx_gfx::gfx::delete_tex(tex);
+        }
+    }
 }
 
 impl ChaptersState {
@@ -52,10 +66,19 @@ impl ChaptersState {
             .iter()
             .rposition(|c| c.start_ms <= pos_ms)
             .unwrap_or(0) as c_int;
+        // A file on this machine's disk has no chapter stills of its own: make them from its frames.
+        let path = meta.playing().map(|p| std::path::Path::new(p.rk.as_str())).filter(|p| p.is_absolute());
+        let stills = path.and_then(plx_media::thumbs::Thumbnailer::new);
+        if let Some(t) = &stills {
+            let starts: Vec<i64> = chapters(meta).iter().map(|c| c.start_ms * 1_000_000).collect();
+            t.prefetch(&starts);
+        }
         ChaptersState {
             sel,
             scroll: Spring::at(scroll_target(sel)),
             scale: Spring::at(1.0), // pop in
+            stills,
+            still_tex: Vec::new(),
         }
     }
 
@@ -142,12 +165,17 @@ impl ChaptersState {
                 p,
                 card,
                 0,
-                "", // a local file carries no chapter stills
+                "", // a local file carries no chapter stills: its frame is drawn over the ground
                 (480, 270),
                 CH_RAD,
                 focused,
                 scale,
             );
+            if let Some(tex) = self.still(ch.start_ms * 1_000_000) {
+                let r = if focused { card.scaled(scale) } else { card };
+                let (w, h) = (plx_media::thumbs::W as f32, plx_media::thumbs::H as f32);
+                p.tex_uv(tex, r.cover_uv(w, h, plx_gfx::gfx::Crop::Centre), r, CH_RAD, theme::white(1.0));
+            }
             if focused {
                 // Same scaled frame `card()` draws into, so the rim rides the focus pop rather than
                 // lagging a resting box. Full strength whenever focused — the pop already animates the
@@ -166,11 +194,7 @@ impl ChaptersState {
             } else {
                 theme::TEXT_SECONDARY
             };
-            let name = if ch.title.trim().is_empty() {
-                plx_platform::i18n::msg::widgets_chapters_number(ch.index as i64)
-            } else {
-                ch.title.clone()
-            };
+            let name = chapter_name(ch);
             if let Ok(tc) = CString::new(plx_gfx::text::elide_by(&name, CH_W, false, |t| {
                 measure.width_str(t, theme::size::LABEL, true)
             })) {
@@ -183,6 +207,22 @@ impl ChaptersState {
     }
 }
 
+impl ChaptersState {
+    /// The texture of the still at `ns`, uploading it the first time its frame is there. Runs in
+    /// the draw, on the GL thread.
+    fn still(&mut self, ns: i64) -> Option<std::os::raw::c_uint> {
+        let bucket = plx_media::thumbs::bucket_of(ns);
+        if let Some(&(_, tex)) = self.still_tex.iter().find(|(b, _)| *b == bucket) {
+            return Some(tex);
+        }
+        let frame = self.stills.as_ref()?.frame_exact(ns)?;
+        let (w, h) = (plx_media::thumbs::W as c_int, plx_media::thumbs::H as c_int);
+        let tex = plx_gfx::gfx::upload_rgba(0, w, h, frame.rgba.as_ptr());
+        self.still_tex.push((bucket, tex));
+        Some(tex)
+    }
+}
+
 /// the playing leaf's chapters — the ONE read, so within a frame the count, the open, the seek and
 /// the draw cannot end up describing different items. ACROSS frames the store can still be replaced
 /// (a new play retires it, `route::request_play`), which is why `update` re-clamps the selection.
@@ -192,7 +232,20 @@ fn chapters<'a>(meta: metadata::MetadataView<'a>) -> &'a [metadata::Chapter] {
 fn n(meta: metadata::MetadataView<'_>) -> c_int {
     chapters(meta).len() as c_int
 }
-/// whether the PLAYING item has chapters — drives showing/hiding the Chapters tab
+/// A chapter's name: its own title, else `Chapter N`.
+pub fn chapter_name(ch: &metadata::Chapter) -> String {
+    if ch.title.trim().is_empty() {
+        plx_platform::i18n::msg::widgets_chapters_number(ch.index)
+    } else {
+        ch.title.clone()
+    }
+}
+/// The name of the chapter `ms` falls in — what the scrub preview reads beside its time. `None`
+/// when the item has no chapters or `ms` is before the first.
+pub fn chapter_at(meta: metadata::MetadataView<'_>, ms: i64) -> Option<String> {
+    chapters(meta).iter().rev().find(|c| c.start_ms <= ms).map(chapter_name)
+}
+/// whether the PLAYING item has chapters — drives showing/hiding the menu's Chapters item
 pub fn has_chapters(meta: metadata::MetadataView<'_>) -> bool {
     n(meta) > 0
 }
@@ -279,10 +332,10 @@ where
             kind: GroupKind::Row { wrap: false },
             seat: Seat::Nearest,
             reachable: AxisMask::HORIZONTAL,
-            // UP is swallowed (no group above, as the old ladder's `_ => {}` left it); DOWN drops
-            // focus back onto the HUD tabs, which only the owning screen can do —
-            // `overlay.rs`'s `Key::Down => … FocusTabs`.
-            edge: [EdgeRule::Stop, EdgeRule::Screen, EdgeRule::Stop, EdgeRule::Stop],
+            // UP hands focus back to the transport's top menu the strip was opened from, which
+            // only the owning screen can do — `overlay.rs`'s `Key::Up => … FocusMenu`; DOWN is
+            // swallowed (nothing below the strip).
+            edge: [EdgeRule::Screen, EdgeRule::Stop, EdgeRule::Stop, EdgeRule::Stop],
             extent: strip_extent(),
             len: nn,
             elem: ElemKind::Card,
@@ -436,6 +489,8 @@ mod focus_tests {
             sel: 1,
             scroll: Spring::at(0.0),
             scale: Spring::at(1.0),
+            stills: None,
+            still_tex: Vec::new(),
         };
         let part = ChaptersPart { state: &st, entry: e, group: GroupId(0), count: chapter_count(test_store().view()) };
         with_cx(e, |cx| {

@@ -58,8 +58,9 @@ pub enum PlayerReq {
     /// the pipeline decode the landed frame without publishing a viewer Resume — which is why this
     /// is a request rather than something `PlayerScreen` performs.
     CommitSeek(i64),
-    /// The panel took a DOWN past its own bottom: drop the HUD's ring onto the tabs row.
-    FocusTabs,
+    /// The Chapters strip took an UP past its own top (or the Info card an UP): hand the HUD's
+    /// ring to the top menu, on the item the panel was opened from.
+    FocusMenu,
     /// Keep the transport alive while a panel is being read (`HUD_MENU_MS`), or hand it the
     /// ordinary linger as a panel closes (`HUD_LINGER_MS`).
     ExtendHud(u32),
@@ -67,11 +68,10 @@ pub enum PlayerReq {
     /// take the playback session's `&mut`, which a screen never has (§2.2) — so the panel decides
     /// and the loop performs, exactly as every other request in this enum.
     CommitTrack(plx_appkit::track_menu::TrackCommit),
-    /// **Present one of the player's overlays directly** — the tabs row's OK
-    /// (`OverlayKind::Chapters`). `PlayerScreen` may not name the bridge that opens it (§2.2), so
-    /// it asks instead.
+    /// **Present one of the player's overlays directly** (the Tracks panel's hand-off to Timing).
+    /// `PlayerScreen` may not name the bridge that opens it (§2.2), so it asks instead.
     OpenOverlay(crate::player::overlay::OverlayKind),
-    /// **OK landed on the transport's own control row** — a Subtitles or Audio disc. Arms the
+    /// **OK landed on the transport's top menu** — Info, Chapters, Subtitles or Audio. Arms the
     /// tvOS press dip; the
     /// loop's existing commit-frame dispatch (`app/run.rs`'s `Route::Player =>
     /// activate_player_row(...)`) is unchanged and performs whatever the row decides once the
@@ -89,8 +89,8 @@ pub enum PlayerReq {
 pub struct ItemMenuArg {
     /// The file the menu is about.
     pub path: String,
-    /// Its watch state, as the library page drew it.
-    pub mark: plx_ui::widgets::PosterMark,
+    /// Which menu: the watch-state rows, or a choice among the file's tracks.
+    pub kind: MenuKind,
     /// The PAGE entry the menu hangs off: its focused element is the anchor the panel sits beside
     /// and the tile lifted back out of the modal dim (`app::bridge::redraw_opener`).
     pub host: plx_machine::machine::EntryId,
@@ -102,9 +102,47 @@ pub struct ItemMenuArg {
     pub anchor: [u32; 4],
 }
 
+/// **Which rows an item menu holds.**
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MenuKind {
+    /// A hold on a video: the watch-state rows and Play from Start, for the watch state the
+    /// library page drew.
+    Watch(plx_ui::widgets::PosterMark),
+    /// The title page's audio or subtitle disc: one row per choice — its label, its detail line
+    /// and what choosing it does — the one that will play checked.
+    Tracks { rows: Vec<TrackRow>, current: Option<usize> },
+}
+
+/// One row of a [`MenuKind::Tracks`] menu.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrackRow {
+    pub label: String,
+    pub detail: String,
+    pub act: crate::item_menu::Action,
+}
+
+/// Which of a file's track lists a title-page disc opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrackKind {
+    Audio,
+    Subtitles,
+}
+
 impl plx_machine::machine::LogicalState for ItemMenuArg {
     fn write(&self, c: &mut plx_machine::machine::Canon) {
-        c.str(&self.path).u32(self.mark as u32).u32(self.host.0);
+        c.str(&self.path);
+        match &self.kind {
+            MenuKind::Watch(mark) => {
+                c.u32(*mark as u32);
+            }
+            MenuKind::Tracks { rows, current } => {
+                c.u32(100).u32(current.map_or(u32::MAX, |i| i as u32));
+                for row in rows {
+                    c.str(&row.label).str(&row.detail);
+                }
+            }
+        }
+        c.u32(self.host.0);
         c.option(self.focus, |c, key| { c.u32(key.entry.0).u32(key.elem); });
         for value in self.anchor { c.u32(value); }
     }
@@ -147,6 +185,8 @@ pub enum ContentReq {
     LocalPlay { path: String, from_start: bool },
     Back,
     ItemMenu,
+    /// A title-page disc: present the file's audio or subtitle choices over the page.
+    TrackMenu(TrackKind),
 }
 
 pub trait ContentLike: AppLike<Memory = PageMemory> {}
@@ -541,7 +581,7 @@ pub fn every_surface_arg() -> Vec<AppArg> {
     use crate::player::overlay::{OverlayKind, PlayerOverlayArg};
     let mut args = vec![AppArg::ItemMenu(ItemMenuArg {
         path: "/media/a.mkv".into(),
-        mark: plx_ui::widgets::PosterMark::None,
+        kind: MenuKind::Watch(plx_ui::widgets::PosterMark::None),
         host: EntryId(0),
         focus: None,
         anchor: [0; 4],

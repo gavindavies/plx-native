@@ -68,18 +68,9 @@ struct SubId {
 }
 
 fn sub_ids(subs: &[plx_data::metadata::Stream]) -> Vec<SubId> {
-    let mut embedded = 0u32;
     subs.iter()
-        .map(|s| {
-            let choice = if s.external {
-                let name = Path::new(&s.key).file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-                local_progress::SubtitleChoice::File(name)
-            } else {
-                embedded += 1;
-                local_progress::SubtitleChoice::Track(embedded - 1)
-            };
-            SubId { id: s.id, choice }
-        })
+        .zip(plx_media::localplay::subtitle_choices(subs))
+        .map(|(s, choice)| SubId { id: s.id, choice })
         .collect()
 }
 
@@ -214,7 +205,8 @@ fn retire_orphan(
     }
 }
 
-/// The item menu's rows: play the file from its start, or write its watch record.
+/// The item menu's rows: play the file from its start, write its watch record, or keep a track
+/// choice the title page made.
 pub(crate) fn apply_menu_action(
     ps: &mut plx_media::playback::PlaybackSession,
     pa: &mut plx_media::player::adapter::PlayerAdapter,
@@ -229,6 +221,25 @@ pub(crate) fn apply_menu_action(
         Action::PlayFromStart(_) => play(ps, pa, &path, true, None, pages, bridge),
         Action::MarkWatched(_) => local_progress::set_watched(&path, size(), true),
         Action::MarkUnwatched(_) => local_progress::set_watched(&path, size(), false),
+        // A title page's choice, kept with the file's others and applied when it plays.
+        Action::ChooseAudio(_, i) => {
+            let size = size();
+            let mut c = local_progress::choices(&path, size).unwrap_or_default();
+            c.size = size;
+            c.audio = Some(i);
+            local_progress::set_choices(&path, c);
+        }
+        Action::ChooseSubtitle(_, choice) => {
+            let size = size();
+            let mut c = local_progress::choices(&path, size).unwrap_or_default();
+            c.size = size;
+            if c.subtitle.as_ref() != Some(&choice) {
+                // the timing belonged to the subtitle it was set for
+                c.subtitle_offset_ms = 0;
+            }
+            c.subtitle = Some(choice);
+            local_progress::set_choices(&path, c);
+        }
     }
 }
 

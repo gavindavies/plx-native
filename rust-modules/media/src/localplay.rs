@@ -117,7 +117,9 @@ pub fn install(ps: &mut crate::playback::PlaybackSession, path: &Path, probe: &c
         crate::playback::set_stream_source_raster(ps, probe.width, probe.height);
     }
     let folder = context_line(path);
-    crate::playback::set_hud_title(ps, &title_of(path), &folder);
+    // The title its `.nfo` gives, once the library has listed the file's folder; else its name.
+    let title = plx_data::local::entry_for(path).map_or_else(|| title_of(path), |e| e.display_title().to_owned());
+    crate::playback::set_hud_title(ps, &title, &folder);
     // No account to say which subtitles are the viewer's: the interface's language leads the menu.
     crate::playback::set_sub_pref_lang(ps, plx_platform::i18n::current().language().tag());
     crate::playback::set_url(ps, &crate::localfile::file_url(path));
@@ -196,8 +198,67 @@ pub fn playing_item(path: &Path, probe: &crate::ff::LocalProbe, sidecars: &[plx_
         video_fps: probe.fps,
         width: i64::from(probe.width),
         height: i64::from(probe.height),
-        chapters: Vec::new(),
+        chapters: probe
+            .chapters
+            .iter()
+            .enumerate()
+            .map(|(i, (start_ms, title))| plx_data::metadata::Chapter { index: i as i64 + 1, start_ms: *start_ms, title: title.clone() })
+            .collect(),
     }
+}
+
+/// What a saved choice calls each of `subs`, in order: an embedded track by its position among the
+/// embedded ones, a file beside the video by its name. The one translation between a played item's
+/// subtitles and `local_progress::SubtitleChoice`, so the title page's picker and the player's
+/// record name a track alike.
+pub fn subtitle_choices(subs: &[plx_data::metadata::Stream]) -> Vec<plx_data::local_progress::SubtitleChoice> {
+    use plx_data::local_progress::SubtitleChoice;
+    let mut embedded = 0u32;
+    subs.iter()
+        .map(|s| {
+            if s.external {
+                let name = Path::new(&s.key).file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                SubtitleChoice::File(name)
+            } else {
+                embedded += 1;
+                SubtitleChoice::Track(embedded - 1)
+            }
+        })
+        .collect()
+}
+
+/// The tracks of the file at `path`, as the player would list them, for a page that offers a
+/// choice before playing (the title page's audio and subtitle discs). The first ask starts a probe
+/// on a worker and answers `None`; the landing wakes the frame and a later ask has it. A file that
+/// cannot be read answers an item with no tracks rather than being probed again.
+pub fn tracks(path: &Path) -> Option<std::sync::Arc<plx_data::metadata::PlayingItem>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+    type Cache = Mutex<HashMap<std::path::PathBuf, Option<Arc<plx_data::metadata::PlayingItem>>>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+    let cache = CACHE.get_or_init(Cache::default);
+    let mut held = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(known) = held.get(path) {
+        return known.clone();
+    }
+    held.insert(path.to_path_buf(), None);
+    drop(held);
+    let file = path.to_path_buf();
+    let spawned = plx_base::task::spawn_small("local tracks", move || {
+        let item = match crate::ff::probe_local(&file) {
+            Ok(probe) => playing_item(&file, &probe, &plx_data::local::sidecars(&file)),
+            Err(e) => {
+                plx_base::eventlog::log(&format!("local tracks: {}: {e}", file.display()));
+                playing_item(&file, &crate::ff::LocalProbe::default(), &[])
+            }
+        };
+        cache.lock().unwrap_or_else(|e| e.into_inner()).insert(file, Some(Arc::new(item)));
+        plx_machine::present::wake_from_worker();
+    });
+    if !spawned {
+        cache.lock().unwrap_or_else(|e| e.into_inner()).remove(path);
+    }
+    None
 }
 
 /// The track a local file starts on: the first in file order the sink decodes (the probe's
@@ -240,6 +301,7 @@ mod tests {
             height: 1080,
             fps: 23.976,
             duration_ns: 0,
+            chapters: Vec::new(),
         }
     }
 
@@ -272,6 +334,15 @@ mod tests {
         assert_eq!(item.audio.iter().map(|s| s.codec.as_str()).collect::<Vec<_>>(), ["truehd", "ac3"]);
         let start = starting_audio(&item, &p).unwrap();
         assert_eq!((start.sid, start.ordinal, start.codec.as_str()), (item.audio[1].id, 1, "ac3"));
+    }
+
+    #[test]
+    fn the_file_s_chapters_reach_the_player_numbered_from_one() {
+        let mut p = probe("h264", "aac", &["aac"]);
+        p.chapters = vec![(0, "Prologue".into()), (61_500, String::new())];
+        let item = playing_item(Path::new("/m/Film.mkv"), &p, &[]);
+        let got: Vec<_> = item.chapters.iter().map(|c| (c.index, c.start_ms, c.title.as_str())).collect();
+        assert_eq!(got, [(1, 0, "Prologue"), (2, 61_500, "")]);
     }
 
     #[test]

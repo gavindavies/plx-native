@@ -22,6 +22,7 @@
 #![allow(dead_code)]
 
 pub mod chapters_panel;
+pub mod info_card; // the player's Info card (the top menu's first item)
 pub mod player_hud;
 pub mod timing_capsule; // the on-video Subtitle Timing capsule (plan `subtitle-menu-capsule` §4)
 pub mod track_menu;

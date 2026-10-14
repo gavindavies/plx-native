@@ -121,6 +121,36 @@ const OFF_FMT_DURATION: usize = 64;
 #[cfg(target_pointer_width = "64")]
 const OFF_FMT_DURATION: usize = 104;
 
+/// `AVFormatContext.nb_chapters` / `.chapters` — the container's chapter table. By offset, like
+/// `duration`: they sit past `streams` (FFmpeg 6.1 inserted `nb_stream_groups`/`stream_groups`
+/// before them). Both pairs checked with `offsetof` against the bundled 9.0 headers (host build:
+/// 72 / 80, `duration` 104 — the 64-bit row agreeing with [`OFF_FMT_DURATION`] is the cross-check
+/// on the derivation; the 32-bit row is the same field order at 4-byte pointers, landing
+/// `duration` on the 64 this table already held).
+#[cfg(target_pointer_width = "32")]
+const OFF_FMT_NB_CHAPTERS: usize = 40;
+#[cfg(target_pointer_width = "32")]
+const OFF_FMT_CHAPTERS: usize = 44;
+#[cfg(target_pointer_width = "64")]
+const OFF_FMT_NB_CHAPTERS: usize = 72;
+#[cfg(target_pointer_width = "64")]
+const OFF_FMT_CHAPTERS: usize = 80;
+
+/// `AVChapter` (avformat.h) — modelled whole: it is public, small and has not changed shape since
+/// FFmpeg 4. `int64_t id; AVRational time_base; int64_t start, end; AVDictionary *metadata` —
+/// 0 / 8 / 16 / 24 / 32, 40 bytes on the host build's `offsetof`; AAPCS aligns the `int64_t`s the
+/// same way on 32-bit ARM, so only the trailing pointer narrows (size 40 there too, padded).
+#[repr(C)]
+#[allow(dead_code)] // `id` and `end` are layout: the chapter's END is the next one's start
+struct AVChapter {
+    id: i64,
+    time_base: AVRational,
+    start: i64,
+    end: i64,
+    metadata: *const AVDictionary,
+}
+const _: () = assert!(std::mem::size_of::<AVChapter>() == 40 && std::mem::offset_of!(AVChapter, start) == 16);
+
 /// `AVDictionaryEntry` — two `char *`. Modelled rather than opaque because the whole point of the
 /// call is to read both halves; `ci/ffabi-assert.c` holds the layout.
 #[repr(C)]
@@ -129,10 +159,43 @@ pub struct AVDictionaryEntry {
     value: *const c_char,
 }
 
-/// The only field this app reads past `AVFormatContext.streams`.
+/// `AVFormatContext.duration` — read by offset, like the chapter table ([`chapters`]); these are
+/// the fields this app reads past `AVFormatContext.streams`.
 #[inline]
 unsafe fn fmt_duration(fmt: *const AVFormatContext) -> i64 {
     *((fmt as *const u8).add(OFF_FMT_DURATION) as *const i64)
+}
+
+/// The container's chapters, in file order: start in milliseconds and the `title` tag (empty when
+/// the file does not name it). Titles are COPIES — the table is freed with the context.
+unsafe fn chapters(fmt: *const AVFormatContext) -> Vec<(i64, String)> {
+    let base = fmt as *const u8;
+    let n = *(base.add(OFF_FMT_NB_CHAPTERS) as *const c_uint);
+    let table = *(base.add(OFF_FMT_CHAPTERS) as *const *const *const AVChapter);
+    if table.is_null() {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(n.min(1024) as usize);
+    for i in 0..n.min(1024) as usize {
+        let ch = *table.add(i);
+        if ch.is_null() {
+            continue;
+        }
+        let tb = (*ch).time_base;
+        if tb.den <= 0 || tb.num <= 0 {
+            continue;
+        }
+        let ms = ((*ch).start as i128 * tb.num as i128 * 1000 / tb.den as i128).clamp(0, i64::MAX as i128) as i64;
+        let mut title = String::new();
+        if !(*ch).metadata.is_null() {
+            let e = av_dict_get((*ch).metadata, c"title".as_ptr(), std::ptr::null(), 0);
+            if !e.is_null() && !(*e).value.is_null() {
+                title = std::ffi::CStr::from_ptr((*e).value).to_string_lossy().trim().to_string();
+            }
+        }
+        out.push((ms, title));
+    }
+    out
 }
 
 // ---- structs (exact n3.3 field order; 32-bit ARM/AAPCS sizes) ----
@@ -262,9 +325,10 @@ pub struct AVChannelLayout {
 //
 // It STOPS at `filename` because that is where the two majors stop agreeing: FFmpeg 4.0 inserted
 // `char *url` at +1056, pushing start_time to +1064 and duration to +1072. Everything above is
-// identical on 3.3 and 4.x. `duration` — the only field past that point this app reads — is
-// reached through [`fmt_duration`] at the offset the runtime ABI table gives, rather than by
-// declaring it here at an offset that is right on exactly one of the two.
+// identical on 3.3 and 4.x. The fields past that point this app reads — `duration`, `nb_chapters`
+// and `chapters` — are reached through the `OFF_FMT_*` constants ([`fmt_duration`], [`chapters`]),
+// which hold for the one FFmpeg the `ABI_OK` major-version gate admits, rather than by declaring
+// them here at offsets that are right on exactly one version.
 #[repr(C)]
 pub struct AVFormatContext {
     pub av_class: *const AVClass,    // +0
@@ -277,9 +341,9 @@ pub struct AVFormatContext {
     pub streams: *mut *mut AVStream, // +28
                                      // STOPS HERE. Everything past `streams` shifts between majors — `duration` is at +48 on
                                      // FFmpeg 6, +64 on 9, and +1064 on the n3.3 the televisions ship, because 5.0 deleted
-                                     // `filename[1024]` and later releases kept rearranging what replaced it. It is the only field
-                                     // beyond this point the app reads, so it is read at OFF_FMT_DURATION rather than declared at
-                                     // a position that would be quietly wrong after a version bump.
+                                     // `filename[1024]` and later releases kept rearranging what replaced it. The fields beyond
+                                     // this point the app reads (`duration`, `nb_chapters`, `chapters`) are read at the OFF_FMT_*
+                                     // offsets rather than declared at positions that would be quietly wrong after a version bump.
 }
 
 // AVBSFContext is NOT modelled. The app does its own AVCC->Annex-B conversion in Rust, so the
@@ -1012,7 +1076,7 @@ pub struct LocalTrack {
 
 /// What [`probe_local`] learned about a file on this machine's disk: everything the Load
 /// declaration needs, which for a Plex item comes from the server's decision instead.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct LocalProbe {
     /// FFmpeg's codec name of the video stream the demuxer will pick (`h264`, `hevc`, ...).
     pub vcodec: String,
@@ -1029,6 +1093,8 @@ pub struct LocalProbe {
     /// Frames per second, 0 when the container does not say.
     pub fps: f64,
     pub duration_ns: i64,
+    /// The container's chapters, in file order: (start ms, title — empty when untitled).
+    pub chapters: Vec<(i64, String)>,
 }
 
 /// Open a local file with the bundled libavformat (its one protocol is `file`) and read what a
@@ -1099,6 +1165,7 @@ pub fn probe_local(path: &std::path::Path) -> Result<LocalProbe, String> {
                 height: clamp((*vcp).height),
                 fps,
                 duration_ns: fmt_duration(fmt).max(0).saturating_mul(1_000),
+                chapters: chapters(fmt),
             })
         })();
         avformat_close_input(&mut fmt);

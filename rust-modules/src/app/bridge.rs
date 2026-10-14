@@ -211,11 +211,35 @@ impl Bridge {
         let rect = real.focused_card_rect(&cx, ret.focus, At::Drawn);
         Some(plx_screens::registry::ItemMenuArg {
             path: path.to_string_lossy().into_owned(),
-            mark,
+            kind: plx_screens::registry::MenuKind::Watch(mark),
             host: entry,
             focus: ret.focus,
             anchor: anchor_bits(rect),
         })
+    }
+
+    /// **A title page's track menu**, anchored beside the disc that asked for it. `None` while the
+    /// file's tracks are still being read (the press then does nothing, and the next one opens it).
+    pub(crate) fn track_menu_arg(
+        &self,
+        d: &Dispatcher<AppHost>,
+        entry: EntryId,
+        ret: &ReturnState<u32, PageMemory>,
+        kind: plx_screens::registry::TrackKind,
+    ) -> Option<plx_screens::registry::ItemMenuArg> {
+        let e = d.nav.entry(entry)?;
+        let real = &e.inst.as_ref()?.screen;
+        let page = real.as_any()?.downcast_ref::<plx_screens::local_detail::LocalDetailScreen>()?;
+        let (path, menu) = page.track_menu(kind)?;
+        let parts = CxParts {
+            tick: Tick { ms: 0, dt_us: 0 },
+            press: plx_machine::machine::PressRead { scale: 1.0, is_long: false, held_ms: None, owner: None },
+            focus: plx_machine::machine::FocusRead { current: ret.focus, ..Default::default() },
+            owner: plx_machine::machine::InputOwner::Entry(entry),
+        };
+        let cx = parts.cx::<AppHost>(self.views(), &self.measure);
+        let rect = real.focused_card_rect(&cx, ret.focus, At::Drawn);
+        Some(plx_screens::registry::ItemMenuArg { path, kind: menu, host: entry, focus: ret.focus, anchor: anchor_bits(rect) })
     }
 
     /// **The opener LIFT: the focused tile repainted above the modal dim.** Render-only, and the
@@ -464,8 +488,8 @@ pub(crate) fn frame_with_tap(
 /// **Open one of the player's panels on the PLAYER PAGE's own `ModalStack`** (§6.2).
 ///
 /// Idempotent per KIND while that kind is up, for `open_settings`'s reason: a second press on the
-/// disc that opened it must not stack a second copy. Opening a DIFFERENT kind over an open one is
-/// allowed and is what the transport's own tab row does — the container's `input_owner()` gives
+/// menu item that opened it must not stack a second copy. Opening a DIFFERENT kind over an open
+/// one is allowed and is what the transport's top menu does — the container's `input_owner()` gives
 /// the topmost surface the keys, so the stack is the answer to "which panel owns the frame".
 ///
 /// The style is `PlayerPanel { survives_failure }`, whose host policy is `(Live, Live)`: what is
@@ -477,8 +501,8 @@ pub(crate) fn open_player_overlay(
     d: &mut Dispatcher<AppHost>,
     kind: plx_screens::player::overlay::OverlayKind,
 ) {
-    // Already up? Then this press is a re-ADDRESS of the entry that exists — the Audio disc
-    // pressed while the Subtitles tab is showing — and never a second surface of the same kind.
+    // Already up? Then this press is a re-ADDRESS of the entry that exists — the menu's Audio
+    // item pressed while the Subtitles tab is showing — and never a second surface of the same kind.
     if player_overlay_kind(d).is_some_and(|up| up.slot() == kind.slot()) {
         if let Some(surface) = player_overlay_mut(d) {
             surface.retarget(meta, kind);

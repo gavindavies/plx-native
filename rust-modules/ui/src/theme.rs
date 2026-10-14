@@ -186,7 +186,8 @@ pub mod layout {
     /// its note into a column too narrow to read; this floor keeps it a panel. A FLOOR only: wider
     /// content still grows the panel up to `ui::table::MENU_MAX_W`.
     pub const PLAYER_MENU_MIN_W: f32 = 440.0;
-    /// Bottom edge of an in-player popover: ~28px above the transport buttons, at 1080p.
+    /// The lowest an in-player popover reaches, at 1080p: clear of the transport's title block,
+    /// whose kicker line stands ~200px above the panel's foot.
     pub const PLAYER_MENU_BOTTOM: f32 = crate::consts::SCR_H - 316.0;
 }
 

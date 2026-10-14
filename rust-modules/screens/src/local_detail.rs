@@ -46,7 +46,7 @@ use plx_ui::{Painter, Rect};
 
 use super::item_menu::Action;
 use super::titles::{facts, file_facts};
-use super::registry::{AppFx, ContentLike, ContentReq, ItemMenuReq, LocalArg};
+use super::registry::{AppFx, ContentLike, ContentReq, ItemMenuReq, LocalArg, MenuKind, TrackKind, TrackRow};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Sec {
@@ -60,6 +60,8 @@ const MORE_GROUP: GroupId = GroupId(1);
 const PLAY_ELEM: u32 = 1;
 const RESTART_ELEM: u32 = 2;
 const WATCHED_ELEM: u32 = 3;
+const SUBS_ELEM: u32 = 4;
+const AUDIO_ELEM: u32 = 5;
 const FIRST_CARD_ELEM: u32 = 0x1000;
 
 /// The back crumb's cap top: the top chrome line.
@@ -151,15 +153,66 @@ fn badges(entry: &Entry) -> Vec<String> {
     out
 }
 
-/// The controls present for a watch record, in row order.
+/// The controls present for a watch record, in row order: Play (or Resume), Restart while there
+/// is a place to resume from, the subtitle and audio choices, and the watch mark (1c).
 fn controls(mark: Option<Progress>) -> Vec<u32> {
     let resuming = mark.is_some_and(|m| !m.watched && m.offset_ms > 0);
     let mut out = vec![PLAY_ELEM];
     if resuming {
         out.push(RESTART_ELEM);
     }
-    out.push(WATCHED_ELEM);
+    out.extend([SUBS_ELEM, AUDIO_ELEM, WATCHED_ELEM]);
     out
+}
+
+/// **A file's audio or subtitle choices**, as the title page's disc offers them: what each row
+/// says and what choosing it keeps, and the one that will play — the viewer's saved choice, else
+/// the file's own start (its first audio track the player carries; subtitles Off). Audio tracks the
+/// player cannot carry are left out: a choice of one could not be kept.
+fn track_rows(path: &str, item: &plx_data::metadata::PlayingItem, saved: Option<&local_progress::Choices>, kind: TrackKind) -> MenuKind {
+    use plx_platform::i18n::msg;
+    let name = |s: &plx_data::metadata::Stream, n: usize| {
+        [s.lang.trim(), s.title.trim()].into_iter().find(|t| !t.is_empty()).map_or_else(|| msg::widgets_tracks_track_ordinal(n as i64 + 1), str::to_owned)
+    };
+    match kind {
+        TrackKind::Audio => {
+            let carried = |s: &plx_data::metadata::Stream| plx_media::player::engine::audio_payload_codec(&s.codec).is_some();
+            let mut rows = Vec::new();
+            let mut positions = Vec::new();
+            for (i, a) in item.audio.iter().enumerate().filter(|(_, a)| carried(a)) {
+                let mut detail = plx_appkit::track_menu::audio_descriptor(a);
+                if !a.title.trim().is_empty() && a.title.trim() != name(a, i) {
+                    detail = [detail, a.title.trim().to_owned()].into_iter().filter(|d| !d.is_empty()).collect::<Vec<_>>().join(" \u{b7} ");
+                }
+                rows.push(TrackRow { label: name(a, i), detail, act: Action::ChooseAudio(path.to_owned(), i as u32) });
+                positions.push(i);
+            }
+            let chosen = saved.and_then(|c| c.audio).map(|i| i as usize).filter(|i| positions.contains(i));
+            let current = chosen.or(positions.first().copied()).and_then(|i| positions.iter().position(|&p| p == i));
+            MenuKind::Tracks { rows, current }
+        }
+        TrackKind::Subtitles => {
+            use plx_data::local_progress::SubtitleChoice;
+            let mut rows = vec![TrackRow { label: msg::widgets_tracks_off().to_owned(), detail: String::new(), act: Action::ChooseSubtitle(path.to_owned(), SubtitleChoice::Off) }];
+            let choices = plx_media::localplay::subtitle_choices(&item.subs);
+            for (i, (s, choice)) in item.subs.iter().zip(choices).enumerate() {
+                let marks: Vec<&str> = [
+                    s.forced.then(msg::widgets_badge_forced),
+                    s.sdh.then(msg::widgets_badge_sdh),
+                    s.external.then(msg::widgets_tracks_external_badge),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                rows.push(TrackRow { label: name(s, i), detail: marks.join(" \u{b7} "), act: Action::ChooseSubtitle(path.to_owned(), choice) });
+            }
+            let current = match saved.and_then(|c| c.subtitle.as_ref()) {
+                Some(want) => rows.iter().position(|r| matches!(&r.act, Action::ChooseSubtitle(_, c) if c == want)).or(Some(0)),
+                None => Some(0),
+            };
+            MenuKind::Tracks { rows, current }
+        }
+    }
 }
 
 /// The other titles, as a row of landscape cards: each title's backdrop, else its poster.
@@ -378,7 +431,7 @@ pub struct LocalDetailScreen {
     drawn: Option<u64>,
     stack: Stack<Sec>,
     ground: ArtGround,
-    pop: CtlPop<3>,
+    pop: CtlPop<5>,
 }
 
 plx_ui::focusable_via_view!(LocalDetailScreen, H: [ContentLike], view);
@@ -405,7 +458,7 @@ impl LocalDetailScreen {
             mark: None,
             synced: None,
             changes: 0,
-            ctrls: vec![PLAY_ELEM, WATCHED_ELEM],
+            ctrls: controls(None),
             elems: Vec::new(),
             index: HashMap::new(),
             keys: HashMap::new(),
@@ -423,6 +476,19 @@ impl LocalDetailScreen {
         for home in homes(&self.page.video) {
             plx_data::local::request(&home);
         }
+        // the file's tracks, read now so the subtitle and audio discs open at once
+        let _ = plx_media::localplay::tracks(&self.page.video);
+    }
+
+    /// **The menu a subtitle or audio disc opens**: the file and its choices. `None` while the
+    /// file's tracks are still being read.
+    pub fn track_menu(&self, kind: TrackKind) -> Option<(String, MenuKind)> {
+        let item = plx_media::localplay::tracks(&self.page.video)?;
+        let path = self.page.video.to_string_lossy().into_owned();
+        let size = self.page.found.as_ref().map_or(0, |f| f.entry.size);
+        let saved = local_progress::choices(&self.page.video, size);
+        let menu = track_rows(&path, &item, saved.as_ref(), kind);
+        Some((path, menu))
     }
 
     fn focused_ctrl<H: ContentLike>(&self, cx: &Cx<'_, H>) -> Option<usize> {
@@ -435,6 +501,8 @@ impl LocalDetailScreen {
         let fxa = match elem {
             PLAY_ELEM => AppFx::Content(ContentReq::LocalPlay { path, from_start: false }),
             RESTART_ELEM => AppFx::Content(ContentReq::LocalPlay { path, from_start: true }),
+            SUBS_ELEM => AppFx::Content(ContentReq::TrackMenu(TrackKind::Subtitles)),
+            AUDIO_ELEM => AppFx::Content(ContentReq::TrackMenu(TrackKind::Audio)),
             WATCHED_ELEM => {
                 let watched = self.page.mark.is_some_and(|m| m.watched);
                 let act = if watched { Action::MarkUnwatched(path) } else { Action::MarkWatched(path) };
@@ -499,6 +567,8 @@ impl LocalDetailScreen {
             } else {
                 let icon = match elem {
                     RESTART_ELEM => Icon::Restart,
+                    SUBS_ELEM => Icon::Cc,
+                    AUDIO_ELEM => Icon::Audio,
                     _ if self.page.mark.is_some_and(|m| m.watched) => Icon::CheckCircleFill,
                     _ => Icon::Check,
                 };
@@ -655,8 +725,54 @@ mod tests {
     #[test]
     fn restart_is_offered_only_while_part_watched() {
         let p = |offset_ms, watched| Some(Progress { offset_ms, duration_ms: 100_000, watched, size: 1 });
-        assert_eq!(controls(None), [PLAY_ELEM, WATCHED_ELEM]);
-        assert_eq!(controls(p(30_000, false)), [PLAY_ELEM, RESTART_ELEM, WATCHED_ELEM]);
-        assert_eq!(controls(p(30_000, true)), [PLAY_ELEM, WATCHED_ELEM], "a finished film plays from the start anyway");
+        let has_restart = |c: Vec<u32>| c.contains(&RESTART_ELEM);
+        assert!(!has_restart(controls(None)));
+        assert!(has_restart(controls(p(30_000, false))));
+        assert!(!has_restart(controls(p(30_000, true))), "a finished film plays from the start anyway");
+    }
+
+    fn stream(id: i64, lang: &str, codec: &str) -> plx_data::metadata::Stream {
+        plx_data::metadata::Stream { id, lang: lang.into(), codec: codec.into(), channels: 6, ..Default::default() }
+    }
+
+    #[test]
+    fn the_audio_choices_leave_out_what_cannot_play_and_check_the_saved_one() {
+        let mut item = plx_data::metadata::PlayingItem::with_subs(Vec::new());
+        item.audio = vec![stream(500, "English", "truehd"), stream(501, "English", "ac3"), stream(502, "French", "aac")];
+        let MenuKind::Tracks { rows, current } = track_rows("/m/f.mkv", &item, None, TrackKind::Audio) else { panic!() };
+        let acts: Vec<_> = rows.iter().map(|r| r.act.clone()).collect();
+        let carried: Vec<u32> = (0..3).filter(|&i| plx_media::player::engine::audio_payload_codec(&item.audio[i as usize].codec).is_some()).collect();
+        assert_eq!(acts, carried.iter().map(|&i| Action::ChooseAudio("/m/f.mkv".into(), i)).collect::<Vec<_>>());
+        assert_eq!(current, Some(0), "unchosen: the first track that plays");
+        let saved = local_progress::Choices { audio: Some(2), ..Default::default() };
+        let MenuKind::Tracks { rows, current } = track_rows("/m/f.mkv", &item, Some(&saved), TrackKind::Audio) else { panic!() };
+        assert_eq!(rows[current.unwrap()].act, Action::ChooseAudio("/m/f.mkv".into(), 2));
+        assert_eq!(rows[current.unwrap()].label, "French");
+    }
+
+    #[test]
+    fn the_subtitle_choices_start_with_off_and_name_a_file_beside_the_video_by_its_name() {
+        use plx_data::local_progress::SubtitleChoice;
+        let side = plx_data::metadata::Stream { id: 1000, lang: "German".into(), external: true, key: "/m/f.de.srt".into(), ..Default::default() };
+        let item = plx_data::metadata::PlayingItem::with_subs(vec![stream(1, "English", "subrip"), side]);
+        let MenuKind::Tracks { rows, current } = track_rows("/m/f.mkv", &item, None, TrackKind::Subtitles) else { panic!() };
+        let acts: Vec<_> = rows.iter().map(|r| r.act.clone()).collect();
+        assert_eq!(acts, [
+            Action::ChooseSubtitle("/m/f.mkv".into(), SubtitleChoice::Off),
+            Action::ChooseSubtitle("/m/f.mkv".into(), SubtitleChoice::Track(0)),
+            Action::ChooseSubtitle("/m/f.mkv".into(), SubtitleChoice::File("f.de.srt".into())),
+        ]);
+        assert_eq!(current, Some(0), "unchosen: Off");
+        assert!(!rows[2].detail.is_empty(), "a file beside the video says so");
+        let saved = local_progress::Choices { subtitle: Some(SubtitleChoice::File("f.de.srt".into())), ..Default::default() };
+        let MenuKind::Tracks { current, .. } = track_rows("/m/f.mkv", &item, Some(&saved), TrackKind::Subtitles) else { panic!() };
+        assert_eq!(current, Some(2));
+    }
+
+    #[test]
+    fn the_controls_offer_subtitles_and_audio_before_the_watch_mark() {
+        let resuming = Progress { offset_ms: 5_000, duration_ms: 60_000, watched: false, size: 1 };
+        assert_eq!(controls(Some(resuming)), [PLAY_ELEM, RESTART_ELEM, SUBS_ELEM, AUDIO_ELEM, WATCHED_ELEM]);
+        assert_eq!(controls(None), [PLAY_ELEM, SUBS_ELEM, AUDIO_ELEM, WATCHED_ELEM]);
     }
 }
