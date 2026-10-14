@@ -129,6 +129,8 @@ pub(crate) struct Bridge {
     /// The surfaces whose host counters this bridge holds: (entry, cached, closing).
     held: Vec<(EntryId, bool, bool)>,
     now_us: fn() -> u64,
+    /// The top tab bar's publication and paint (`app::tabs`).
+    tabs: super::tabs::TabChrome,
 }
 
 impl Bridge {
@@ -159,7 +161,14 @@ impl Bridge {
             effect_return: ReturnState::default(),
             held: Vec::new(),
             now_us,
+            tabs: super::tabs::TabChrome::new(),
         }
+    }
+
+    /// Publish the tab bar for this frame (`app::tabs`), before the dispatcher runs.
+    pub(crate) fn publish_tabs(&mut self, d: &mut Dispatcher<AppHost>, dt: f32) {
+        let measure: &dyn Measure = &self.measure;
+        self.tabs.publish(d, measure, dt);
     }
 
     pub(crate) fn take_content_reqs(&mut self) -> Vec<(MachineId, ContentReq, ReturnState<u32, PageMemory>)> {
@@ -339,8 +348,10 @@ impl Bridge {
 
 impl Rig<AppHost> for Bridge {
     fn draw_chrome(&mut self, _arg: &AppArg, _parts: &CxParts<u32>,
-        _nav: plx_ui::screen::NavPresentation,
-        _glass: Option<&mut plx_ui::frame::glass::GlassPlan>) {}
+        nav: plx_ui::screen::NavPresentation,
+        _glass: Option<&mut plx_ui::frame::glass::GlassPlan>) {
+        self.tabs.draw(nav.chrome_alpha);
+    }
     fn scrim_chrome_read(&self) -> Option<plx_ui::widgets::ChromeRead<'_>> {
         None
     }
@@ -689,7 +700,7 @@ pub(crate) fn nav_pop_to(d: &mut Dispatcher<AppHost>, entry: EntryId) {
     if d.nav.tabs.stack.entries.iter().any(|e| e.id == entry) {
         d.request(MachineId::Nav, NavOp::PopTo(entry));
     } else {
-        d.request(MachineId::Nav, NavOp::SelectTab(AppArg::Local(plx_screens::registry::LocalArg { path: String::new() })));
+        d.request(MachineId::Nav, NavOp::SelectTab(AppArg::Home));
     }
 }
 

@@ -568,8 +568,8 @@ mod player_return_tests {
         assert_eq!(p.top_entry(), origin);
     }
 
-    /// **An origin that is no longer on the stack falls back to the library's root** rather than
-    /// to nothing.
+    /// **An origin that is no longer on the stack falls back to the root** — Home, the tab bar's
+    /// first pill — rather than to nothing.
     #[test]
     fn an_origin_that_is_gone_falls_back_to_the_root() {
         let _serial = plx_base::testlock::serial();
@@ -582,7 +582,7 @@ mod player_return_tests {
         bridge::nav_push(&mut p.d, AppArg::Player);
         p.settle();
         p.back_out();
-        assert!(p.top().same_instance(&folder("")), "a stranded return lands on the root");
+        assert!(p.top().same_instance(&AppArg::Home), "a stranded return lands on the root, Home");
     }
 }
 

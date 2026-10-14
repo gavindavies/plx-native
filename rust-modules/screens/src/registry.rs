@@ -140,6 +140,8 @@ pub enum ContentReq {
     LocalOpen(LocalArg),
     /// Open a video's title page (`screens::local_detail`), so BACK returns here.
     LocalDetail(LocalArg),
+    /// A tab bar pill was pressed: select destination `n` of `tabs::destinations()`.
+    SelectTab(usize),
     /// Play a file on this machine's disk: resumed where it was left unless `from_start`. The loop
     /// probes it and starts the engine, which needs the playback session a screen may not name.
     LocalPlay { path: String, from_start: bool },
@@ -178,6 +180,8 @@ pub mod word {
     pub const LOCAL: &str = "local";
     /// A local video's title page (`screens::local_detail`).
     pub const LOCAL_DETAIL: &str = "localdetail";
+    /// Home (`screens::home`).
+    pub const HOME: &str = "home";
 }
 
 /// An element key for a route-family screen: table rows are their index; the action band's
@@ -413,6 +417,9 @@ pub enum AppArg {
     Local(LocalArg),
     /// One video's title page. The path is the video's.
     LocalDetail(LocalArg),
+    /// Home: the newest title, Continue Watching and Recently Added (`screens::home`). The app's
+    /// root, and the tab bar's first pill.
+    Home,
 }
 
 /// The argument of [`AppArg::Local`] and [`AppArg::LocalDetail`]: which folder or video the page
@@ -423,7 +430,7 @@ pub struct LocalArg {
 }
 
 pub const ARG_SHAPE: &str = "AppArg{ItemMenu{path:str,mark:u32,host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4]},\
-     PlayerOverlay{Tracks(tab:i32),Chapters},Player,Local{path:str},LocalDetail{path:str}}";
+     PlayerOverlay{Tracks(tab:i32),Chapters},Player,Local{path:str},LocalDetail{path:str},Home}";
 
 impl LogicalState for AppArg {
     fn write(&self, c: &mut Canon) {
@@ -433,14 +440,17 @@ impl LogicalState for AppArg {
             Self::Player => { c.u32(0).u32(10); }
             Self::Local(arg) => { c.u32(13).str(&arg.path); }
             Self::LocalDetail(arg) => { c.u32(14).str(&arg.path); }
+            Self::Home => { c.u32(15); }
         }
     }
     fn probe(&self, out: &mut String) { out.push_str("app_arg"); }
 }
 
 impl plx_ui::screen::ScreenArg for AppArg {
+    /// Home and the library pills' folders wear the tab bar (`tabs`); every page pushed from them
+    /// (a subfolder, a title page, the player) stands alone.
     fn chrome(&self) -> Chrome {
-        Chrome::None
+        if crate::tabs::is_tab_page(self) { Chrome::TabBar } else { Chrome::None }
     }
     fn id(&self) -> ScreenId {
         ScreenId(match self {
@@ -452,6 +462,7 @@ impl plx_ui::screen::ScreenArg for AppArg {
             // Every folder page is one SCREEN; which folder is its argument.
             AppArg::Local(_) => 25,
             AppArg::LocalDetail(_) => 26,
+            AppArg::Home => 27,
         })
     }
     fn title(&self) -> Option<&str> {
@@ -517,6 +528,7 @@ where
             }
             AppArg::Local(arg) => Box::new(crate::local::LocalScreen::new(entry, id, arg)),
             AppArg::LocalDetail(arg) => Box::new(crate::local_detail::LocalDetailScreen::new(entry, id, arg)),
+            AppArg::Home => Box::new(crate::home::HomeScreen::new(entry, id)),
         }
     }
 }
@@ -540,7 +552,7 @@ pub fn every_surface_arg() -> Vec<AppArg> {
     for a in &args {
         match a {
             AppArg::ItemMenu(_) | AppArg::PlayerOverlay(_) => {}
-            AppArg::Player | AppArg::Local(_) | AppArg::LocalDetail(_) => panic!("a page argument is not a surface: its word is `route=`"),
+            AppArg::Player | AppArg::Local(_) | AppArg::LocalDetail(_) | AppArg::Home => panic!("a page argument is not a surface: its word is `route=`"),
         }
     }
     args
@@ -556,6 +568,7 @@ pub const SCREEN_SHAPES: &[&str] = &[
     crate::player::overlay::SHAPE,
     crate::local::LocalScreen::SHAPE,
     crate::local_detail::LocalDetailScreen::SHAPE,
+    crate::home::HomeScreen::SHAPE,
 ];
 
 #[cfg(test)]

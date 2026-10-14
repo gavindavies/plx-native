@@ -82,10 +82,16 @@ struct Disk {
     items: HashMap<String, Progress>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     choices: HashMap<String, Choices>,
+    /// When each file was last played, in seconds since the epoch: what orders Continue
+    /// Watching ([`continue_watching`]). A separate map rather than a [`Progress`] field, so the
+    /// watch rules and their equality never see a clock. Absent in a file written before it.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    played: HashMap<String, u64>,
 }
 
 static ITEMS: Mutex<Option<HashMap<String, Progress>>> = Mutex::new(None);
 static CHOICES: Mutex<Option<HashMap<String, Choices>>> = Mutex::new(None);
+static PLAYED: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
 static REVISION: AtomicU64 = AtomicU64::new(0);
 /// Serializes the file writes, so an older snapshot can never land after a newer one.
 static WRITER: Mutex<()> = Mutex::new(());
@@ -119,6 +125,7 @@ pub fn load() {
     plx_base::eventlog::log(&format!("local progress: {} record(s), {} with choices", disk.items.len(), disk.choices.len()));
     *ITEMS.lock().unwrap_or_else(|e| e.into_inner()) = Some(disk.items);
     *CHOICES.lock().unwrap_or_else(|e| e.into_inner()) = Some(disk.choices);
+    *PLAYED.lock().unwrap_or_else(|e| e.into_inner()) = Some(disk.played);
     REVISION.fetch_add(1, Relaxed);
 }
 
@@ -159,7 +166,22 @@ pub fn after_stop(before: Option<Progress>, position_ms: u64, duration_ms: u64, 
 /// no disk on the caller's thread: the size comes from whoever already read it.
 pub fn record(path: &Path, size: u64, position_ms: u64, duration_ms: u64, reached_end: bool) {
     let next = after_stop(get(path, size), position_ms, duration_ms, reached_end, size);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    PLAYED.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(key(path), now);
     put(path, next);
+}
+
+/// **Continue Watching**: every file with a place to resume and not finished, most recently
+/// played first (a file with no play time recorded — kept before the time was — last, by path).
+pub fn continue_watching() -> Vec<(PathBuf, Progress)> {
+    let items = ITEMS.lock().unwrap_or_else(|e| e.into_inner());
+    let played = PLAYED.lock().unwrap_or_else(|e| e.into_inner());
+    let at = |k: &str| played.as_ref().and_then(|m| m.get(k)).copied().unwrap_or(0);
+    let mut out: Vec<(String, Progress)> = items.as_ref().map_or_else(Vec::new, |m| {
+        m.iter().filter(|(_, p)| p.offset_ms > 0 && !p.watched).map(|(k, p)| (k.clone(), *p)).collect()
+    });
+    out.sort_by(|a, b| at(&b.0).cmp(&at(&a.0)).then_with(|| a.0.cmp(&b.0)));
+    out.into_iter().map(|(k, p)| (PathBuf::from(k), p)).collect()
 }
 
 /// The viewer's own verdict: watched (place forgotten) or not watched (from the beginning).
@@ -215,6 +237,7 @@ fn save() {
             version: 1,
             items: ITEMS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default(),
             choices: CHOICES.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default(),
+            played: PLAYED.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default(),
         };
         let json = match serde_json::to_vec_pretty(&disk) {
             Ok(j) => j,
@@ -294,6 +317,28 @@ mod tests {
         set_choices(&film, chosen.clone());
         assert_eq!(choices(&film, 10), Some(chosen), "choices outlive the watch record");
         assert_eq!(choices(&film, 11), None, "…for this file only");
+        plx_base::paths::redirect_persistent_state_root_for_test(None);
+    }
+
+    #[test]
+    fn continue_watching_is_the_unfinished_places_most_recent_first() {
+        let _serial = plx_base::testlock::serial();
+        let dir = plx_base::testscratch::process_dir("local-progress-cw");
+        plx_base::paths::redirect_persistent_state_root_for_test(Some(dir.join("state")));
+        let (a, b, c) = (dir.join("a.mkv"), dir.join("b.mkv"), dir.join("c.mkv"));
+        record(&a, 1, 40 * MIN, 100 * MIN, false);
+        record(&b, 1, 20 * MIN, 100 * MIN, false);
+        record(&c, 1, 95 * MIN, 100 * MIN, false);
+        // the same second for both: the clock cannot order them, the path does (stably)
+        let mut want = vec![a.clone(), b.clone()];
+        let got: Vec<PathBuf> = continue_watching().into_iter().map(|(p, _)| p).filter(|p| p.starts_with(&dir)).collect();
+        want.sort();
+        let mut sorted = got.clone();
+        sorted.sort();
+        assert_eq!(sorted, want, "a finished film is not continued");
+        PLAYED.lock().unwrap().get_or_insert_with(HashMap::new).insert(key(&b), u64::MAX);
+        let first = continue_watching().into_iter().map(|(p, _)| p).find(|p| p.starts_with(&dir));
+        assert_eq!(first, Some(b.clone()), "the most recently played leads");
         plx_base::paths::redirect_persistent_state_root_for_test(None);
     }
 }
