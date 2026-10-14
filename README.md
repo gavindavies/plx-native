@@ -63,14 +63,22 @@ and Up reaches the subtitle and audio buttons; a remote's media keys work too. L
 
 ## Demo library
 
-`design/demo-library/generate.sh` makes a small library of invented films and a show, from
-nothing but `ffmpeg` and the app's own fonts: posters, video, English and Spanish audio, and
-subtitle files beside each video. It is what the screenshots above show.
+`design/demo-library/build.py` builds a library from PlxNative's openly licensed demo catalog:
+Blender Studio's open films (Sintel, Spring, Big Buck Bunny, Sprite Fright, ...), public-domain
+classics (Nosferatu, Metropolis, The General, ...) and two shows (Caminandes, ESA's Hubblecast).
+It downloads each poster, backdrop and still from its pinned source (checking every file's hash),
+cuts them to PiTV's folder layout and writes a `CREDITS.md` with each one's licence and
+attribution. Sintel is the real film (282 MB; `--no-films` skips it); every other title gets a
+short clip panning across its own key art, with its synopsis as an English subtitle file.
 
 ```sh
-design/demo-library/generate.sh          # into design/demo-library/library (not committed)
+design/demo-library/build.py             # into design/demo-library/library (not committed)
 PITV_MEDIA_DIRS=design/demo-library/library dist/linux/pitv/pitv
 ```
+
+The catalog and its sources are `design/demo-library/catalog.json` and `assets.json`.
+`design/demo-library/generate.sh` makes a smaller library of invented titles from nothing but
+`ffmpeg`, for a machine without network access.
 
 ## Status
 
