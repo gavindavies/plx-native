@@ -652,6 +652,18 @@ pub const fn white(a: f32) -> [f32; 4] {
     with_a(WHITE, a)
 }
 
+/// **The app surface ([`SURFACE_APP`]) at alpha `a`** — the veil a page lays over its own artwork
+/// so that what stands below it (shelves, a row of stills) stands on the surface itself
+/// (`art_ground`). A weight of the surface, not a new hue.
+pub const fn surface(a: f32) -> [f32; 4] {
+    with_a(SURFACE_APP, a)
+}
+
+/// How strongly a BROWSING page's blurred artwork shows through (`art_ground::Treatment::Blurred`,
+/// the redesign's `opacity:.55`): enough to say which title is focused, not enough to compete with
+/// the posters over it.
+pub const ART_GROUND_BLUR_A: f32 = 0.55;
+
 /// Near-black scrim at alpha `a` — hero/scroll dimming.
 pub const fn scrim(a: f32) -> [f32; 4] {
     [SCRIM_INK[0], SCRIM_INK[1], SCRIM_INK[2], a]

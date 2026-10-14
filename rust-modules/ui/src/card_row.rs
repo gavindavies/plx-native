@@ -81,6 +81,26 @@ impl RowStyle {
         circular: false,
         right_reserve: 0.0,
     };
+    /// **The library's poster shelf** (`PiTV Redesign.dc.html` 1b): HOME's poster, with the
+    /// redesign's wider 56 px air between posters (the screens read as cramped on a 50" panel at
+    /// 30) and a stronger pop — 250 → 280 wide, the mock's focused poster. `slot − w × pop` is
+    /// 306 − 280 = 26 px, so a popped poster still clears its neighbours.
+    pub const SHELF: RowStyle = RowStyle {
+        w: CARD_W,
+        h: CARD_H,
+        gap: 56.0,
+        margin_x: MARGIN_X,
+        radius: theme::CARD_RING_RAD,
+        focus_scale: 1.12,
+        k_scale: K_SCALE,
+        k_scroll: K_SCROLL,
+        circular: false,
+        right_reserve: 0.0,
+    };
+    /// **The library's shelf of landscape stills** — EPISODE's 420×236 with [`RowStyle::SHELF`]'s
+    /// air (48, the mock's Continue Watching gap), for a season's episodes and a title page's
+    /// "More in" row.
+    pub const STILL_SHELF: RowStyle = RowStyle { gap: 48.0, ..RowStyle::EPISODE };
     /// **A shelf of EPISODES: landscape stills.** Same motion as HOME — the spring magnification,
     /// the scroll, the glow ring and the heading lift are all one vocabulary — and a different
     /// aspect, because an episode is not a poster.

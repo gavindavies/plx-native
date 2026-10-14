@@ -77,6 +77,9 @@ pub struct Entry {
     /// A folder that is a show: it has a `tvshow.nfo`, or a `Season …` / `Specials` folder inside.
     /// Every other folder is a plain one — a collection of titles, or anything else.
     pub show: bool,
+    /// A video with a subtitle file beside it ([`sidecars`]' naming), read from the names the
+    /// scan already listed.
+    pub sidecar_subs: bool,
 }
 
 impl Entry {
@@ -92,7 +95,7 @@ impl Entry {
 
     /// An entry with nothing known about it beyond its name, kind, poster and size.
     pub fn new(title: String, path: PathBuf, kind: EntryKind, art: Option<String>, size: u64) -> Self {
-        Entry { title, path, kind, art, size, meta: None, backdrop: None, logo: None, show: false }
+        Entry { title, path, kind, art, size, meta: None, backdrop: None, logo: None, show: false, sidecar_subs: false }
     }
 }
 
@@ -298,7 +301,7 @@ fn folder_entry(path: PathBuf, name: &str) -> Entry {
 }
 
 /// `Season 1`, `Season 01`, `S01`, `Specials`: the folders a show is split into.
-fn is_season_folder(name: &str) -> bool {
+pub fn is_season_folder(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     if lower == "specials" {
         return true;
@@ -320,6 +323,7 @@ fn described(mut entry: Entry, dir: &Path, names: &[String], stem: &str, lone: b
     };
     entry.backdrop = own(local_meta::backdrop_in(dir, names, stem)).map(|p| art_token(&p));
     entry.logo = own(local_meta::logo_in(dir, names, stem)).map(|p| art_token(&p));
+    entry.sidecar_subs = !stem.is_empty() && names.iter().any(|n| sidecar_of(stem, n).is_some());
     entry
 }
 
@@ -577,6 +581,7 @@ mod tests {
         assert_eq!(charge.kind, EntryKind::Video);
         assert_eq!(charge.display_title(), "Charge", "the .nfo's title names it");
         assert_eq!(charge.collection(), "Blender Open Movies");
+        assert!(!charge.sidecar_subs);
         assert_eq!(art_path(charge.backdrop.as_deref().unwrap()).unwrap(), film.join("fanart.jpg"));
         assert_eq!(art_path(charge.logo.as_deref().unwrap()).unwrap(), film.join("clearlogo.png"));
         let show = top.iter().find(|e| e.title == "Caminandes").unwrap();
@@ -584,8 +589,10 @@ mod tests {
         assert!(show.backdrop.is_some(), "and wears its own backdrop");
         let silent = top.iter().find(|e| e.title == "Silent Classics").unwrap();
         assert!(!silent.show && silent.meta.is_none(), "a folder of films is a plain folder");
+        touch(&root.join("Mixed/one.en.srt"));
         let mixed = scan(&root.join("Mixed")).unwrap();
         assert_eq!(mixed[0].display_title(), "One");
+        assert!(mixed[0].sidecar_subs && !mixed[1].sidecar_subs, "a subtitle file is its own video's");
         assert_eq!(mixed[0].backdrop, None, "a video sharing its folder does not take the folder's backdrop");
         assert_eq!(art_path(mixed[1].backdrop.as_deref().unwrap()).unwrap(), root.join("Mixed/two-fanart.jpg"));
         assert_eq!(mixed[1].meta, None);

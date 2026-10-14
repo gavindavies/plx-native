@@ -9,6 +9,7 @@ pub(crate) fn route_word(route: &AppArg) -> &'static str {
     match route {
         AppArg::Player => "player",
         AppArg::Local(_) => plx_screens::registry::word::LOCAL,
+        AppArg::LocalDetail(_) => plx_screens::registry::word::LOCAL_DETAIL,
         // Not pages: a surface's word is ` overlay=`, and none of these reaches the page stack's
         // top. Written out rather than swept into a `_` so a new PAGE variant is a compile error.
         AppArg::ItemMenu(_) | AppArg::PlayerOverlay(_) => "",

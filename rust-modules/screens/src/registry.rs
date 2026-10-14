@@ -138,9 +138,11 @@ pub const PAGE_MEMORY_SHAPE: &str = "PageMemory{None}";
 pub enum ContentReq {
     /// Open a folder as a page of its own, so BACK returns here.
     LocalOpen(LocalArg),
-    /// Play a file on this machine's disk. The loop probes it and starts the engine, which needs
-    /// the playback session a screen may not name.
-    LocalPlay(String),
+    /// Open a video's title page (`screens::local_detail`), so BACK returns here.
+    LocalDetail(LocalArg),
+    /// Play a file on this machine's disk: resumed where it was left unless `from_start`. The loop
+    /// probes it and starts the engine, which needs the playback session a screen may not name.
+    LocalPlay { path: String, from_start: bool },
     Back,
     ItemMenu,
 }
@@ -174,6 +176,8 @@ pub mod word {
     pub const ITEM_MENU: &str = "itemmenu";
     /// The local library's folder page (`screens::local`).
     pub const LOCAL: &str = "local";
+    /// A local video's title page (`screens::local_detail`).
+    pub const LOCAL_DETAIL: &str = "localdetail";
 }
 
 /// An element key for a route-family screen: table rows are their index; the action band's
@@ -407,16 +411,19 @@ pub enum AppArg {
     /// One folder of the local library. The path is the folder's, empty for the library's top
     /// level.
     Local(LocalArg),
+    /// One video's title page. The path is the video's.
+    LocalDetail(LocalArg),
 }
 
-/// The argument of [`AppArg::Local`]: which folder the page shows.
+/// The argument of [`AppArg::Local`] and [`AppArg::LocalDetail`]: which folder or video the page
+/// shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LocalArg {
     pub path: String,
 }
 
 pub const ARG_SHAPE: &str = "AppArg{ItemMenu{path:str,mark:u32,host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4]},\
-     PlayerOverlay{Tracks(tab:i32),Chapters},Player,Local{path:str}}";
+     PlayerOverlay{Tracks(tab:i32),Chapters},Player,Local{path:str},LocalDetail{path:str}}";
 
 impl LogicalState for AppArg {
     fn write(&self, c: &mut Canon) {
@@ -425,6 +432,7 @@ impl LogicalState for AppArg {
             Self::ItemMenu(arg) => { c.u32(9); arg.write(c); }
             Self::Player => { c.u32(0).u32(10); }
             Self::Local(arg) => { c.u32(13).str(&arg.path); }
+            Self::LocalDetail(arg) => { c.u32(14).str(&arg.path); }
         }
     }
     fn probe(&self, out: &mut String) { out.push_str("app_arg"); }
@@ -443,13 +451,14 @@ impl plx_ui::screen::ScreenArg for AppArg {
             AppArg::Player => 11,
             // Every folder page is one SCREEN; which folder is its argument.
             AppArg::Local(_) => 25,
+            AppArg::LocalDetail(_) => 26,
         })
     }
     fn title(&self) -> Option<&str> {
         None
     }
     fn same_instance(&self, other: &Self) -> bool {
-        if let (Self::Local(a), Self::Local(b)) = (self, other) {
+        if let (Self::Local(a), Self::Local(b)) | (Self::LocalDetail(a), Self::LocalDetail(b)) = (self, other) {
             return a == b;
         }
         // **A player overlay's identity is its KIND, never the playback under it**: the panel is
@@ -507,6 +516,7 @@ where
                 Box::new(page)
             }
             AppArg::Local(arg) => Box::new(crate::local::LocalScreen::new(entry, id, arg)),
+            AppArg::LocalDetail(arg) => Box::new(crate::local_detail::LocalDetailScreen::new(entry, id, arg)),
         }
     }
 }
@@ -530,7 +540,7 @@ pub fn every_surface_arg() -> Vec<AppArg> {
     for a in &args {
         match a {
             AppArg::ItemMenu(_) | AppArg::PlayerOverlay(_) => {}
-            AppArg::Player | AppArg::Local(_) => panic!("a page argument is not a surface: its word is `route=`"),
+            AppArg::Player | AppArg::Local(_) | AppArg::LocalDetail(_) => panic!("a page argument is not a surface: its word is `route=`"),
         }
     }
     args
@@ -545,6 +555,7 @@ pub const SCREEN_SHAPES: &[&str] = &[
     crate::player::SHAPE,
     crate::player::overlay::SHAPE,
     crate::local::LocalScreen::SHAPE,
+    crate::local_detail::LocalDetailScreen::SHAPE,
 ];
 
 #[cfg(test)]

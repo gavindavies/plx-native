@@ -46,9 +46,12 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
             ContentReq::LocalOpen(arg) => {
                 bridge::nav_push_with_return(&mut app.pages, AppArg::Local(arg), ret);
             }
-            ContentReq::LocalPlay(path) => {
+            ContentReq::LocalDetail(arg) => {
+                bridge::nav_push_with_return(&mut app.pages, AppArg::LocalDetail(arg), ret);
+            }
+            ContentReq::LocalPlay { path, from_start } => {
                 super::local_watch::play(&mut app.player.session, &mut app.adapters.player, std::path::Path::new(&path),
-                    false, Some(ret), &mut app.pages, &mut app.bridge);
+                    from_start, Some(ret), &mut app.pages, &mut app.bridge);
             }
             ContentReq::ItemMenu => {
                 // The page does not move: a surface is presented over the top page and never

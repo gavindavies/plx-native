@@ -13,6 +13,7 @@
 //! concrete host and the rig it lends the dispatcher.
 
 pub mod local; // the Linux build's folder browser: one folder of the local library per page
+pub mod local_detail; // one local video's title page: its artwork, description and how to play it
 pub mod item_menu;
 pub mod player;
 pub mod registry;
