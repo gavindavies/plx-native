@@ -303,27 +303,6 @@ pub fn note_spring(pos: f32, target: f32, vel: f32) {
     }
 }
 
-/// Run `f` — a page's DECORATIVE springs (a colour dissolve under the page, an in-place focus pop)
-/// — so that their motion still wakes the present gate and still counts as page motion for every
-/// pixel-facing reader ([`page_moving`]), but does not count toward [`page_layout_moving`].
-///
-/// The page-freeze holds a route's snapshot until the page stops moving so that first poster
-/// admission can settle behind it; a spring that decorates the page and moves neither layout nor
-/// the card grid must not be able to hold that snapshot for the whole
-/// `PAGE_QUIESCENCE_HOLD_MAX_MS` cap. Declare it here rather than special-casing a screen in the
-/// transition code. Does not nest with [`MotionScope`] semantics: it is independent of them.
-pub fn decorative<T>(f: impl FnOnce() -> T) -> T {
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            DECOR_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
-        }
-    }
-    DECOR_DEPTH.with(|d| d.set(d.get() + 1));
-    let _g = Guard;
-    f()
-}
-
 /// Whether a spring at `pos` heading for `target` with `vel` is visibly at rest — the exact test
 /// [`note_spring`] applies, exported so an animator can snap a settled spring onto its target
 /// (`Spring::jump`) and hand the compositor an exactly-resting final frame.

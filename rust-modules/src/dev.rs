@@ -34,7 +34,3 @@ plx_base::devtrig::latched_flag! {
     /// The `imgtrace` trigger — trace the poster pipeline (`app::adapters::poster::trace`).
     pub(crate) fn imgtrace_armed = "imgtrace";
 }
-plx_base::devtrig::latched_flag! {
-    /// RAM-only control leg for cache performance comparisons; absent in shipping builds.
-    pub(crate) fn imagecache_bypass_armed = "imagecache-bypass";
-}

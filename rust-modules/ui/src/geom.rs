@@ -372,59 +372,6 @@ where
     }
 }
 
-/// A `DocumentReader` in its frame: a `Document` group of ONE element that scrolls inside and
-/// leaves only at its ends (spec §7.3 step 2).
-pub struct Document<'a> {
-    pub reader: &'a super::document_reader::DocumentReader,
-    pub frame: Rect,
-    pub group: GroupId,
-    pub entry: EntryId,
-}
-
-impl<H: Host> Focusable<H> for Document<'_>
-where
-    H::Elem: IndexElem,
-{
-    fn groups(&self, _cx: &Cx<'_, H>, out: &mut Vec<GroupSpec>) {
-        out.push(GroupSpec {
-            id: self.group,
-            kind: GroupKind::Document,
-            seat: Seat::First,
-            reachable: AxisMask::BOTH,
-            edge: [EdgeRule::Geometric; 4],
-            extent: self.frame,
-            len: 1,
-            elem: ElemKind::Control,
-        });
-    }
-    fn group_of(&self, key: &H::Elem, _cx: &Cx<'_, H>) -> Option<GroupId> {
-        (key.index()? == 0).then_some(self.group)
-    }
-    fn neighbour(&self, k: FocusKey<H::Elem>, dir: Dir, _cx: &Cx<'_, H>) -> Step<H::Elem> {
-        // A move INSIDE the document is a scroll the owner performs on `FocusMoved`; the key
-        // stays the document's one element. At an end, the direction leaves.
-        match dir {
-            Dir::Up if !self.reader.at_top() => Step::Move(k),
-            Dir::Down if !self.reader.at_end() => Step::Move(k),
-            _ => Step::Edge,
-        }
-    }
-    fn place(&self, key: &H::Elem, _cx: &Cx<'_, H>, _at: At) -> Option<Placed> {
-        (key.index()? == 0).then_some(Placed {
-            rect: self.frame,
-            rest_rect: self.frame,
-            clip: self.frame,
-            index: Some(0),
-        })
-    }
-    fn reconcile(&self, _want: FocusKey<H::Elem>, _cx: &Cx<'_, H>) -> FocusKey<H::Elem> {
-        key(self.entry, 0)
-    }
-    fn seat(&self, _g: GroupId, _from: Placed, _cx: &Cx<'_, H>) -> FocusKey<H::Elem> {
-        key(self.entry, 0)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -560,32 +507,6 @@ mod tests {
         assert!(matches!(Focusable::<FixtureHost>::neighbour(&table, k3, Dir::Down, &cx), Step::Edge));
         let sep = FocusKey { entry: E, elem: 1u32 };
         assert_ne!(Focusable::<FixtureHost>::reconcile(&table, sep, &cx).elem, 1, "a separator is never focus");
-    }
-
-    /// A document scrolls inside and leaves only at its ends.
-    #[test]
-    fn a_document_scrolls_inside_and_leaves_at_its_ends() {
-        let m = FixtureMeasure;
-        let v = FixtureView::default();
-        let cx = cx(&m, &v);
-        let mut reader = super::super::document_reader::DocumentReader::new();
-        let frame = Rect::new(0.0, 0.0, 800.0, 600.0);
-        fn doc(r: &super::super::document_reader::DocumentReader, frame: Rect) -> Document<'_> {
-            Document {
-                reader: r,
-                frame,
-                group: GroupId(9),
-                entry: E,
-            }
-        }
-        let k = FocusKey { entry: E, elem: 0u32 };
-        assert!(matches!(Focusable::<FixtureHost>::neighbour(&doc(&reader, frame), k, Dir::Up, &cx), Step::Edge), "at the top, UP leaves");
-        assert!(matches!(Focusable::<FixtureHost>::neighbour(&doc(&reader, frame), k, Dir::Down, &cx), Step::Edge), "an empty document has no inside");
-        reader.set_extent_for_test(2000.0);
-        assert!(matches!(Focusable::<FixtureHost>::neighbour(&doc(&reader, frame), k, Dir::Down, &cx), Step::Move(_)));
-        reader.move_by(1000);
-        assert!(matches!(Focusable::<FixtureHost>::neighbour(&doc(&reader, frame), k, Dir::Down, &cx), Step::Edge), "at the end, DOWN leaves");
-        assert!(matches!(Focusable::<FixtureHost>::neighbour(&doc(&reader, frame), k, Dir::Up, &cx), Step::Move(_)));
     }
 
     /// The one reconcile rule: a stale index clamps to the last item, a key from another namespace

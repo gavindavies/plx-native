@@ -246,8 +246,6 @@ extern "C" {
     fn glClear(mask: c_uint);
     #[cfg(feature = "devtriggers")]
     fn glFinish();
-    #[cfg(feature = "devtriggers")]
-    fn glFlush();
     fn glGenTextures(n: c_int, textures: *mut c_uint);
     // `#[allow(dead_code)]` — the same shape as `app/mod.rs`'s SDL text-input externs: the sole
     // caller (`delete_tex`, below) compiles its real call out under `cfg(test)`, so this
@@ -417,15 +415,6 @@ pub fn frame_clear(r: f32, g: f32, b: f32) {
     frame_clear_alpha(r, g, b, 1.0);
 }
 
-/// Transparent black. The compositor blends this surface over the hardware video plane, so alpha 0
-/// is a hole, not a black fill. The player route clears this way from the loop because that page
-/// never paints a ground. A page that keeps its own chrome (the detail trailer preview) has to
-/// punch the same hole itself: [`frame_clear`] here is a full-screen sheet over the plane, which
-/// is sound with no picture.
-pub fn frame_clear_through() {
-    frame_clear_alpha(0.0, 0.0, 0.0, 0.0);
-}
-
 thread_local! {
     static SUPPRESS_FRAME_CLEAR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -474,16 +463,6 @@ fn frame_clear_alpha(r: f32, g: f32, b: f32, a: f32) {
 #[cfg(feature = "devtriggers")]
 pub fn gl_finish() {
     unsafe { glFinish() }
-}
-
-/// Submit everything queued without waiting for it. Unlike [`gl_finish`] this does not stall the
-/// CPU, which is what lets the asynchronous timer path use it: on a tile-based Midgard GPU the
-/// fragment work for a render target is only issued when that target's pass is flushed, so a
-/// `GL_TIME_ELAPSED` interval closed before the flush contains no submitted job and reports a
-/// cost of essentially zero. Profiler-only, for the same reason `gl_finish` is.
-#[cfg(feature = "devtriggers")]
-pub fn gl_flush() {
-    unsafe { glFlush() }
 }
 
 static mut PROG: c_uint = 0;
@@ -1470,14 +1449,6 @@ fn draw_ambient_impl(
     }
 }
 
-/// Can the wash carry an ink ramp ([`draw_ambient_inked`])? Only the dithered program has one; if
-/// it failed to link, the plain twin draws the wash and the caller keeps the ramp as its own layer.
-#[inline]
-pub fn wash_ink_ok() -> bool {
-    // SAFETY: written once at init on the render thread, read on the render thread.
-    unsafe { APROG != 0 }
-}
-
 /// [`draw_ambient`] with a vertical INK RAMP laid over the field in the same pass: `ink` (rgb) at an
 /// alpha running linearly from `inka[0]` at the rect's top edge to `inka[1]` at its bottom — the
 /// screen's atmospheric scrim, cut by the caller at its knees so each rect is one straight segment.
@@ -1920,15 +1891,6 @@ fn init_hero() {
     }
 }
 
-/// Is the hero-ground program usable? `false` means its link failed and the caller must draw the
-/// art and the scrims the way it always has.
-#[inline]
-pub fn hero_ground_ok() -> bool {
-    // Not `HPROG != 0`: the link has not been attempted until the first draw, so before that the
-    // honest answer is "nothing has refused it yet". A refusal latches through `HERO_TRIED`.
-    unsafe { HPROG != 0 || !HERO_TRIED }
-}
-
 /// Draw the hero ground: the art quad `(x,y,w,h)` with the atmospheric ramp and the corner wedge
 /// evaluated per fragment. `ramp` is `(y0, knee, alpha_at_knee, alpha_at_foot)` and `wedge` is
 /// `(peak, width, feather_top, feather_knee)`, both in authored pixels with the alphas already
@@ -1994,14 +1956,6 @@ pub fn draw_hero_ground(
         glUniform4f(HL_RECT, x, y, w, h);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
-}
-
-/// Can the wash carry its artwork in one pass? `false` means the caller draws [`draw_ambient`] and
-/// then the art as two layers — the same picture.
-#[inline]
-pub fn art_wash_ok() -> bool {
-    // SAFETY: written once at init on the render thread, read on the render thread.
-    unsafe { std::ptr::addr_of!(ART_WASH).read().is_some() }
 }
 
 /// **The wash with a photograph dissolved into it, in ONE opaque pass**: the four-corner field
@@ -2128,12 +2082,6 @@ pub mod tex_ledger {
         #[cfg(any(test, feature = "test-support"))]
         static MUTATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     }
-
-    /// Test-support: how many times a texture was specified or deleted on this thread, ever. A
-    /// test that must show "no texture work happened across this span" compares two readings; the
-    /// live set alone cannot (a delete paired with a re-specify leaves it unchanged).
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn mutations() -> u64 { MUTATIONS.with(|n| n.get()) }
 
     #[cfg(any(test, feature = "test-support"))]
     fn note_mutation() { MUTATIONS.with(|n| n.set(n.get().wrapping_add(1))); }
@@ -3430,11 +3378,6 @@ pub fn retain_backdrop(z: backdrop::Z) -> bool {
 /// A configured cadence and the cadence that RAN are different claims: an invalidation only
 /// schedules a capture, and a containment miss can take one no clock asked for.
 pub static BLUR_SNAPSHOTS: AtomicU32 = AtomicU32::new(0);
-
-/// Take and clear the snapshot count, for the once/sec heartbeat.
-pub fn take_blur_snapshots() -> u32 {
-    BLUR_SNAPSHOTS.swap(0, Ordering::Relaxed)
-}
 
 static mut BLURST: Option<BlurChain> = None;
 /// Latched off: no FBO, no program, or a failed copy. Callers draw no backdrop and keep their own
@@ -4744,12 +4687,6 @@ impl<const N: usize> GroundProbe<N> {
         }
     }
 
-    /// Drop any reading in flight or read back, and queue a fresh one on the next call.
-    fn invalidate(&mut self) {
-        self.cadence.invalidate();
-        self.ready = None;
-    }
-
     /// **The read-back, at a frame BOUNDARY.** Called right after the swap, before the next frame
     /// draws anything: reading the probe's target here binds another framebuffer while the
     /// frame's own has nothing pending, so it neither splits a render pass nor waits on one. The
@@ -4969,15 +4906,6 @@ static mut CONTROL_GROUND_RGB: Option<[f32; 3]> = None;
 /// The Hero row's probe — its own cadence and its own target, never the bar's.
 static mut CONTROL_PROBE: GroundProbe<CONTROL_GROUND_TAPS> =
     GroundProbe::new(CONTROL_GROUND_SAMPLE_EVERY, CONTROL_GROUND_TAP_PX);
-
-/// Mark a Hero's sampled ground stale when the item behind the row changes. The last honest answer
-/// remains available during the carousel/route transition; the first settled draw queues a fresh
-/// reading, and a reading still in flight for the old item is dropped rather than latched.
-pub fn control_ground_invalidate() {
-    unsafe {
-        (*std::ptr::addr_of_mut!(CONTROL_PROBE)).invalidate();
-    }
-}
 
 /// **One display-encoded sRGB channel as RADIANCE** (IEC 61966-2-1), and [`enc`] back again.
 ///
@@ -5884,46 +5812,7 @@ const GL_FRAMEBUFFER_COMPLETE: c_uint = 0x8CD5;
 const GL_PACK_ALIGNMENT: c_uint = 0x0D05;
 const GL_NO_ERROR: c_uint = 0;
 
-const CAP_W: c_int = 1920;
-const CAP_H: c_int = 1080;
-const CAP_MID_W: c_int = 960;
-const CAP_MID_H: c_int = 540;
-const CAP_OUT_W: c_int = 480;
-const CAP_OUT_H: c_int = 270;
 const CAP_TINT: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; // untinted blit
-
-struct CapChain {
-    grab: c_uint, // 1920x1080 back-buffer copy target
-    mid: c_uint,  // 960x540 downscale target
-    mid_fbo: c_uint,
-    /// 480x270 downscale target. **Deliberately never read**, unlike `grab` and `mid`, which are
-    /// both sampled as the next pass's source: this is the LAST pass, and its frame leaves through
-    /// `glReadPixels` on `out_fbo`. Kept because it is the only handle on the texture object
-    /// backing that fbo — dropping the name leaks it unrecoverably, with nothing to delete or
-    /// re-attach it by. `#[allow]` rather than `_out` so it still reads as a live GL resource.
-    #[allow(dead_code)]
-    out: c_uint,
-    out_fbo: c_uint,
-    pending: bool,    // a frame was rendered into this chain, not yet read back
-    pw: c_int,        // dims of the pending frame — LATCHED at write time (never
-    ph: c_int,        //   re-derived from the live request; kills the switch race)
-    read_fbo: c_uint, // which fbo holds the pending frame (mid_fbo or out_fbo)
-    flip: bool,       // pending frame is bottom-up (even pass count) — encoder reverses rows
-}
-
-struct CapState {
-    chains: [CapChain; 2],
-    parity: usize,
-    first_copy_checked: bool,
-}
-static mut CAPST: Option<CapState> = None;
-static mut CAP_LATCHED_OFF: bool = false;
-
-// glReadPixels time split out of the whole-cycle time (capture.rs owns that one and
-// folds both into its periodic stats line). The read is the only synchronous GL call
-// in the cycle — everything else is submission cost that lands at the swap.
-pub static CAP_READ_US: AtomicU32 = AtomicU32::new(0);
-pub static CAP_READ_N: AtomicU32 = AtomicU32::new(0);
 
 /// A capture-ready NPOT texture: storage only (pixels NULL), refreshed via CopyTexSubImage.
 /// `upload_rgba` already sets the CLAMP_TO_EDGE + LINEAR quartet these NPOT targets REQUIRE
@@ -5951,147 +5840,6 @@ fn fbo_target(w: c_int, h: c_int, who: &str) -> Option<(c_uint, c_uint)> {
             return None;
         }
         Some((t, f))
-    }
-}
-
-fn cap_lazy_init() -> bool {
-    unsafe {
-        if (*std::ptr::addr_of!(CAPST)).is_some() {
-            return true;
-        }
-        let mk_chain = || -> Option<CapChain> {
-            let grab = cap_tex(CAP_W, CAP_H);
-            let (mid, mid_fbo) = fbo_target(CAP_MID_W, CAP_MID_H, "capture")?;
-            let (out, out_fbo) = fbo_target(CAP_OUT_W, CAP_OUT_H, "capture")?;
-            Some(CapChain {
-                grab,
-                mid,
-                mid_fbo,
-                out,
-                out_fbo,
-                pending: false,
-                pw: 0,
-                ph: 0,
-                read_fbo: 0,
-                flip: false,
-            })
-        };
-        match (mk_chain(), mk_chain()) {
-            (Some(a), Some(b)) => {
-                CAPST = Some(CapState {
-                    chains: [a, b],
-                    parity: 0,
-                    first_copy_checked: false,
-                });
-                true
-            }
-            _ => {
-                CAP_LATCHED_OFF = true; // cap_target already logged the status
-                false
-            }
-        }
-    }
-}
-
-/// One capture cycle, called by `capture::tick` on the GL (main) thread between the last UI
-/// draw and the swap. Writes the current back buffer (grab + downscale) into this cycle's
-/// chain, and — if the *other* chain has a frame pending from the previous cycle — reads it
-/// into `buf` (resized exactly). Returns `Some((w, h, flip))` when `buf` was filled.
-/// `want_960` selects the 960x540 output (single pass) over the default 480x270 (two passes).
-/// Returns `None` and does nothing after a completeness/copy failure (latched off).
-pub fn cap_cycle(want_960: bool, buf: &mut Vec<u8>) -> Option<(c_int, c_int, bool)> {
-    unsafe {
-        if CAP_LATCHED_OFF || !cap_lazy_init() {
-            return None;
-        }
-        // through a raw pointer, not `&mut CAPST` (`static_mut_refs`, a future hard error). Sound
-        // for the same reason the direct form was: `cap_cycle` runs only on the GL (main) thread.
-        let st = (*std::ptr::addr_of_mut!(CAPST)).as_mut().unwrap();
-        let w = st.parity;
-        let r = 1 - w;
-
-        // A. grab the finished UI frame (framebuffer 0 is bound; nothing drawn after this,
-        //    so the pass-flush this forces is work the swap would submit anyway).
-        glBindTexture(GL_TEXTURE_2D, st.chains[w].grab);
-        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, CAP_W, CAP_H);
-        if !st.first_copy_checked {
-            st.first_copy_checked = true;
-            let e = glGetError();
-            if e != GL_NO_ERROR {
-                // e.g. INVALID_OPERATION if the window config lost its alpha bits — the copy
-                // silently no-ops (black stream), so latch off loudly instead.
-                log(&format!(
-                    "capture: CopyTexSubImage error=0x{e:x} — capture off"
-                ));
-                CAP_LATCHED_OFF = true;
-                return None;
-            }
-        }
-
-        // B. downscale pass(es). Blend OFF (fresh target, raw copy); glClear before each pass
-        //    spares Midgard the tile preserve-load of the stale FBO contents (a full-screen
-        //    quad does NOT relieve that obligation). Scissor is off here (clip pairs in-frame).
-        glDisable(GL_BLEND);
-        let c = &st.chains[w];
-        glBindFramebuffer(GL_FRAMEBUFFER, c.mid_fbo);
-        glViewport(0, 0, CAP_MID_W, CAP_MID_H);
-        glClear(GL_COLOR_BUFFER_BIT);
-        // full-authored-screen rect: IPROG maps (0,0,1920,1080) to the whole viewport
-        draw_tex(c.grab, 0.0, 0.0, SCR_W, SCR_H, 0.0, CAP_TINT.as_ptr());
-        if !want_960 {
-            glBindFramebuffer(GL_FRAMEBUFFER, c.out_fbo);
-            glViewport(0, 0, CAP_OUT_W, CAP_OUT_H);
-            glClear(GL_COLOR_BUFFER_BIT);
-            draw_tex(c.mid, 0.0, 0.0, SCR_W, SCR_H, 0.0, CAP_TINT.as_ptr());
-        }
-        let ch = &mut st.chains[w];
-        ch.pending = true;
-        if want_960 {
-            ch.pw = CAP_MID_W;
-            ch.ph = CAP_MID_H;
-            ch.read_fbo = ch.mid_fbo;
-            ch.flip = false; // 1 pass: cap (bottom-up) + 1 flip = top-down
-        } else {
-            ch.pw = CAP_OUT_W;
-            ch.ph = CAP_OUT_H;
-            ch.read_fbo = ch.out_fbo;
-            ch.flip = true; // 2 passes: flips cancel = bottom-up; encoder reverses rows
-        }
-
-        // C. read the OTHER chain's frame, rendered >=1 cycle ago (complete — no drain).
-        let mut got = None;
-        let rc = &mut st.chains[r];
-        if rc.pending {
-            rc.pending = false;
-            glBindFramebuffer(GL_FRAMEBUFFER, rc.read_fbo);
-            glPixelStorei(GL_PACK_ALIGNMENT, 1); // RGBA rows are 4-aligned anyway; belt+braces
-            let n = (rc.pw * rc.ph * 4) as usize;
-            buf.resize(n, 0); // resize, NOT with_capacity: glReadPixels needs len, not capacity
-            let t0 = std::time::Instant::now();
-            glReadPixels(
-                0,
-                0,
-                rc.pw,
-                rc.ph,
-                GL_RGBA,
-                GL_UNSIGNED_BYTE,
-                buf.as_mut_ptr() as *mut c_void,
-            );
-            CAP_READ_US.fetch_add(t0.elapsed().as_micros() as u32, Ordering::Relaxed);
-            CAP_READ_N.fetch_add(1, Ordering::Relaxed);
-            got = Some((rc.pw, rc.ph, rc.flip));
-        }
-
-        // D. restore the world exactly: framebuffer 0 (or every next frame renders into the
-        //    FBO = frozen screen), full viewport, blend back on (func untouched). Program binding
-        //    needs no restore — every draw fn binds its own lazily (use_prog); texture unit 0
-        //    stays active; vertex state untouched.
-        glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
-        glViewport(0, 0, CAP_W, CAP_H);
-        glEnable(GL_BLEND);
-
-        st.parity = r;
-        got
     }
 }
 

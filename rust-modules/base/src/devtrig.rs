@@ -144,46 +144,11 @@ pub fn guard_log_only() -> bool {
     *MODE.get_or_init(|| read("guard").as_deref() == Some("log"))
 }
 
-/// **`/tmp/pitv-nowan` — refuse every name lookup, as a dead resolver would.**
-///
-/// The offline-mode reproduction. A household whose internet is down but whose LAN is up resolves
-/// no public name at all: `plex.tv`, `discover.provider.plex.tv` and — the one that matters — the
-/// `plex.direct` hostname the app persisted for its OWN server on the LAN. Nothing on a desk can
-/// take the router's uplink away deterministically, so this trigger does it inside the app: while
-/// armed, `net`, `curlio` and `stream` refuse any host that is not a
-/// numeric literal, at the point where they would otherwise hand it to a resolver, and return the
-/// same error a failed resolution returns. A name reaches the wire only when the request carries a
-/// resolve pin (`plex::ResolvePin`) — which is exactly what the fix provides, so the same
-/// trigger shows the defect red and the fix green with no network condition arranged anywhere.
-///
-/// Content `slow` first sleeps the connect budget an API call would have spent waiting on a dead
-/// resolver (`net::API`'s `connect_s`), so a worker that would have stalled stalls here
-/// too. Empty is the fast variant. Latched at first read like every per-frame trigger, and `None`
-/// at COMPILE time without `devtriggers`, so a public binary carries no such switch.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NoWan {
-    pub slow: bool,
-}
-
-pub fn no_wan() -> Option<NoWan> {
-    static SEEN: std::sync::OnceLock<Option<NoWan>> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        read("nowan").map(|s| NoWan {
-            slow: s.trim() == "slow",
-        })
-    })
-}
-
 /// **Hold the Load-returned flag** — `pitv-holdload[=ms]`.
 ///
-/// `Some(ms)` when armed (default 30000 for a bare/empty trigger, per its own `parse` fallback),
-/// else `None`. `player::threads::load_thread` sleeps this many milliseconds right after the real
-/// `sf_load` call returns and BEFORE `Shared::mark_native_load_returned` publishes that fact — so
-/// issue #74 D.1's budget (the pump's `deferring` line, then, past `NATIVE_LOAD_BUDGET`, the
-/// failure read-out) becomes observable on a real television on demand, rather than only on a
-/// k5lp set that happens to hang there for real. Deliberately NOT `DIAG`: it changes playback
-/// behaviour (a real Load attempt now waits), so arming it must suppress the who's-watching
-/// picker like every other automation trigger.
+/// `Some(ms)` when armed (default 30000 for a bare/empty trigger), else `None`.
+/// `player::threads::load_thread` sleeps this many milliseconds right after the sink's Load returns
+/// and BEFORE that fact is published, so the pump's Load budget can be exercised on demand.
 #[cfg(feature = "devtriggers")]
 pub fn holdload_delay_ms() -> Option<u64> {
     let raw = read("holdload")?;
@@ -198,27 +163,8 @@ pub fn holdload_delay_ms() -> Option<u64> {
     None
 }
 
-/// A raw dev payload in the runtime root, by bare NAME — only `sample.h264` and `sample.h265`,
-/// which predate the `pitv-` prefix and feed the player a local Annex-B sample instead of a
-/// stream. Everything else here is `pitv-<name>`; these two are the exception, so they get
-/// their own door rather than a prefix they do not have.
-///
-/// It took an ABSOLUTE path until the flavour split, which left them as the last two runtime
-/// surfaces still pinned to a shared `/tmp` while every other one had moved — harmless in itself
-/// (two installs reading one sample is fine) but a hole in the rule that every runtime surface
-/// resolves through [`crate::paths::in_runtime_dir`], and rules with holes stop being checkable.
-/// NB the file now goes in the install's own root: `$(make -s print-rundir)/sample.h264`.
-#[cfg(feature = "devtriggers")]
-pub fn read_sample(name: &str) -> Option<Vec<u8>> {
-    std::fs::read(crate::paths::in_runtime_dir(name)).ok()
-}
-#[cfg(not(feature = "devtriggers"))]
-pub fn read_sample(_name: &str) -> Option<Vec<u8>> {
-    None
-}
-
-/// `true` when this build reads `/tmp` at all — for the one boot log line that says so, and for
-/// call sites gating a whole subsystem (the capture listener, the remote FIFO) rather than a read.
+/// `true` when this build reads the runtime-dir triggers at all — for the one boot log line that
+/// says so, and for call sites gating a whole subsystem (the remote FIFO) rather than a read.
 pub const ENABLED: bool = cfg!(feature = "devtriggers");
 
 /// The trigger's absolute path. `/tmp/pitv-<name>` on the television; see

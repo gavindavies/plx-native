@@ -39,7 +39,6 @@ pub const MARGIN_X: f32 = 96.0;
 /// Smaller than [`MARGIN_X`] because it is 5% of the SHORTER axis; the frame is a percentage of each
 /// dimension, not one distance.
 pub const MARGIN_Y: f32 = 54.0;
-pub const ROW_TITLE_H: f32 = 30.0;
 /// Hub-title cap top above the shelf's `row_y` origin — the heading draws at `row_y − TITLE_DY`,
 /// minus whatever `CardRow::lift` has raised it by. Named because it is a LAYOUT relationship two
 /// other constants here are derived against ([`CARD_DY`]'s air, [`GRID_TOP_Y`]'s clearance under the
@@ -75,11 +74,6 @@ pub const UNDER_LABEL_AIR: f32 = 22.0;
 /// screens differ in their fixed part (a landscape row, a typed search block), never in the band.
 pub const ROW_PITCH: f32 =
     TITLE_DY + CARD_DY + CARD_H + crate::card_row::UNDER_LABEL_H + UNDER_LABEL_AIR;
-pub const CONTENT_Y: f32 = 200.0;
-/// Off-screen cull/clip-edge slack for a focused card's glow AND its risen drop-shadow — big enough
-/// to cover the worst case, a large poster's `CARD_SHADOW_BLUR + CARD_SHADOW_DY` (44+18=62) plus a
-/// 1px AA margin, rounded up.
-pub const GLOW_PAD: f32 = 64.0;
 pub use plx_base::surface::{LOGICAL_H as SCR_H, LOGICAL_W as SCR_W};
 
 /// **The safe area itself** — the box every piece of REQUIRED content has to fit inside, as one
@@ -109,20 +103,6 @@ pub fn inside_safe(r: crate::Rect) -> bool {
         && r.x + r.w <= SAFE.x + SAFE.w + EPS
         && r.y + r.h <= SAFE.y + SAFE.h + EPS
 }
-
-// hero <-> grid continuum
-/// Shelf top in hero view. Re-derived once the peek row stopped magnifying its focused cell: the
-/// peek used to be judged off that popped tile, whose 1.09 scale about its centre lifted its top
-/// edge `CARD_H * 0.09 / 2 ≈ 17px` above every other card in the row. Un-popping the row dropped
-/// the whole shelf by that much, so the peek is 17px shallower here to keep the composition the
-/// hero view was tuned to (828 → 811; card top = `PEEK_Y + CARD_DY` = 837, as the popped one was).
-pub const PEEK_Y: f32 = 811.0;
-// shelf top in grid view — leaves the first hub title (row_y − TITLE_DY, lifted up to ~10 more when its
-// leftmost card magnifies) a clear space::MD under the profile chip (bottom edge 126).
-// 176 until 2026-08-23: it moved with the top bar, which dropped 18px so its track clears MARGIN_Y
-// (`widgets::TOP_BAR_Y`). The clearance under the chip is what this number IS, so it follows the bar
-// rather than staying put and letting the heading crowd it.
-pub const GRID_TOP_Y: f32 = 194.0;
 
 // SDL keycodes (scancode | SDLK_SCANCODE_MASK, or ASCII)
 pub const SDLK_RIGHT: c_uint = 79 | (1 << 30);
@@ -485,7 +465,6 @@ pub fn is_bound(sym: c_uint, wcode: c_uint) -> bool {
 // spring stiffnesses (from ui_home.c, redistributed 1:1 to their owning views)
 pub const K_SCALE: f32 = 320.0;
 pub const K_SCROLL: f32 = 170.0;
-pub const K_SNAP: f32 = 200.0;
 
 #[cfg(test)]
 mod tests {

@@ -325,19 +325,6 @@ impl Grid {
         self.shift
     }
 
-    /// External mode: the shift ([`landed_shift`](Self::landed_shift)) the NEXT tick will report for
-    /// the cards as they stand now. An owner that sets its scroll target between two ticks against
-    /// a document that has already landed holds that target in the coordinates its scroll is still
-    /// in: it takes this off, so the tick's rebase of both does not apply the landing twice.
-    pub fn pending_shift<H: Host, S: CardSource<H>>(&self, cx: &Cx<'_, H>, src: &S) -> f32 {
-        if self.spec.scroll != ScrollMode::External || super::focused_index(&cx.focus, self.entry, src).is_none() {
-            return 0.0;
-        }
-        pool::slid(src, self.anchor).map_or(0.0, |(p, q)| {
-            ((q / self.spec.cols) as f32 - (p / self.spec.cols) as f32) * self.spec.geom().pitch()
-        })
-    }
-
     /// The scroll the last tick wanted for the focused row (`poster_grid::snap_row_in` against the
     /// current scroll), `None` while focus is not in the grid. An external owner may take it or
     /// apply its own reveal rule; the self-scrolling grid springs to it.
@@ -370,15 +357,6 @@ impl Grid {
     /// animating.
     pub fn settle_band(&mut self, row: Option<usize>) {
         self.bands.focus(row, false);
-    }
-
-    /// Forget the focus pop's cell and any pending move: a fresh content set whose old indexes mean
-    /// nothing, so the next tick adopts the focused element whole instead of reading it as the
-    /// same element landing at a new index. For an owner that was not ticking while its content
-    /// was replaced (a covered page).
-    pub fn forget_pop(&mut self) {
-        self.pop = GridPop::new();
-        self.seen = Seen::Nothing;
     }
 
     /// The caption bands closed and settled: a fresh content set whose old rows mean nothing.

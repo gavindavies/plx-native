@@ -161,45 +161,6 @@ pub fn img_malloc_copy(rgba: &[u8], detail: impl FnOnce() -> String) -> *mut c_u
     px
 }
 
-/// Encode OPAQUE RGBA as an RGB PNG, the format baked artwork is persisted in: the alpha channel
-/// is dropped (a quarter of the pixels to deflate, none of them information) and
-/// [`img_decode_owned`] restores it as 255. `None` if the encoder refuses.
-pub fn img_encode_png(w: u32, h: u32, rgba: &[u8]) -> Option<Vec<u8>> {
-    let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
-    let mut out = Vec::new();
-    let enc = image::codecs::png::PngEncoder::new(&mut out);
-    image::ImageEncoder::write_image(enc, &rgb, w, h, image::ExtendedColorType::Rgb8).ok()?;
-    Some(out)
-}
-
-pub fn img_decode_rgba(
-    buf: *const c_uchar,
-    len: c_int,
-    w: *mut c_int,
-    h: *mut c_int,
-) -> *mut c_uchar {
-    if buf.is_null() || len <= 0 {
-        return ptr::null_mut();
-    }
-    let data = unsafe { std::slice::from_raw_parts(buf, len as usize) };
-    let Some((iw, ih, raw)) = img_decode_owned(data) else {
-        return ptr::null_mut();
-    };
-    let px = img_malloc_copy(&raw, || format!("{iw}x{ih} len={len} magic={}", magic(data)));
-    if px.is_null() {
-        return ptr::null_mut();
-    }
-    unsafe {
-        if !w.is_null() {
-            *w = iw as c_int;
-        }
-        if !h.is_null() {
-            *h = ih as c_int;
-        }
-    }
-    px
-}
-
 pub fn img_free(px: *mut c_uchar) {
     if !px.is_null() {
         unsafe { free(px as *mut c_void) }

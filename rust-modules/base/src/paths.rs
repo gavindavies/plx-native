@@ -133,23 +133,6 @@ pub fn flavour() -> Option<&'static str> {
     app_id().strip_prefix(STABLE_APP_ID)?.strip_prefix('.')
 }
 
-/// The closed-enum sandbox fact for every telemetry event — `devmode` / `homebrew` / `unknown` —
-/// derived from [`app_dir`]'s prefix rather than from a second read of `/proc/self/exe`. **Never
-/// the path itself**: the two real prefixes are `/media/developer/…` and `/media/cryptofs/…`, and
-/// a raw path is exactly the kind of value this app's telemetry never sends (see this module's own
-/// doc, and `diag::schema`'s "no field a caller can put a runtime string into"). `unknown` also
-/// covers the host build, where the binary sits under `target-sim/`.
-pub fn install_kind() -> &'static str {
-    let dir = app_dir();
-    if dir.starts_with("/media/developer") {
-        "devmode"
-    } else if dir.starts_with("/media/cryptofs") {
-        "homebrew"
-    } else {
-        "unknown"
-    }
-}
-
 /// The directory the running executable sits in — i.e. where the ipk's payload was installed.
 ///
 /// `std::env::current_exe` IS the `/proc/self/exe` read on Linux, so this is the same syscall the
@@ -224,11 +207,9 @@ pub fn in_app_dir(name: &str) -> PathBuf {
     app_dir().join(name)
 }
 
-
 fn macos_bundle_resources(_exe: &Path) -> Option<PathBuf> {
     None
 }
-
 
 fn macos_app_support() -> Option<PathBuf> {
     None
@@ -446,24 +427,9 @@ pub unsafe extern "C" fn plx_runtime_path(
 /// data with a stale second list.
 pub mod runtime_file {
     pub const EVENTS: &str = "pitv-events.log";
-    pub const CRASH: &str = "pitv-crash.log";
-    pub const STDERR: &str = "pitv-stderr.log";
-    pub const STORAGE_DIAGNOSTICS: &str = "pitv-diag.log";
     pub const ANIMATION: &str = "pitv-anim.log";
     pub const GST: &str = "pitv-gst.log";
-    pub const GPU_TIME: &str = "pitv-gputime.jsonl";
-    pub const HARDWARE_COUNTERS: &str = "pitv-hwcnt.jsonl";
 
-    pub const LOGS: [&str; 8] = [
-        EVENTS,
-        CRASH,
-        STDERR,
-        STORAGE_DIAGNOSTICS,
-        ANIMATION,
-        GST,
-        GPU_TIME,
-        HARDWARE_COUNTERS,
-    ];
 }
 
 /// A runtime surface inside [`runtime_dir`], addressed by its bare name (`pitv-…` included).
@@ -586,95 +552,6 @@ pub fn image_cache_candidates() -> Vec<PathBuf> {
     v
 }
 
-/// The spool, beside the decision that authorised it.
-///
-/// **Same directories, same search order, different file** — and not merged into
-/// `telemetry.json` for one reason: the decision is small, rewritten rarely and must survive
-/// anything, while the spool is up to half a megabyte rewritten after every flush. Sharing one file
-/// would put the consent record itself at risk on every single upload, which is the one piece of
-/// state whose loss changes what the app is allowed to do.
-pub fn telemetry_spool_candidates() -> Vec<PathBuf> {
-    telemetry_candidates()
-        .into_iter()
-        .map(|p| {
-            p.with_file_name(p.file_name().map_or_else(
-                || "telemetry-spool.bin".into(),
-                |n| {
-                    n.to_string_lossy()
-                        .replace("telemetry.json", "telemetry-spool.bin")
-                },
-            ))
-        })
-        .collect()
-}
-
-/// How much of the append-only crash log has already been reported, beside the spool.
-///
-/// **A watermark rather than a truncation, and that is the whole reason this file exists.**
-/// `pitv-crash.log` is append-only and survives a relaunch BY DESIGN — `docs/agent-reference.md` names it the
-/// thing to read after a crash-and-restart and `tools/crash-report.sh` parses it — so the telemetry
-/// reader may not consume it. Recording a byte offset lets a human and this module read the same
-/// file without either disturbing the other.
-///
-/// Not in the runtime root with the log it points into, deliberately. The runtime root is `/tmp` on
-/// this television: a watermark that vanished with a reboot would re-report every crash still in
-/// the log, and the one thing worse than losing a crash report is sending it four times. It lives
-/// beside the decision that authorised sending it, which is also the directory that survives a
-/// reinstall.
-pub fn telemetry_crashmark_candidates() -> Vec<PathBuf> {
-    telemetry_candidates()
-        .into_iter()
-        .map(|p| {
-            p.with_file_name(p.file_name().map_or_else(
-                || "telemetry-crashmark.json".into(),
-                |n| {
-                    n.to_string_lossy()
-                        .replace("telemetry.json", "telemetry-crashmark.json")
-                },
-            ))
-        })
-        .collect()
-}
-
-pub fn telemetry_candidates() -> Vec<PathBuf> {
-    let mut v = Vec::new();
-    // A steerable build keeps its own, for exactly the reason the session file does: several
-    // simulators must not share one decision (or one identifier).
-    if ENV_STEERABLE {
-        v.push(in_runtime_dir("telemetry.json"));
-    }
-    let id = app_id();
-    v.extend([
-        PathBuf::from(format!("/media/developer/{id}-telemetry.json")),
-        PathBuf::from(format!("/media/internal/.{id}-telemetry.json")),
-        in_app_dir("telemetry.json"),
-    ]);
-    // No legacy/migration entry, and no `flavour().is_none()` arm: there is no older location, and
-    // the two installs are two devices — a decision taken in one is not a decision about the other.
-    v
-}
-
-/// Candidate locations of the retired **last place** bookmark (`coldstart`).
-///
-/// Builds before 2026-09-01 wrote into these persistent locations. The current build only removes
-/// them during migration; it never reads or writes a route bookmark. Keep the exact old resolution
-/// (including steerable simulator and per-flavour names) so every former location is retired.
-pub fn obsolete_last_place_candidates() -> Vec<PathBuf> {
-    let mut v = Vec::new();
-    // Steerable simulators used their own instance root.
-    if ENV_STEERABLE {
-        v.push(in_runtime_dir("lastplace.json"));
-    }
-    // The old names were per install, so debug and stable must both remove only their own file.
-    let id = app_id();
-    v.extend([
-        PathBuf::from(format!("/media/developer/{id}-lastplace.json")),
-        PathBuf::from(format!("/media/internal/.{id}-lastplace.json")),
-        in_app_dir("lastplace.json"),
-    ]);
-    v
-}
-
 #[cfg(test)]
 mod tests {
     /// The runtime root is a path in the shared, sticky `/tmp`, and `ensure_runtime_dir` chmods it
@@ -723,7 +600,6 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&base);
     }
-
 
     /// `app_dir` must hand back an ABSOLUTE directory and must not panic however it got there.
     ///
@@ -888,7 +764,6 @@ mod tests {
             std::path::Path::new("/run/sim-a")
         );
     }
-
 
     /// Two instances given different roots must not share a namespace — the whole point of the
     /// override. Asserted on the composed trigger path, not just the root, because that is what
@@ -1139,44 +1014,3 @@ pub fn redirect_persistent_state_root_for_test(root: Option<PathBuf>) {
         .unwrap_or_else(|e| e.into_inner()) = root;
 }
 
-/// Prepare the hostsim-only state root without following a pre-existing symlink. Television code
-/// may inspect an existing directory as a migration source but never creates it as an authority.
-#[allow(dead_code)] // Stage A storage root; connected by Session/Consent integration.
-pub fn ensure_persistent_state_root() -> std::io::Result<()> {
-    if !ENV_STEERABLE {
-        return Ok(());
-    }
-    let root = persistent_state_root();
-    match std::fs::symlink_metadata(&root) {
-        Ok(meta) if meta.file_type().is_dir() => Ok(()),
-        Ok(_) => Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "persistent state root is not a directory",
-        )),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::DirBuilderExt;
-                let mut builder = std::fs::DirBuilder::new();
-                builder.mode(0o700);
-                builder.create(&root)
-            }
-            #[cfg(not(unix))]
-            {
-                std::fs::create_dir(&root)
-            }
-        }
-        Err(e) => Err(e),
-    }
-}
-
-
-/// Final legacy migration order, independent of the temporary synchronous caller API.
-#[allow(dead_code)]
-pub fn session_migration_candidates() -> Vec<PathBuf> {
-    let mut candidates = session_candidates();
-    let app = in_app_dir("auth.json");
-    let index = candidates.iter().position(|path| path == &app).unwrap_or(candidates.len());
-    candidates.insert(index, in_app_dir("state").join("auth.json"));
-    candidates
-}

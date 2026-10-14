@@ -78,16 +78,6 @@ static ATOT: AtomicI64 = AtomicI64::new(0);
 static VATT: AtomicI64 = AtomicI64::new(0);
 static AATT: AtomicI64 = AtomicI64::new(0);
 
-/// AUs fed to the Starfish pipeline this SESSION, video and audio.
-///
-/// Zeroed by `start_bufferfeed`, not cumulative since boot: the diagnostics read-out has to answer
-/// "is this playback feeding?", and a number carried over from the last item answers a question
-/// nobody asked. The log's `v <= 4 || v % 100 == 0` cadence restarting per session is the behaviour
-/// that was wanted there too.
-pub fn fed_totals() -> (i64, i64) {
-    (VTOT.load(Ordering::Relaxed), ATOT.load(Ordering::Relaxed))
-}
-
 /// The AU queues' BASE byte caps — the denominators the read-out shows `dg_aq_*` against, so a viewer
 /// can see backpressure (a video lane pinned at its cap is the demuxer outrunning the decoder;
 /// both lanes empty while Stage is Playing is the opposite).
@@ -2221,7 +2211,6 @@ fn feed_audio_lane(mt: &MainThread, eng: &mut Engine) {
     }
 }
 
-
 #[cfg(test)]
 mod feed_pace_tests {
     use super::{FeedPace, FEED_PACE_CAP_MS, MAX_FEED_AHEAD_NS, PRES_NONE};
@@ -4193,7 +4182,6 @@ mod sink_envelope_tests {
         assert!(payload.contains(r#""audio":"DTS""#));
     }
 
-
     #[test]
     fn h264_declares_fhd_only_when_the_widest_raster_fits_fhd() {
         for (raster, want) in [
@@ -4304,7 +4292,6 @@ mod sink_envelope_tests {
             assert!(p.contains(r#""maxWidth":3840"#) && p.contains(r#""maxHeight":2160"#), "{p}");
         }
     }
-
 
 }
 

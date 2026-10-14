@@ -170,8 +170,6 @@ impl plx_machine::machine::LogicalState for PageMemory {
     fn probe(&self, out: &mut String) { out.push_str("page_memory"); }
 }
 
-pub const PAGE_MEMORY_SHAPE: &str = "PageMemory{None}";
-
 /// Effects cross the screen/loop boundary; screens do not poll one another's pending latches.
 pub enum ContentReq {
     /// Open a folder as a page of its own, so BACK returns here.
@@ -469,9 +467,6 @@ pub struct LocalArg {
     pub path: String,
 }
 
-pub const ARG_SHAPE: &str = "AppArg{ItemMenu{path:str,mark:u32,host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4]},\
-     PlayerOverlay{Tracks(tab:i32),Chapters},Player,Local{path:str},LocalDetail{path:str},Home}";
-
 impl LogicalState for AppArg {
     fn write(&self, c: &mut Canon) {
         match self {
@@ -597,19 +592,6 @@ pub fn every_surface_arg() -> Vec<AppArg> {
     }
     args
 }
-
-/// **Every SCREEN-side shape the recorder's `state_fp` hashes**, as one array in the module a new
-/// screen is added to. Order is part of the hash, so an entry is APPENDED.
-pub const SCREEN_SHAPES: &[&str] = &[
-    ARG_SHAPE,
-    PAGE_MEMORY_SHAPE,
-    crate::item_menu::SHAPE,
-    crate::player::SHAPE,
-    crate::player::overlay::SHAPE,
-    crate::local::LocalScreen::SHAPE,
-    crate::local_detail::LocalDetailScreen::SHAPE,
-    crate::home::HomeScreen::SHAPE,
-];
 
 #[cfg(test)]
 mod arg_tests {

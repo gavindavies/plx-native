@@ -2026,17 +2026,6 @@ impl Shared {
         }
     }
 
-    pub fn stop_hls_clock(&self) {
-        let mut clock = self.hls_clock.lock().unwrap_or_else(|e| e.into_inner());
-        clock.phase = HlsClockPhase::Stopping;
-        clock.recovery = HlsRecoveryEpoch::idle();
-        clock.user_held = false;
-        clock.resume_acb_pending = false;
-        clock.automatic = None;
-        self.hls_rebuffering.store(false, Ordering::Release);
-        self.hls_clock_changed.notify_all();
-    }
-
     fn reset_hls_clock(&self) {
         let mut clock = self.hls_clock.lock().unwrap_or_else(|e| e.into_inner());
         // Session identity changes, token identity does not restart. A worker from the retired
@@ -2212,14 +2201,6 @@ impl Transport {
             _ => {}
         }
         self.paused.store(paused, Ordering::Release);
-    }
-
-    /// One synchronized sample for an unpaused-elapsed transaction clock. `Instant` and the
-    /// cumulative accepted-Pause duration are observed under the transition mutex, so a complete
-    /// Pause->Resume inside a blocked network call can never disappear between two bool reads.
-    pub fn pause_clock_sample(&self) -> (Instant, Duration) {
-        let sample = self.pause_state_sample();
-        (sample.now, sample.elapsed)
     }
 
     pub fn pause_state_sample(&self) -> UserPauseSnapshot {

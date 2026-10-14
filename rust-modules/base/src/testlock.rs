@@ -117,26 +117,6 @@ thread_local! {
     static ADOPTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Treat the CALLING thread as if it too held the [`serial`] guard — for a test that
-/// deliberately spawns a WORKER thread to race a real *production* lock (not this one)
-/// against the thread that took `serial()`, e.g. proving that `plex::servers`' own `WRITE`
-/// mutex serializes a repoint against an in-flight commit. That worker still touches the same
-/// crate globals `serial()` exists to protect, so [`assert_held`] must not wave it through for
-/// free — but it is not a bystander test either, so the ordinary per-thread [`held`] check
-/// (correctly) refuses it.
-///
-/// Call this as the FIRST statement inside the spawned closure, and only while the spawning
-/// thread's [`Serial`] guard is still alive for the rest of the adopted thread's work — nothing
-/// here clears the flag early or checks that the spawner is still holding it, so an adopted
-/// thread that outlives the guard's `Drop` (e.g. a leaked worker still running after the test
-/// function has returned) would silently keep reporting `held() == true` with nobody actually
-/// holding [`GLOBALS`], which is a quieter failure than the one this whole module exists to
-/// catch. A thread that calls this NEVER needs to call [`serial`] itself — doing so would
-/// deadlock against the spawning thread's still-held [`GLOBALS`] lock.
-pub fn adopt_current_thread() {
-    ADOPTED.with(|a| a.set(true));
-}
-
 /// Does THIS thread hold the lock (or was it explicitly [`adopt`](adopt_current_thread)ed by
 /// one that does)? Not "is it held" — an UNADOPTED foreign holder is the failure.
 pub fn held() -> bool {

@@ -424,56 +424,6 @@ pub fn determinism_idle(mount: Mount) -> Outcome {
     Outcome::Pass
 }
 
-/// The requirement under every landing rule: focus never moves under the user, in any
-/// interleaving. Cards arrive before every card shown ([`CardHarness::shift`]) between the same two
-/// ticks as the engine hands focus on, by every cause (a key, the pointer, a restore, a reconcile
-/// naming another card, a reconcile naming the same card), the focus change first or the shift
-/// first. A card that stayed must stay where it is drawn, and the focused one must end up drawn.
-/// Not one of [`CASES`]: a screen whose harness cannot shift reports `Unsupported`.
-pub fn shifted_under_a_focus_change(mount: Mount) -> Outcome {
-    let mut bad = Vec::new();
-    for (by, same) in [(By::Dir, false), (By::Pointer, false), (By::Restore, false), (By::Reconcile, false), (By::Reconcile, true)] {
-        for focus_first in [true, false] {
-            let mut h = mount(40);
-            h.tick(2);
-            let cards = h.cards();
-            let cols = h.columns().unwrap_or(1);
-            let at = if cols > 1 { 2 * cols + 1 } else { 20 };
-            if cards.len() <= at + 1 {
-                return fail(format!("mounted with 40 items but exposes {} cards", cards.len()));
-            }
-            h.focus(cards[at], By::Restore);
-            h.tick(SETTLE);
-            let (stayed, target) = (cards[at - 1], if same { cards[at] } else { cards[at + 1] });
-            let Some(before) = h.drawn_rect(stayed, 1.0) else {
-                return Outcome::Unsupported("the screen exposes no drawn rect");
-            };
-            let why = format!("{by:?} same={same} focus_first={focus_first}");
-            if focus_first {
-                h.focus(target, by);
-            }
-            // whole rows for a grid (its columns hold), half a window for a strip
-            if let Err(why) = h.shift(if cols > 1 { cols * 3 } else { 12 }) {
-                return Outcome::Unsupported(why);
-            }
-            if !focus_first {
-                h.focus(target, by);
-            }
-            h.tick(1);
-            match h.drawn_rect(stayed, 1.0) {
-                Some(now) if (now.x - before.x).abs() < 100.0 && (now.y - before.y).abs() < 100.0 => {}
-                now => bad.push(format!("{why}: a card that stayed went from {} to {}", show(before), now.map_or("nowhere".into(), show))),
-            }
-            h.tick(SETTLE);
-            let on = h.place(target, At::Drawn).map(|p| p.rect);
-            if !on.is_some_and(|r| r.cx() > 0.0 && r.cx() < crate::consts::SCR_W && r.cy() > 0.0 && r.cy() < crate::consts::SCR_H) {
-                bad.push(format!("{why}: the focused card ended at {}", on.map_or("nowhere".into(), show)));
-            }
-        }
-    }
-    if bad.is_empty() { Outcome::Pass } else { fail(bad.join("; ")) }
-}
-
 /// Run every case on every screen of `table`, return the matrix as `(screen, case, outcome)`.
 /// Takes `testlock::serial()` for the whole run: every harness reaches thread-local focus, press
 /// and idle state.
@@ -488,45 +438,3 @@ pub fn run_all(table: &[(&'static str, Mount)]) -> Vec<(&'static str, &'static s
     out
 }
 
-/// Compare a matrix with the expected-failure list (`screen case  # reason` per line). Returns
-/// the complaints: an unlisted failure, a listed case that now passes, a listed case that is
-/// unsupported, a malformed or duplicate line.
-pub fn check_expected(matrix: &[(&'static str, &'static str, Outcome)], list: &str) -> Vec<String> {
-    let mut complaints = Vec::new();
-    let mut listed: Vec<(String, String)> = Vec::new();
-    for line in list.lines() {
-        let body = line.trim();
-        if body.is_empty() || body.starts_with('#') {
-            continue;
-        }
-        // `<source file>\t<screen> <case>\t# <reason>`
-        let mut fields = body.splitn(3, '\t');
-        let (_file, keys, reason) = (fields.next(), fields.next().unwrap_or(""), fields.next().unwrap_or(""));
-        let mut it = keys.split_whitespace();
-        match (it.next(), it.next(), it.next()) {
-            (Some(s), Some(c), None) if !reason.trim().is_empty() => {
-                if listed.iter().any(|(a, b)| a == s && b == c) {
-                    complaints.push(format!("duplicate line: {s} {c}"));
-                }
-                listed.push((s.into(), c.into()));
-            }
-            _ => complaints.push(format!("malformed line (want `screen case  # reason`): {body}")),
-        }
-    }
-    for (s, c) in &listed {
-        match matrix.iter().find(|(ms, mc, _)| ms == s && mc == c) {
-            None => complaints.push(format!("{s} {c}: listed but not in the matrix; remove it from the list")),
-            Some((_, _, Outcome::Pass)) => complaints.push(format!("{s} {c}: now PASSES; remove it from ci/allow/cards-conformance.txt")),
-            Some((_, _, Outcome::Unsupported(why))) => complaints.push(format!("{s} {c}: is unsupported ({why}), not failing; remove it from the list")),
-            Some((_, _, Outcome::Fail(_))) => {}
-        }
-    }
-    for (s, c, o) in matrix {
-        if let Outcome::Fail(msg) = o {
-            if !listed.iter().any(|(ls, lc)| ls == s && lc == c) {
-                complaints.push(format!("{s} {c}: FAILS and is not listed: {msg}"));
-            }
-        }
-    }
-    complaints
-}

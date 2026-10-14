@@ -191,13 +191,6 @@ pub fn audio_switching() -> bool {
     }
 }
 
-/// The read-out beside the spinner for `st`: [`PlaybackState::caption`], except that a load which
-/// is an audio-track switch says so ("Switching audio…") instead of "Buffering…". Any other
-/// rebuild (a seek's reload, a quality or subtitle change) keeps the plain caption.
-pub fn busy_caption(st: PlaybackState) -> &'static std::ffi::CStr {
-    busy_caption_with(st, audio_switching())
-}
-
 /// [`busy_caption`] with the audio-switch fact given — the pure choice, host-testable.
 pub fn busy_caption_with(st: PlaybackState, audio_switch: bool) -> &'static std::ffi::CStr {
     if audio_switch && st == PlaybackState::Buffering {
@@ -207,12 +200,6 @@ pub fn busy_caption_with(st: PlaybackState, audio_switch: bool) -> &'static std:
     }
 }
 
-/// Test-only: stand the audio-switch state up (`0` none, `1` picked, `2` reloading).
-#[cfg(any(test, feature = "test-support"))]
-pub fn set_audio_switch_for_test(state: u8) {
-    SHARED.audio_pick_ms.store(i64::from(vclock_ms()), Relaxed);
-    SHARED.audio_switch.store(state, Relaxed);
-}
 pub fn pause(pa: &mut adapter::PlayerAdapter) -> bool {
     match SHARED.prepare_hls_user_pause() {
         Some(HlsUserPause::AlreadyHeld) => {
@@ -715,10 +702,6 @@ fn failtest_arm() -> Option<ErrorShape> {
 pub fn error_caption(ps: &crate::playback::PlaybackSession) -> &'static std::ffi::CStr {
     error_now(ps).caption
 }
-/// The same non-empty answer for the diagnostics panel's verdict line.
-pub fn error_reason(ps: &crate::playback::PlaybackSession) -> &'static str {
-    error_now(ps).panel
-}
 /// Test-only: drive the derived playback state, returning the previous raw value to restore.
 ///
 /// `pb_state` is the pump's field and `shared` is a private module, so a host test that needs the
@@ -792,11 +775,6 @@ pub fn stage_native_audio(ps: &mut crate::playback::PlaybackSession, audio_idx: 
     SHARED.desired_audio_idx.store(audio_idx, Relaxed);
     SHARED.sub_cues.lock().unwrap().clear();
 }
-/// reset to the default (best) audio stream — called on a new item so a prior track choice
-/// does not leak across items (desired_audio_idx persists across seeks, not across items).
-pub fn reset_audio_track() {
-    SHARED.desired_audio_idx.store(-1, Relaxed);
-}
 /// reset the subtitle selection to Off — called on a NEW item. Like desired_audio_idx, the
 /// subtitle selection PERSISTS across seeks/reloads (it is no longer cleared in reset_session),
 /// so a reload-based seek (transcode, or the direct-play reload fallback) keeps the chosen sub
@@ -806,23 +784,10 @@ pub fn reset_subtitle() {
     sidecar::reset(); // …and the previous item's external subtitle file with it
     SUBTITLE_OFFSET_MS.store(0, Relaxed); // …and the timing offset tuned against that file
 }
-/// select the audio stream index the demuxer feeds at the FIRST Load (before start_bufferfeed) —
-/// used by the decision to direct-play a non-default direct-playable track (e.g. an AC3 track on
-/// a TrueHD-default item). -1 = default/best.
-pub fn set_audio_track(idx: i32) {
-    SHARED.desired_audio_idx.store(idx, Relaxed);
-}
 
 // Dev-only: used only by `route::decision`'s `#[cfg(feature = "devtriggers")]` tests (a store
 // build's `CredentialPolicy::HttpsOnly` refuses those tests' plaintext loopback PMS fixtures; see
 // the comment on that module's first gated test).
-
-/// Route-policy tests share the process-wide player mailbox even though no Engine pumps it.
-/// Empty it between cases so one test's requested handoff cannot become the next test's input.
-#[cfg(any(test, feature = "test-support"))]
-pub fn reset_route_requests_for_test(ps: &crate::playback::PlaybackSession) {
-    crate::playback::reset_player_control_for_test(ps);
-}
 
 // ---- client-rendered subtitles (direct-play only; a transcode carries no subs) ----
 /// selected subtitle track index (-1 = off); the demuxer reads this per block.
@@ -965,22 +930,6 @@ pub fn set_subtitle_tone(tone: plx_data::settings::SubtitleTone) {
 pub fn set_subtitle_offset(offset_ms: i64) {
     SUBTITLE_OFFSET_MS.store(clamp_subtitle_offset_ms(offset_ms), Relaxed);
     plx_machine::idle::invalidate();
-}
-
-/// Carry a retry's offset through [`reset_subtitle`] (`route::reset_track_selection`). The
-/// subtitle it was tuned against is re-selected only when the retry lands — a sidecar, whose range
-/// allows an advance, among them — so this holds it to the WIDEST range, and the landing narrows it
-/// with [`reclamp_subtitle_offset`].
-pub fn restore_subtitle_offset(offset_ms: i64) {
-    let clamped = offset_ms.clamp(SUBTITLE_OFFSET_EARLIEST_SIDECAR_MS, SUBTITLE_OFFSET_LATEST_MS);
-    SUBTITLE_OFFSET_MS.store(clamped as i32, Relaxed);
-}
-
-/// Hold the offset to the range of the subtitle now selected ([`subtitle_offset_range_ms`]) —
-/// called by a landing, after it has re-selected the subtitle, so an advance carried by a retry
-/// never outlives the sidecar that allowed it.
-pub fn reclamp_subtitle_offset() {
-    SUBTITLE_OFFSET_MS.store(clamp_subtitle_offset_ms(subtitle_offset_ms()), Relaxed);
 }
 
 /// The text store's hard cap, a runaway guard that an ordinary file never reaches. The store

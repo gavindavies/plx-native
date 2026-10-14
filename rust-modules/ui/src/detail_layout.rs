@@ -1,5 +1,5 @@
 //! Shared detail hero geometry, also used by the contrast and safe-area audits.
-use super::{consts::{MARGIN_X, MARGIN_Y, SCR_H}, theme, widgets};
+use super::{consts::{MARGIN_Y, SCR_H}, theme, widgets};
 #[cfg(any(test, feature = "test-support"))]
 use super::{consts::SCR_W, Rect};
 
@@ -21,15 +21,6 @@ pub const PEOPLE_INK: [f32; 4] = theme::TEXT_SECONDARY;
 pub const FACTS_INK: [f32; 4] = theme::TEXT_SECONDARY;
 pub const COMPACT_TITLE_BOT: f32 = MARGIN_Y + theme::logo::COMPACT_H_MAX;
 pub const TOP_MARGIN: f32 = COMPACT_TITLE_BOT + 26.0;
-
-
-/// Top-left anchor for the hero logo while a trailer plays in the background — independent of
-/// scroll, unlike the pinned [`COMPACT_TITLE_BOT`] title (which answers "how far down have I
-/// scrolled", not "is a trailer playing"). Sits inside the safe-area margins.
-pub const PREVIEW_LOGO_X: f32 = MARGIN_X;
-pub const PREVIEW_LOGO_Y: f32 = MARGIN_Y;
-/// Keeps a wide wordmark from reaching toward the center of the screen once it has shrunk.
-pub const PREVIEW_LOGO_MAX_W: f32 = 480.0;
 
 #[derive(Clone, Copy)]
 pub struct HeroChain {
@@ -116,10 +107,10 @@ pub fn base_scrim_a(y: f32, hero_vis: f32) -> f32 {
 pub fn overscan_rects(out: &mut Vec<(&'static str, Rect)>) {
     let tall = theme::logo::COMPACT_H_MAX;
     out.push(("detail pinned compact title (tallest logo)",
-        Rect::new(MARGIN_X, COMPACT_TITLE_BOT - tall, SCR_W - 2.0 * MARGIN_X, tall)));
-    out.push(("detail hero text column", Rect::new(MARGIN_X, TITLE_BOTTOM - 200.0, HERO_TEXT_W, 200.0)));
-    out.push(("detail people column (right edge)", Rect::new(SCR_W - MARGIN_X - PEOPLE_W, 700.0, PEOPLE_W, 100.0)));
-    out.push(("detail below-hero flow, at rest", Rect::new(MARGIN_X, TOP_MARGIN, SCR_W - 2.0 * MARGIN_X, 100.0)));
+        Rect::new(crate::consts::MARGIN_X, COMPACT_TITLE_BOT - tall, SCR_W - 2.0 * crate::consts::MARGIN_X, tall)));
+    out.push(("detail hero text column", Rect::new(crate::consts::MARGIN_X, TITLE_BOTTOM - 200.0, HERO_TEXT_W, 200.0)));
+    out.push(("detail people column (right edge)", Rect::new(SCR_W - crate::consts::MARGIN_X - PEOPLE_W, 700.0, PEOPLE_W, 100.0)));
+    out.push(("detail below-hero flow, at rest", Rect::new(crate::consts::MARGIN_X, TOP_MARGIN, SCR_W - 2.0 * crate::consts::MARGIN_X, 100.0)));
 }
 
 #[cfg(test)]
@@ -131,9 +122,9 @@ mod tests {
     /// width bound and nothing else.
     #[test]
     fn the_facts_row_stops_short_of_the_people_column() {
-        let facts_r = SCR_W - MARGIN_X - PEOPLE_W - theme::space::SM;
+        let facts_r = SCR_W - crate::consts::MARGIN_X - PEOPLE_W - theme::space::SM;
         assert!(
-            facts_r < SCR_W - MARGIN_X - PEOPLE_W,
+            facts_r < SCR_W - crate::consts::MARGIN_X - PEOPLE_W,
             "the facts row's bound must sit LEFT of the column it is bounded against"
         );
         let measure = crate::fixture::FixtureMeasure;
@@ -277,23 +268,23 @@ mod tests {
             (
                 "detail pinned compact title (tallest logo)",
                 Rect::new(
-                    MARGIN_X,
+                    crate::consts::MARGIN_X,
                     COMPACT_TITLE_BOT - theme::logo::COMPACT_H_MAX,
-                    SCR_W - 2.0 * MARGIN_X,
+                    SCR_W - 2.0 * crate::consts::MARGIN_X,
                     theme::logo::COMPACT_H_MAX,
                 ),
             ),
             (
                 "detail hero text column",
-                Rect::new(MARGIN_X, TITLE_BOTTOM - 200.0, HERO_TEXT_W, 200.0),
+                Rect::new(crate::consts::MARGIN_X, TITLE_BOTTOM - 200.0, HERO_TEXT_W, 200.0),
             ),
             (
                 "detail people column (right edge)",
-                Rect::new(SCR_W - MARGIN_X - PEOPLE_W, 700.0, PEOPLE_W, 100.0),
+                Rect::new(SCR_W - crate::consts::MARGIN_X - PEOPLE_W, 700.0, PEOPLE_W, 100.0),
             ),
             (
                 "detail below-hero flow, at rest",
-                Rect::new(MARGIN_X, TOP_MARGIN, SCR_W - 2.0 * MARGIN_X, 100.0),
+                Rect::new(crate::consts::MARGIN_X, TOP_MARGIN, SCR_W - 2.0 * crate::consts::MARGIN_X, 100.0),
             ),
         ];
         for (got, want) in got.iter().zip(want.iter()) {

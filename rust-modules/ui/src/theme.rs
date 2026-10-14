@@ -259,9 +259,6 @@ pub mod logo {
 pub const ACCENT: [f32; 4] = COOL_0;
 /// Near-black ink/glyphs drawn over [`ACCENT`].
 pub const ACCENT_INK: [f32; 4] = NEUTRAL_950;
-/// Alias for [`ACCENT_INK`] read from the "ink over accent" intent. The one legitimate alias in this
-/// file: it is the same ROLE under a second name, not a second role that happens to share a stop.
-pub const INK_ON_ACCENT: [f32; 4] = ACCENT_INK;
 /// Fixed OKLCH lightness of a keyed focused control's lit top. The rendered ground contributes hue
 /// and a measured fraction of chroma only; it may never make the focus face darker.
 pub const CONTROL_FOCUS_FACE_L: f32 = 0.972;
@@ -287,30 +284,6 @@ pub const CONTROL_SPENT_FOCUS_W: f32 = 0.76;
 /// BOTH sides — the first version flipped the ink at the sweep line and cut the label in half
 /// mid-word.
 pub const CONTROL_SPENT_FILL: [f32; 4] = mix(COOL_0, NEUTRAL_500, 1.0 - CONTROL_SPENT_FOCUS_W);
-
-/// The Search query field's **editing** ink — the bright endpoint of the `hot` cross-fade in
-/// `search::field::draw` (idle end: `TEXT_SECONDARY`) while the television's keyboard is up. Its own
-/// role because it names the JOB: the design system's `SearchField` contract forbids a rim or rule
-/// on this control, so ink is the only focus signal editing ever gets, and one stop (`TEXT_HEADING`)
-/// was too little from the couch (owner feedback, 2026-09-02). Lands on `TEXT_PRIMARY`, the
-/// brightest ink stop short of pure white.
-///
-/// **Until 2026-09-04 this was also the ink for focused-but-not-editing** — first alone, then (for
-/// one day, issue 22) behind a flat [`ACCENT`]/[`ACCENT_INK`] plate that the owner rejected on sight
-/// ("you made the search bar background white, while I wanted text to be white"). The plate is
-/// gone for good and focus is ink-only again, but the two focused states now read apart by ink
-/// alone too: [`FIELD_WAITING_INK`] is the target while waiting for a press, and this token narrowed
-/// to the state that still has the caret to help it — see `field::draw`'s `ink_target`.
-pub const FIELD_EDITING_INK: [f32; 4] = TEXT_PRIMARY;
-
-/// The Search query field's **focused-but-not-editing** ink — the `hot` cross-fade's bright
-/// endpoint for the one state that has no caret, no keyboard and (since 2026-09-04) no plate to
-/// carry focus instead. Pure `WHITE`, not `TEXT_PRIMARY`/[`FIELD_EDITING_INK`]'s near-white
-/// `#f7fafc`: a field waiting for a press has to read as the brightest thing on the page by ink
-/// alone, one stop past what editing needs once the caret is there to help. `field::draw`'s
-/// `ink_target` is the one place that picks between this and [`FIELD_EDITING_INK`], on `editing`
-/// alone — never a second spring.
-pub const FIELD_WAITING_INK: [f32; 4] = WHITE;
 
 /// Idle (unfocused) control disc/pill fill — solid dark, faintly translucent.
 pub const CONTROL_IDLE_FILL: [f32; 4] = with_a(NEUTRAL_600, 0.92);
@@ -396,10 +369,6 @@ pub const CONTROL_CAST_FOCUS: [(f32, f32, f32); 2] = [(5.0, 32.0, 0.34), (1.0, 6
 /// MEDIUM gray, deliberately not near-black: the focused-card drop-shadow only reads against a base
 /// this light (on the old near-black 25,25,29 a black shadow had almost nothing to darken).
 pub const SURFACE_APP: [f32; 4] = NEUTRAL_500;
-/// Opaque sheet drawn over the hardware video plane when a detail page scrolls the hero away.
-/// Same stop as [`SURFACE_APP`] so the rising page and the cover are one surface. Different role:
-/// this hides the plane. It is not atmosphere, so [`scrim`] is the wrong token.
-pub const PLANE_COVER: [f32; 4] = SURFACE_APP;
 // GL clear color — 3-float (`frame_clear` takes r,g,b, no alpha): [`SURFACE_APP`] itself (both are
 // the `NEUTRAL_500` stop), defined in `gfx::tokens` because `gfx` clears with it.
 pub use plx_gfx::gfx::tokens::CLEAR_RGB;
@@ -588,12 +557,6 @@ mod material_tests {
 pub const PANEL_FROST_TOP: [f32; 4] = with_a(NEUTRAL_650, 0.72);
 /// The frosted sheet's bottom stop — see [`PANEL_FROST_TOP`].
 pub const PANEL_FROST_BOT: [f32; 4] = with_a(NEUTRAL_750, 0.72);
-/// The sign-in **QR card's** quiet-zone plate (`login.rs`) — a bright cool-white whose job is SCAN
-/// CONTRAST for a phone camera, not focus. It is a SURFACE, not a control fill, which is the whole
-/// reason it outlived the second control white it used to be (`FILL_PRIMARY`): a plate under a
-/// black-tinted QR texture, and the only place in the app where the app paints something this
-/// bright on purpose.
-pub const SURFACE_QR_PLATE: [f32; 4] = COOL_0;
 /// **The one exact colour the `placeholder-sentinel` build paints every placeholder in**: #FF00FE.
 /// The palette never uses it (`the_sentinel_is_in_no_palette_stop` greps this file for the code),
 /// so a pixel of exactly this value on a frame is a placeholder the frame drew. Defined in every
@@ -774,8 +737,6 @@ pub const fn dim(c: [f32; 4], k: f32) -> [f32; 4] {
 // ── Rails / overlays / accents ───────────────────────────────────────────────
 /// Unfilled progress/scrubber track.
 pub const RAIL_TRACK: [f32; 4] = with_a(WHITE, 0.20);
-/// Buffered-ahead / resume-track band.
-pub const RAIL_BUFFERED: [f32; 4] = with_a(WHITE, 0.28);
 /// Played/filled portion of a rail.
 pub const RAIL_FILL: [f32; 4] = with_a(WHITE, 0.95);
 /// An intro/credits SEGMENT on the player scrubber — a band lit a step above the track, drawn
@@ -803,33 +764,9 @@ pub const ROUTE_GROUND_FALLBACK: [[f32; 4]; 4] =
 /// same weight as [`RAIL_FILL`] and still its own role, so the card marks and the player scrubber
 /// can be retuned apart. Was amber `#fab82e` (`AMBER_300`) until then.
 pub const RESUME_FILL: [f32; 4] = with_a(WHITE, 0.95);
-/// Plex's own "Plex Pass" gold, `#e5a00d` — a BRAND REFERENCE, not a palette member
-/// (`Plex Pass Awareness.dc.html`, "the amber decision"). Two ambers exist ON PURPOSE and stay
-/// two tokens: [`RESUME_FILL`] is ours and tunable; this one names somebody else's colour and
-/// must not drift when the first is retuned. They never meet: progress fill lives on card art;
-/// pass-gold appears on exactly TWO surfaces, both derived from Plex's own Pass docs (the owner's
-/// directive — design as visual baseline, logic from the docs): the failure read-out's filled
-/// capsule, and the detail facts row's two Pass-gated states (`detail::play_note`, the docs-derived
-/// truth table — hardware conversion and HDR tone mapping are both Pass-gated server features, and
-/// the warning outranks the soft note because a wrong picture outranks a slower one). Every use of
-/// the name is load-bearing,
-/// which is the trademark position. [`crate::widgets::pass_capsule`] is its only consumer
-/// besides ink; a line carries at most one gold thing, and warning severity is never amber — it
-/// is carried by glyph, stroke and contrast.
-pub const PASS_GOLD: [f32; 4] = AMBER_500;
-/// Near-black ink over a [`PASS_GOLD`] fill — the error read-out's FILLED capsule, the one place
-/// the capsule fills (on pure black an outline has no ground and reads as a hole). `#1a1204`.
-pub const PASS_GOLD_INK: [f32; 4] = AMBER_950;
 /// Unfilled track behind the resume bar — the full-bleed card-bottom rail. The redesign's `.28`,
 /// [`RAIL_BUFFERED`]'s weight: a white fill needs the step the amber hue used to give it.
 pub const RESUME_TRACK: [f32; 4] = with_a(WHITE, 0.28);
-/// Ink over [`RESUME_FILL`] when the fill is a SURFACE rather than a mark. Tuned when the fill was
-/// amber; it reads as a knockout on the white fill too.
-///
-/// **No consumer today** — its one user was the amber watched DISC, which the 2026-08-13 evening
-/// sync replaced with a bare tick over a veil ([`TILE_MARK_INK`]). Kept because the design system
-/// still carries the role, and because the next amber surface needs exactly this ink.
-pub const INK_ON_RESUME: [f32; 4] = NEUTRAL_850;
 
 // ── A list row's trailing VALUE read-out ─────────────────────────────────────
 /// The word at a row's trailing edge that says what it is SET to (`On`/`Off`, "English"), over the
@@ -901,21 +838,6 @@ pub const CONTROL_DANGER_IDLE_INK: [f32; 4] = DANGER;
 /// so motion is visible instead of red/green frames blending into yellow at panel refresh rate.
 pub const DIAG_FLIP_A: [f32; 4] = GREEN_400;
 pub const DIAG_FLIP_B: [f32; 4] = RED_400;
-/// Stats-for-Nerds delivery budget that covers the current media demand. This is not a generic
-/// success colour: the diagnostic plot uses it only for the literal `budget >= demand` state.
-pub const DIAG_LINK_SUSTAINS: [f32; 4] = GREEN_400;
-/// The same plot when its conservative delivery budget is below current media demand.
-pub const DIAG_LINK_DEFICIT: [f32; 4] = RED_400;
-/// Bytes delivered during one diagnostics sampling cell. Kept independent of the budget colour:
-/// activity can be high while the probabilistic budget still does not cover demand.
-pub const DIAG_NETWORK_ACTIVITY: [f32; 4] = COOL_150;
-/// Arithmetic mean across the diagnostics plot's visible network-activity window. Amber separates
-/// the statistic from the cool instantaneous bars; the adjacent `mean` label prevents it being
-/// mistaken for an independent connection-speed test.
-pub const DIAG_NETWORK_MEAN: [f32; 4] = AMBER_300;
-/// The fixed-slot plot's overwrite cursor. Near-white survives every state colour and a phone
-/// camera's chroma subsampling, which is the output format of this surface.
-pub const DIAG_SWEEP_CURSOR: [f32; 4] = COOL_0;
 /// Section divider hairline.
 pub const HAIRLINE: [f32; 4] = with_a(WHITE, 0.10);
 /// A glass container's **perimeter line** — the design system's `--glass-rim`, one notch under the
@@ -1160,11 +1082,6 @@ pub const TAB_PLATE_SELECTED: [f32; 4] = with_a(WHITE, 0.20);
 pub const TAB_PLATE_SELECTED_OVER: [f32; 4] = with_a(WHITE, 0.13);
 /// An unselected plated segment — present, but only just: it says "this is a control" and nothing more.
 pub const TAB_PLATE_IDLE: [f32; 4] = with_a(WHITE, 0.08);
-/// Softer selection panel — the lightest weight on the overlay ramp, and deliberately NOT
-/// [`TAB_PLATE_IDLE`]'s .08 one step up. The design project briefly resolved this role to that .08
-/// stop while its own specimen card and readme both said .07; holding the product at .07 was the
-/// right call, and the design has since added a .07 stop of its own and points here again.
-pub const OVERLAY_FOCUS_SOFT: [f32; 4] = with_a(WHITE, 0.07);
 /// Outlined-badge / meta-badge border.
 pub const OVERLAY_BORDER: [f32; 4] = with_a(WHITE, 0.55);
 /// The keyline PILL's stroke — a secondary action outlined over scrimmed video (the post-play
@@ -1186,37 +1103,6 @@ pub const BADGE_FILL: [f32; 4] = with_a(COOL_150, 0.20);
 /// No-op texture tint (structural: draw an RGBA texture unmodified).
 pub const TINT_WHITE: [f32; 4] = WHITE;
 
-// ── Review-score marks (detail hero ratings row) ─────────────────────────────
-// These used to be the ONE place the palette borrowed someone else's colour, justified by the
-// badge being a BRAND MARK. That justification is gone with the marks: Rotten Tomatoes' fruit,
-// seal and popcorn tub were removed 2026-08-02 (no licensing route exists, and a redraw is the
-// infringement pattern, not a defence), and every provider is NAMED in text instead. So these are
-// now our own semantic colours for a VERDICT, and only two still sit near a brand's hue because a
-// ripe tomato that isn't red has stopped being a tomato.
-//
-// They tint an icon MASK only — never text, never a surface — so they cannot leak into the rest of
-// the UI. The row's captions and scores use the ordinary TEXT_* tokens, which is the point: the
-// only colour left in the row is the verdict.
-/// The ripe tomato's body — `#f5341a`.
-pub const RATING_FRESH: [f32; 4] = RED_500;
-/// The Certified body — `#f0b429`. The SAME fruit struck in gold rather than a separate seal:
-/// a rarer bar reads as a richer version of the thing, and a seal was the one shape here that was
-/// unmistakably somebody's award rather than a piece of fruit.
-pub const RATING_CERTIFIED: [f32; 4] = AMBER_400;
-/// The audience crowd when the verdict is good — `#3ec96b`. Note the polarity across the row is
-/// deliberately NOT uniform: critics go red-for-good (a ripe tomato), audience goes green-for-good
-/// (a healthy crowd). Each mark is read against itself, not against its neighbour.
-pub const RATING_AUDIENCE: [f32; 4] = GREEN_400;
-/// The **calyx** green — the tomato's leaf-and-stem, on a fresh or certified body. `#2fae5b`, and
-/// deliberately not [`RATING_AUDIENCE`]: they are two marks' greens that land close, and folding
-/// them would let an audience tweak silently restyle a leaf.
-pub const RATING_LEAF: [f32; 4] = GREEN_500;
-/// The drained state, for both a hollow tomato and a negated crowd — `COOL_400`, the same stop
-/// [`TEXT_TERTIARY`] resolves to, because the negation is literally "this has the weight of a
-/// caption now". Its own role ON that stop rather than an alias OF the text token: a verdict mark
-/// and a runtime label are two jobs, and retuning one must not restyle the other.
-pub const RATING_MUTED: [f32; 4] = COOL_400;
-
 // ── Card-glow geometry (the glow *color* is shader-baked in gfx.rs's FS_SRC/FS_IMG; only geometry
 // is tunable). The hero-grid card's wide glow pad is `consts::GLOW_PAD` (shared with off-screen
 // culling, so it has one home there).
@@ -1226,64 +1112,6 @@ pub const CARD_RING_RAD: f32 = 14.0;
 // ── Episode filmstrip focus treatment ───────────────────────────────────────────────────────────
 // The episode filmstrip's labels sit BELOW the tile, so a focus change has to read from the text as
 // well as the still: the still lifts and grows, and the label block gets a `ui::text_lift` plate.
-
-/// The episode still's focus pop. Its own constant rather than [`crate::widgets::CARD_FOCUS_SCALE`]
-/// (1.07): on a 420×236 still that overlaps the neighbouring slot, and 1.04 reads as a lift rather
-/// than a zoom.
-pub const EP_CARD_FOCUS_SCALE: f32 = 1.04;
-
-/// How far the focused episode still rises, in px, at full focus — with [`EP_CARD_FOCUS_SCALE`] it
-/// separates the focused card from the row instead of merely enlarging it in place.
-pub const EP_CARD_FOCUS_LIFT: f32 = 6.0;
-
-/// The episode label block's inks. They never change with focus (Apple dims nothing, and the
-/// dimmed variants were rejected on the TV); focus is marked by the `ui::text_lift` plate instead.
-pub const EP_TITLE_INK: [f32; 4] = TEXT_PRIMARY;
-
-/// The episode summary's ink — [`TEXT_SECONDARY`] mixed slightly toward [`TEXT_PRIMARY`].
-pub const EP_SUMMARY_INK: [f32; 4] = mix(TEXT_SECONDARY, TEXT_PRIMARY, 0.03);
-
-/// The episode number / air date / rating chip's ink.
-pub const EP_META_INK: [f32; 4] = TEXT_TERTIARY;
-
-/// **The ALERT PANEL corner** — the full-frame glass sheet a block opens with OK
-/// (`Alert Views.dc.html`), as opposed to the anchored menus a chip or a button drops. Those keep
-/// their own smaller corner (`screens::item_menu` 20, `screens::alt_sources` 20,
-/// `screens::account_menu` 24, `glassload` 28):
-/// a menu hangs off a control and reads as part of it, while an alert owns the middle of the frame
-/// and is its own object.
-///
-/// **32, in the design's own words** — quoted rather than paraphrased, because all four alert
-/// panels were built against this one paragraph and three of them re-derived it independently:
-///
-/// > "Panel corner is 32px, one step over `--radius-panel` 24. It was tried at 60 — one whole
-/// > `--control-h`, so the panel would read as round as the pills inside it — and that is the
-/// > value that made the modal look like it came from somewhere else: at 14px on every tile and
-/// > 18px on a `TableView` row pill, this page has a restrained corner vocabulary and a 60px arc
-/// > leaves it. 32 stays inside that vocabulary while still reading as softer than a card, and
-/// > clears the 28px glass bevel so the chamfer runs inside the arc."
-///
-/// The tile's 14 is [`CARD_RING_RAD`] and the row pill's 18 is `table::PILL_RAD`, so that sentence
-/// is checkable against this tree rather than only against the mock. Two consequences are
-/// load-bearing rather than decorative. The **bevel clause**: below the 28px glass bevel the
-/// chamfer would run OUTSIDE the corner arc and the rim would break at each corner. And the
-/// **padding clause**, which the design leaves implicit and the panels make explicit — every one of
-/// them pads 48, and 32 is the largest corner whose arc still clears a 48px pad, so the eyebrow's
-/// cap-top and the footer's keycap sit beside the curve rather than inside it. That is why a panel
-/// quotes its radius and its padding together.
-///
-/// Deliberately ONE token rather than a literal per panel: the alert panels are a FAMILY, and a
-/// corner that drifted between them is exactly the drift `theme.rs` exists to kill. It very nearly
-/// did — this shipped as four constants under four names (`ALERT_CORNER_RAD`, `ALERT_PANEL_RAD`,
-/// `ALERT_RAD`, `RADIUS_PANEL`) before the four panels were merged into one tree.
-///
-/// One independent corroboration is worth keeping, because it was derived from the app rather than
-/// from the mock and it agrees: a decision alert's two answers are fully-rounded capsules at
-/// [`StatusOverlay::CTRL_H`](crate::widgets::StatusOverlay::CTRL_H)`/2` = 30, so 32 sits a hair
-/// OVER the pills it contains — enough that the sheet is unmistakably the outer shape, not enough
-/// for it to become one. That is the design's "as round as the pills inside it" objection to 60,
-/// measured on the one panel that actually holds pills.
-pub const ALERT_PANEL_RAD: f32 = 32.0;
 
 /// **The alert panels' HEAD ladder** — eyebrow → title → subtitle, in the design's own `margin-top`s
 /// (`Alert Views.dc.html` §1B and §1C, which spell the identical four numbers).
@@ -1305,28 +1133,12 @@ pub const ALERT_PANEL_RAD: f32 = 32.0;
 /// title band. Those two BANDS are half the ladder, which is why the leads live here too — a caller
 /// that advanced by measured cap heights instead is exactly how §1C ended up 12px tight.
 pub mod alert {
-    /// Titles and reading text share the panel's left padding edge in every alert.
-    /// Button labels and paired trailing values keep their own control/column alignment.
-    pub const TEXT_ALIGN: crate::label::HAlign = crate::label::HAlign::Left;
     /// The alert panel's inset — the pad every read-only alert lays its head ladder and its body
     /// against. **One number, because [`super::ALERT_PANEL_RAD`]'s own argument depends on it**:
     /// "32 is the largest corner whose arc still clears a 48px pad" cannot be checked while the pad
     /// is four private constants in four files. It was exactly that, and `widgets::KeyHint` had to
     /// reason about "the PAD 48 all three read-only alerts drew" with no name to say it with.
     pub const PAD: f32 = 48.0;
-    /// The scrolled-viewport edge dissolve (`ui::text_view::TextView::edge_fade`, since
-    /// 2026-09-02 — was `widgets::edge_feather`'s opaque gradient) — how far the crossing text
-    /// fades at the top and bottom of a scissor-clipped body.
-    pub const FEATHER: f32 = 88.0;
-    /// `line-height: 1` on the eyebrow — a caps run has no descenders to clear.
-    pub const EYEBROW_LEAD: f32 = super::size::CAPTION as f32; // 24
-    /// The eyebrow's `margin-bottom`, as the title's `margin-top:14`.
-    pub const GAP_EYEBROW_TITLE: f32 = 14.0;
-    /// `1.1` — tight, because a panel's title is one line by construction.
-    pub const TITLE_LEAD: f32 = super::size::TITLE as f32 * 1.1; // 44
-    /// The title's `margin-bottom`, as the subtitle's `margin-top:12`. A subtitle here is §1B's file
-    /// path or §1C's dot-separated identity line.
-    pub const GAP_TITLE_SUB: f32 = 12.0;
 }
 
 // ── Card treatment (Home Screen.dc.html): every tile = a soft drop shadow that GROWS with the focus

@@ -137,8 +137,6 @@ where
 pub const MAX_STEPS_PRE: u32 = 192;
 /// Reserved for the post-commit drain (§3.3 step 7); never consumable by step 6.
 pub const MAX_STEPS_POST: u32 = 64;
-/// The coarse round counter, diagnostics only.
-pub const MAX_ROUNDS: u32 = 4;
 /// A debug build asserts when `carried` grows for this many consecutive frames.
 pub const CARRY_GROWTH_FRAMES: u8 = 8;
 
@@ -523,11 +521,6 @@ where
             .map_or(false, |i| i.screen.hit_source() == HitSource::Engine)
     }
 
-    /// A replay's mode (§5.5): `Some(Legacy)` bypasses the engine and the map for every page.
-    pub fn set_focus_source_override(&mut self, o: Option<FocusSource>) {
-        self.focus_override = o;
-    }
-
     /// `Event::Store{id, gen}` (§3.4): a notice to every live instance, then the engine's
     /// `reconcile` before draw.
     pub fn store_changed(&mut self, ord: StoreOrd, gen: u32) {
@@ -597,19 +590,6 @@ where
     /// until the commit's `Mount` step has run.
     pub fn top_arg(&self) -> Option<&H::Arg> {
         self.nav.top_page().map(|e| &e.arg)
-    }
-
-    /// The top page's argument, or — while there is NO top page yet — the page the first nav
-    /// commit is about to mount (the last parked `Root`/`Push`/`Replace`/`SelectTab`). A caller
-    /// that runs BEFORE the frame's commit (the bridge's chrome capture) asks this rather than
-    /// [`Self::top_arg`], which is `None` on a boot's first frame — the route is parked, not
-    /// mounted — and would make that frame look like no page at all. Once a page is up this IS
-    /// `top_arg`: a push parked behind it changes the chrome at its own commit, not a frame early.
-    pub fn top_or_mounting_arg(&self) -> Option<&H::Arg> {
-        self.top_arg().or_else(|| self.parked.iter().rev().find_map(|(s, _)| match &s.fx {
-            Fx::Nav(NavOp::Root(a) | NavOp::Push(a) | NavOp::Replace(a) | NavOp::SelectTab(a)) => Some(a),
-            _ => None,
-        }))
     }
 
     /// …and its `ScreenId`, the identity every argument of one screen shares.
@@ -773,20 +753,6 @@ where
     /// and holds only on that debt, since a capture with debt is re-captured until it is clean.
     pub fn held_page_image(&self) -> Option<f32> {
         self.page_image_alpha
-    }
-
-    /// Is a modal surface or a popover's held image up? The frame dump fails closed on it: the dim
-    /// field behind a modal is sampled on a cadence of presented iterations.
-    pub fn overlay_open(&self) -> bool {
-        !self.nav.modals.surfaces.is_empty() || crate::popover::host::held_ceiling().is_some()
-    }
-
-    /// Does the dispatcher carry work into its next iteration: a queued step, a parked structural
-    /// op or lifecycle step (one nav commit per iteration), a pending back? The frame dump holds a
-    /// virtual frame on it, so an input's whole effect lands within the frame it was pressed in
-    /// rather than on whichever later iteration the holds happened to leave.
-    pub fn work_carried(&self) -> bool {
-        !self.queue.is_empty() || !self.parked.is_empty() || !self.parked_life.is_empty() || self.pending_back
     }
 
     /// Whether this frame may show the page as a frozen image at all: a freezing transition, a
@@ -2488,10 +2454,6 @@ where
     /// Called at the frame tail: drop the bodies whose `Unmount` was delivered.
     pub fn prune(&mut self, unmounted: &[InstanceId]) {
         self.nav.prune(unmounted);
-    }
-
-    pub fn frame_index(&self) -> u64 {
-        self.frame
     }
 
     pub fn queued(&self) -> usize {

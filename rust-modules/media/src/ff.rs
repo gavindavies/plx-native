@@ -586,12 +586,10 @@ pub const AV_CODEC_ID_AV1: c_int = 222;
 pub const AV_PKT_FLAG_KEY: c_int = 1;
 pub const AVSEEK_FLAG_BACKWARD: c_int = 1;
 pub const AVERROR_EOF: c_int = -541478725;
-pub const AVERROR_EAGAIN: c_int = -11;
 /// `AVERROR(EIO)`: unlike EOF, tells libavformat and our producer that the source was truncated by
 /// a transport failure.
 pub const AVERROR_IO: c_int = -5;
 pub const AV_NOPTS_VALUE: i64 = i64::MIN;
-pub const AV_TIME_BASE: i64 = 1_000_000;
 pub const NS_TB: AVRational = AVRational {
     num: 1,
     den: 1_000_000_000,

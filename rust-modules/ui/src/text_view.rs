@@ -490,15 +490,6 @@ impl<'a> TextView<'a> {
         top + drawn_h - self.line_h()
     }
 
-    /// Reserve [`fade_last`](Self::fade_last) room for a right-pinned [`more_mark`] at this
-    /// block's own size, plus `gap` of air before it — the clamped-prose idiom of the Person bio
-    /// and the Collection summary. Needs [`with_measure`](Self::with_measure) first; without a
-    /// measure only the gap is reserved.
-    pub fn fade_for_more(self, gap: f32) -> Self {
-        let mark = self.measure.map_or(0.0, |m| m.width(more_mark(), self.sz, true));
-        self.fade_last(mark + gap)
-    }
-
     /// Declare that the mark [`fade_last`](Self::fade_last) reserves room for is pinned on the last
     /// line UNCONDITIONALLY (the About card's MORE opens the card whatever the synopsis' length), so
     /// an untruncated last line that reaches into the reserved zone dissolves too instead of
@@ -507,15 +498,6 @@ impl<'a> TextView<'a> {
     pub fn mark_always(mut self) -> Self {
         self.mark_always = true;
         self
-    }
-
-    /// Draw the [`more_mark`] pinned right on the last line of this block, drawn at `x`/`top` in a
-    /// `w`-wide column to `drawn_h`: `TEXT_SECONDARY` while `marked` (the block holds a pressed
-    /// focus), `TEXT_TERTIARY` otherwise. The pair to [`fade_for_more`](Self::fade_for_more).
-    pub fn draw_more(&self, p: Painter, x: f32, top: f32, w: f32, drawn_h: f32, marked: bool) {
-        let ink = if marked { crate::theme::TEXT_SECONDARY } else { crate::theme::TEXT_TERTIARY };
-        Label::new(more_mark().as_ptr(), self.sz, ink).bold().h(HAlign::Right).v(VAlign::CapTop)
-            .draw(p, Rect::new(x, self.last_line_cap_y(top, drawn_h), w, 0.0));
     }
 
     /// Does [`draw`](Self::draw) dissolve the LAST line at wrap width `width` into the

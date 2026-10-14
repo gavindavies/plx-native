@@ -25,7 +25,6 @@ pub(crate) mod card_row;
 pub mod cards; // shared card sections (plan: shared-card-sections): Shelf, Grid, CardSource, and the card conformance suite
 pub mod marquee; // the focused run's looping glide: a tile's title and caption (card_row), cast name and role, menu rows (table)
 pub mod card_motion;
-pub mod value_chip; // shared label/value/owner capsule used by menu-opening controls
 pub mod containers; // RESTRUCTURE (spec §6.2): Navigation = TabContainer → NavStack → ModalStack, the transitions, the host fold
 pub mod collection_tile; // the neutral tile a thumb-less collection draws on every surface
 pub mod consts;
@@ -34,13 +33,10 @@ pub mod dispatch; // RESTRUCTURE spike (spec §3.3): the one frame algorithm, ge
 pub mod adapters; // RESTRUCTURE (spec §2.2): the one door out of the machine world, and its test stub
 pub mod geom; // RESTRUCTURE (spec §7.1): `Focusable` for the widgets — geometry IS `place`
 pub mod tile; // RESTRUCTURE (spec §10): the library's item abstraction for a shelf tile
-pub mod document_reader;
-pub mod prose_scroll; // the paged prose viewport `person_bio` and `about_panel` share
 pub mod fit; // one declared-priority primitive for a line with two competing runs (`two_runs`)
 pub mod fixture; // RESTRUCTURE spike: `FixtureHost` — the bundle the generic library is tested against
 pub mod focus; // RESTRUCTURE (spec §7.3): the focus ENGINE — one owner of focus, the golden tables
 pub mod fmt; // shared duration/clock display formatters
-pub mod dwell; // raw dwell accumulator; notes Motion, never a Ramp
 pub mod frame; // RESTRUCTURE spike (spec §8.1): `Budget`, admission control for prepare work
 pub mod hold_hint; // the standing "Hold [OK] for options" capsule: dwell/life schedule, hold-progress cap, fade + rise
 pub mod hit; // RESTRUCTURE (spec §7.6): the double-buffered hit map and the pointer gates
@@ -58,8 +54,6 @@ pub mod input; // RESTRUCTURE (spec §2.2): the Input machine — owner of the p
 #[cfg(feature = "threadcheck")]
 pub mod runtime_warning;
 pub mod label;
-pub mod linked_heading; // linked shelf-entry control: shared entry/heading geometry, focus and hits
-pub mod master_detail; // RESTRUCTURE (spec §10): reusable two-region focus/return/follow policy
 // Library is owned by screens::library; its legacy state/focus model is retired.
 // `login` retired (phase 6): the QR sign-in is `screens::login::LoginScreen` now, an owned
 // `Screen` mounted through `app::bridge` rather than a `Popover` reached through `app.rs`'s key
@@ -75,16 +69,13 @@ pub mod press; // tvOS-style click: OK-down dips the focused card, OK-up springs
 pub mod route_screen;
 pub mod screen; // RESTRUCTURE spike (spec §6.1, §7.1): Screen, Focusable, Composed/Part, DrawFrame
 pub mod table;
-pub mod table_screen; // Header / TableScreen / DocumentScreen — the route family's screens as components (phase 5a)
+pub mod table_screen; // Header / TableScreen — a table screen as components (phase 5a)
 pub mod tex; // RESTRUCTURE spike (spec §10): TexCache — the render-resource half of image caching
-pub mod testapp; // RESTRUCTURE (spec §15.1): a screen under test with no SDL — dispatcher + fixture rig + virtual clock
 pub mod text_view;
 pub mod text_buffer;
-pub mod text_lift; // the animated focus treatment (lift + plate + shadow) for a block of prose that is a focus stop but not a card
 pub mod theme;
 pub mod underlay; // the shared UNDERLAY FIELD: a coarse, spatially faithful colour field of what is drawn beneath an overlay
 pub mod widgets;
-pub mod xfade; // content cross-fade: fade out → swap the data at the floor → fade in
 
 /// The focus fill — a near-white with near-black ink/icons over it, and the only fill a control
 /// lights up with. The focused control (button, pill, menu row) fills ACCENT; its label/glyph
@@ -290,14 +281,6 @@ pub mod draw_census {
             }
         });
     }
-    /// Every textured quad a recording painter is handed while `f` runs, as
-    /// `(texture id, screen rect, alpha)` — the census for a test that asks which PICTURE a frame
-    /// drew, not only that it drew one.
-    pub fn capture_tex(f: impl FnOnce()) -> Vec<(u32, Rect, f32)> {
-        TEX.with(|l| *l.borrow_mut() = Some(Vec::new()));
-        f();
-        TEX.with(|l| l.borrow_mut().take()).unwrap_or_default()
-    }
 }
 
 fn declared_text_bounds(s: *const c_char, sz: c_int, bold: c_int) -> (f32,f32) {
@@ -406,13 +389,6 @@ fn shadow_ramp(h: f32, f: f32, rest_a: f32, focus_a: f32) -> (f32, f32, f32, f32
         lerp(rest_a, focus_a),
         off_l,
     )
-}
-
-/// `(blur, offset, alpha)` of a prose block's focus shadow at focus `f` — [`shadow_ramp`] from a
-/// resting alpha of 0. The one source for [`Painter::focus_shadow_outside`] and its tests.
-pub fn text_shadow_params(h: f32, f: f32) -> (f32, f32, f32) {
-    let (blur, off, a, _) = shadow_ramp(h, f, 0.0, theme::CARD_SHADOW_CHIP_A);
-    (blur, off, a)
 }
 
 impl Painter {
@@ -762,14 +738,6 @@ impl Painter {
         }) { return; }
         let (blur, off, a, _) = card_shadow_params(r.h, f, theme::CARD_SHADOW_CHIP_A);
         self.shadow(r, radius, blur, off, theme::with_a(theme::CARD_SHADOW, a));
-    }
-    /// [`focus_shadow`](Self::focus_shadow) for a TRANSLUCENT block that casts no shadow at rest
-    /// (`ui::text_lift`'s plate): the same blur/offset ramp, but the alpha runs 0 → the chip's
-    /// ceiling with `f`, so it is exactly 0 at `f == 0`, and the ink stops at the block's own outline
-    /// ([`shadow_outside`](Self::shadow_outside)).
-    pub fn focus_shadow_outside(self, r: Rect, radius: f32, f: f32) {
-        let (blur, off, a) = text_shadow_params(r.h, f);
-        self.shadow_outside(r, radius, blur, off, theme::with_a(theme::CARD_SHADOW, a));
     }
     /// The tile-fill colour of the focus edge-sheen (the 1px inset perimeter rim), folded into the
     /// caller's alpha cascade — shared by the sheened fill primitives below.
@@ -1599,15 +1567,6 @@ pub fn on_axis(start: f32, extent: f32, span: f32, lead: f32) -> bool {
     start < span && start + extent.max(1.0) > -lead
 }
 
-/// The hero-fade curve: a top hero fades to 0 as `progress` rises to `fade_end`. The caller keeps its
-/// own `fade_end` (home 0.55 on the snap continuum, detail 400px of scroll) so the motion constants
-/// stay byte-identical at the call site. `1.0 - hero_alpha(..)` is the complementary compact-title
-/// alpha.
-#[inline]
-pub fn hero_alpha(progress: f32, fade_end: f32) -> f32 {
-    (1.0 - progress / fade_end).clamp(0.0, 1.0)
-}
-
 /// The hero synopsis' line pitch. See [`hero_synopsis`].
 pub const HERO_SYN_LEAD: f32 = 36.0;
 /// Lines of blurb before it elides — the mock's own band, and both heroes'. Past it the flow would
@@ -1693,20 +1652,6 @@ impl ScrollColumn {
             top,
             margin,
         }
-    }
-    /// The pre-scroll top of child `i`: stacks the present children's heights from `top`, adding
-    /// `gap_before(k)` before each child k>0. This IS the flow — the single below-hero Y source.
-    pub fn child_top(&self, c: &impl Column, i: usize) -> f32 {
-        let mut y = self.top;
-        for k in 1..=i {
-            y += c.gap_before(k);
-            y += c.height(k - 1);
-        }
-        y
-    }
-    /// The scroll offset that lifts child `i`'s top to `margin` (clamped at 0).
-    pub fn lift_target(&self, c: &impl Column, i: usize) -> f32 {
-        (self.child_top(c, i) - self.margin).max(0.0)
     }
     /// Draw every present child, scrolled and band-culled — off-screen children are SKIPPED by
     /// culling (this flow culls rather than using the `Painter::clip` scissor). The focused child is never culled (the scroll keeps it at

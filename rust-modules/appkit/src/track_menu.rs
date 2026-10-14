@@ -97,7 +97,6 @@ use plx_ui::theme;
 use plx_ui::{Painter, Rect};
 use std::os::raw::c_int;
 
-
 /// **What a focusable row of either tab IS** — the identity the [`FormTable`] resolves a press, a
 /// focus move and a rebuild's landing by, never a position. The Audio tab's track rows, the two Plex
 /// Pass DSP toggles and the Subtitles tab's rows (root, Style page and pickers) share one alphabet
@@ -255,7 +254,6 @@ impl FormId for TrackRow {
 /// Nav row opens.
 type TrackForm = Form<TrackRow, (), TrackPage>;
 type TrackTable = FormTable<TrackRow, (), TrackPage>;
-
 
 /// The panel's top edge: under the transport's top menu, with the menu's own air.
 const PANEL_TOP: f32 = crate::player_hud::MENU_BOTTOM + 16.0;
@@ -495,7 +493,6 @@ pub fn new(
         s
     }
 
-
     /// The highlighted row, for the focus probe (`crate::focusprobe`) — a READ of the cursor the
     /// key ladder moves, and the reason it exists: `app.rs`'s UP/DOWN arm for this panel changes
     /// nothing else, so without this the fingerprint records the panel opening and closing and
@@ -515,18 +512,11 @@ pub fn new(
         c.u32(self.form.key_at(self.form.table.sel.max(0) as usize).map_or(u32::MAX, |k| k.0));
     }
 
-    /// What the `submenuosc` trigger needs to choose its next key: the tab (0 Audio, 1 Subtitles),
-    /// how many pages are pushed above the root, and whether the root offers Other languages.
-    pub fn osc_probe(&self) -> (c_int, usize, bool) {
-        (self.tab, self.pages.len(), self.form.index_of(&TrackRow::OpenOther).is_some())
-    }
-
     /// The pages pushed above the Subtitles root, outermost first, for tests and probes.
     #[cfg(any(test, feature = "test-support"))]
     pub fn page_path(&self) -> Vec<TrackPage> {
         self.pages.iter().map(|s| s.page).collect()
     }
-
 
     /// The highlighted row's id (`None` on a note or an empty list).
     #[cfg(any(test, feature = "test-support"))]
@@ -579,14 +569,6 @@ pub fn new(
     /// -1 = subtitles off, else index into the playing item's subs list
     pub fn active_sub(&self) -> c_int {
         self.active_sub
-    }
-    /// Plex stream id of the chosen audio track (for &audioStreamID), or 0
-    pub fn audio_stream_id(&self, meta: metadata::MetadataView<'_>) -> i64 {
-        let i = self.active_audio();
-        tracks(meta)
-            .and_then(|t| t.audio.get(i.max(0) as usize))
-            .map(|s| s.id)
-            .unwrap_or(0)
     }
     /// Plex stream id of the chosen subtitle track (for &subtitleStreamID), or 0 if Off
     pub fn sub_stream_id(&self, meta: metadata::MetadataView<'_>) -> i64 {
@@ -642,7 +624,6 @@ pub fn new(
         self.active_audio = audio;
         self.active_sub = sub;
     }
-
 
     /// The Subtitles tab's half of the live poll `Self::update` runs every tick, mirroring the
     /// Audio tab's own `enh_state` poll just above it. Issue #309's field report: a subtitle pick
@@ -791,7 +772,6 @@ pub fn new(
             }
         }
     }
-
 
     /// Resolve a NAMED Subtitles-tab target to a TRACK, for the `/tmp/pitv-menupick` trigger:
     /// `"track:N"` is the N-th (0-based) track in PAGE ORDER — the root's track rows first, then the
@@ -1000,17 +980,6 @@ pub fn new(
         Form::new().section(sec)
     }
 
-
-
-
-
-
-
-
-
-
-
-
     /// The Style page: one drill-in per field, each reading out its current value. Under an image
     /// or styled subtitle Size and Position are disabled (dim, focusable, inert) and one note names
     /// why; Color is live under every renderer — the subtitle ink tints bitmaps and ASS alike.
@@ -1140,8 +1109,6 @@ pub fn new(
         }
     }
 
-
-
     /// The Audio tab as a form: the track list. Mirrors [`Self::layout`] for the Subtitles tab.
     fn audio_form(&self, meta: metadata::MetadataView<'_>) -> TrackForm {
         let mut sec = FormSection::new(plx_platform::i18n::msg::widgets_tracks_audio());
@@ -1183,7 +1150,6 @@ pub fn new(
         Form::new().section(sec)
     }
 
-
     /// Build the Subtitles root's form from the CURRENT state — the one place the model
     /// (`metadata::sub_layout::sub_sections`) is asked, so what a row IS can never disagree with
     /// what was drawn. Also stores the [`SubSig`] and renderer the root is built from, for the
@@ -1223,7 +1189,6 @@ pub fn new(
         let names = plx_media::player::SHARED.track_names.lock().unwrap();
         sub_layout::sub_sections(subs, &offered, &names, &self.yours, show_timing)
     }
-
 
     fn rebuild(&mut self, meta: metadata::MetadataView<'_>, tab: c_int, slide: bool) {
         if tab == 0 {
@@ -1550,7 +1515,6 @@ fn format_offset(ms: i64) -> String {
 use plx_data::metadata::friendly_codec; // the ONE codec→display-name map (shared with the Info card)
 use plx_data::metadata::track_label::Kind;
 
-
 /// "AC-3 5.1", "Dolby TrueHD 7.1", "DTS 5.1" — a compact codec + channel-layout descriptor. Public
 /// for the title page's audio picker (`screens::local_detail`), which names a track the way this
 /// menu does.
@@ -1573,9 +1537,7 @@ pub fn audio_descriptor(s: &metadata::Stream) -> String {
     }
 }
 
-
 // ---- Subtitles-tab sections (the model is `metadata::sub_layout`, plan §3) ------------------
-
 
 fn row_badge(b: &RowBadge) -> Badge {
     match b {
@@ -1938,7 +1900,6 @@ mod tests {
         plx_ui::table::assert_no_fit_failures(&out);
     }
 
-
     // ---- sub_layout: Timing absent under transcode, dim while Off -----------------------------
 
     #[test]
@@ -2046,7 +2007,6 @@ mod tests {
     }
 
     // ---- track_menu: sidecar, tone and Timing rows dispatch to their own outcomes -------------
-
 
     // ---- track_menu: Timing returns OpenTiming, and is inert while Off ------------------------
 
@@ -2278,7 +2238,6 @@ mod focus_tests {
         })
     }
 
-
     /// **UP/DOWN step by one row and clamp at both ends**, matching
     /// [`TrackMenuState::move_focus`]'s own clamp.
     #[test]
@@ -2465,7 +2424,6 @@ mod keyed_form_tests {
         }
     }
 
-
     /// **Adding a subtitle track to the offered list moves no other row's key**, even though the
     /// added track sorts above them on screen (its key is its subs-list index, not its position).
     #[test]
@@ -2568,8 +2526,6 @@ mod style_page_tests {
         reset_player_control_for_test(ps);
     }
 
-
-
     fn focus_id(menu: &mut TrackMenuState, id: TrackRow) {
         let i = menu.form.index_of(&id).unwrap_or_else(|| panic!("{id:?} is not on this page"));
         menu.focus_row(i as c_int);
@@ -2627,7 +2583,6 @@ mod style_page_tests {
         teardown(&ps);
     }
 
-
     /// Picking a rung commits it live, keeps the panel and page open and moves the checkmark; the
     /// already-checked rung is inert.
     #[test]
@@ -2670,12 +2625,6 @@ mod style_page_tests {
         }
         teardown(&ps);
     }
-
-
-
-
-
-
 
     /// The title band is a pointer-only stop: its key is recognised, no row owns it.
     #[test]
@@ -3052,7 +3001,6 @@ mod language_page_tests {
         assert_eq!(menu.selected_id(), Some(TrackRow::OpenOther));
         teardown(&ps);
     }
-
 
     /// **Finding 3: a language page is its language, not a list position.** Two earlier tracks
     /// leave while French's page is open and Dutch now starts where French used to; the page must
