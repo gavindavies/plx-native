@@ -182,19 +182,23 @@ pub fn listing(dir: &Path) -> Listing {
     state().dirs.get(dir).map_or(Listing::Loading, |s| s.listing.clone())
 }
 
-/// The listed entry for the file at `path` — its title, `.nfo` and artwork — from its folder's
-/// listing. `None` until that folder has been scanned, in which case the scan is asked for and a
-/// later read finds it.
+/// The listed entry for the file at `path` — its title, `.nfo` and artwork — from a listing that
+/// holds it: its folder's folder (a film in its own folder is listed there among the other films,
+/// which is the listing browsing has already read), else its own folder. `None` until one of them
+/// has been scanned; the file's own folder is then asked for, and a later read finds it.
 pub fn entry_for(path: &Path) -> Option<Entry> {
     let dir = path.parent()?;
-    match listing(dir) {
+    let find = |d: &Path| match listing(d) {
         Listing::Ready(entries) => entries.iter().find(|e| e.path == path).cloned(),
-        Listing::Loading => {
-            request(dir);
-            None
-        }
-        Listing::Failed(_) => None,
+        _ => None,
+    };
+    if let Some(e) = dir.parent().and_then(|up| find(up)).or_else(|| find(dir)) {
+        return Some(e);
     }
+    if listing(dir) == Listing::Loading {
+        request(dir);
+    }
+    None
 }
 
 /// Scan `dir` unless a scan is in flight or the last one is fresh.
@@ -533,6 +537,24 @@ mod tests {
     fn touch(p: &Path) {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, b"x").unwrap();
+    }
+
+    /// A film in its own folder is found through the listing browsing reads — the folder above
+    /// its own — so a play started from Home or Films is titled by its `.nfo`, not its file name.
+    #[test]
+    fn a_film_in_its_own_folder_is_found_in_the_listing_above_it() {
+        let root = tree("entry-for");
+        let video = root.join("Alien (1979)/Alien (1979).mkv");
+        touch(&video);
+        std::fs::write(root.join("Alien (1979)/Alien (1979).nfo"), "<movie><title>Alien</title></movie>").unwrap();
+        request(&root);
+        let start = Instant::now();
+        while listing(&root) == Listing::Loading && start.elapsed() < std::time::Duration::from_secs(5) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let e = entry_for(&video).expect("found in its folder's folder");
+        assert_eq!(e.display_title(), "Alien");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
