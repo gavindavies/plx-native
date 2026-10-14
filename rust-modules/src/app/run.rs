@@ -722,7 +722,6 @@ unsafe fn ingest_sdl_event(app: &mut App, _fr: &mut Frame) {
                 &mut app.ok_armed,
                 &mut app.input.press,
                 &mut app.pages,
-                &mut app.bridge,
             );
         } else if matches!(key, Key::Pause) {
             key_pause(&mut app.adapters.player, app.last_input, &mut app.pages);
@@ -1144,10 +1143,20 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                         // itself: the transport's MIDDLE is hidden behind an open Chapters strip,
                         // and which panel is up is the container's answer.
                         let busy = plx_appkit::player_hud::busy(&app.player.session);
-                        let bare_middle = !matches!(
-                            super::bridge::player_overlay_kind(&app.pages),
-                            Some(plx_screens::player::overlay::OverlayKind::Chapters)
-                        );
+                        let open_kind = super::bridge::player_overlay_kind(&app.pages);
+                        let bare_middle = !matches!(open_kind, Some(plx_screens::player::overlay::OverlayKind::Chapters));
+                        // The top-menu item whose panel is up keeps its selected plate.
+                        let menu_open = open_kind.and_then(|kind| {
+                            use plx_appkit::player_hud::MenuItem;
+                            use plx_screens::player::overlay::OverlayKind;
+                            match kind {
+                                OverlayKind::Info => Some(MenuItem::Info),
+                                OverlayKind::Chapters => Some(MenuItem::Chapters),
+                                OverlayKind::Tracks { tab: 1 } => Some(MenuItem::Subtitles),
+                                OverlayKind::Tracks { .. } => Some(MenuItem::Audio),
+                                OverlayKind::Timing => None,
+                            }
+                        });
                         // Both subtitle paths lift clear of the transport for the same reason and
                         // by the same test — an open track menu counts, since that is exactly when
                         // the user is reading the bottom of the screen. The Timing capsule is the
@@ -1157,6 +1166,7 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                         if let Some(player) = super::bridge::player_mut(&mut app.pages) {
                             player.busy = busy;
                             player.transport = bare_middle;
+                            player.menu_open = menu_open;
                             player.set_hud_policy(hud_policy);
                         }
                         // THE PAGE, and its panels: `Dispatcher::draw(.., true)` runs the page

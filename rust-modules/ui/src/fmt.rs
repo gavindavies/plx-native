@@ -337,3 +337,19 @@ pub fn rating_suffix(scale: RatingScale) -> &'static str {
         RatingScale::Percent => "",
     }
 }
+
+/// `2019 · 8 min · Animation, Fantasy`: a title's facts, each only when known — the line a
+/// description gives under a title (the Films preview, the title page, the player's Info card).
+pub fn title_facts(year: Option<u16>, runtime_min: Option<u32>, genres: &[String]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(y) = year {
+        parts.push(y.to_string());
+    }
+    if let Some(m) = runtime_min {
+        parts.push(dur_long(i64::from(m) * 60_000));
+    }
+    if !genres.is_empty() {
+        parts.push(genres.join(", "));
+    }
+    parts.join(" · ")
+}

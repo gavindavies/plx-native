@@ -16,19 +16,10 @@ pub fn file_facts(entry: &Entry) -> String {
     if ext.is_empty() { size } else { format!("{ext} · {size}") }
 }
 
-/// `2019 · 8 min · Animation, Fantasy`: the facts a description gives, each only when known.
+/// `2019 · 8 min · Animation, Fantasy`: the facts a description gives, each only when known
+/// ([`plx_ui::fmt::title_facts`], naming at most three genres).
 pub fn facts(year: Option<u16>, runtime_min: Option<u32>, genres: &[String]) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(y) = year {
-        parts.push(y.to_string());
-    }
-    if let Some(m) = runtime_min {
-        parts.push(plx_ui::fmt::dur_long(i64::from(m) * 60_000));
-    }
-    if !genres.is_empty() {
-        parts.push(genres.iter().take(GENRES_SHOWN).cloned().collect::<Vec<_>>().join(", "));
-    }
-    parts.join(" · ")
+    plx_ui::fmt::title_facts(year, runtime_min, &genres[..genres.len().min(GENRES_SHOWN)])
 }
 
 /// The card's watch state, as the item menu reads it: finished wins over a kept place (a finished

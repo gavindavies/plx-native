@@ -211,11 +211,35 @@ impl Bridge {
         let rect = real.focused_card_rect(&cx, ret.focus, At::Drawn);
         Some(plx_screens::registry::ItemMenuArg {
             path: path.to_string_lossy().into_owned(),
-            mark,
+            kind: plx_screens::registry::MenuKind::Watch(mark),
             host: entry,
             focus: ret.focus,
             anchor: anchor_bits(rect),
         })
+    }
+
+    /// **A title page's track menu**, anchored beside the disc that asked for it. `None` while the
+    /// file's tracks are still being read (the press then does nothing, and the next one opens it).
+    pub(crate) fn track_menu_arg(
+        &self,
+        d: &Dispatcher<AppHost>,
+        entry: EntryId,
+        ret: &ReturnState<u32, PageMemory>,
+        kind: plx_screens::registry::TrackKind,
+    ) -> Option<plx_screens::registry::ItemMenuArg> {
+        let e = d.nav.entry(entry)?;
+        let real = &e.inst.as_ref()?.screen;
+        let page = real.as_any()?.downcast_ref::<plx_screens::local_detail::LocalDetailScreen>()?;
+        let (path, menu) = page.track_menu(kind)?;
+        let parts = CxParts {
+            tick: Tick { ms: 0, dt_us: 0 },
+            press: plx_machine::machine::PressRead { scale: 1.0, is_long: false, held_ms: None, owner: None },
+            focus: plx_machine::machine::FocusRead { current: ret.focus, ..Default::default() },
+            owner: plx_machine::machine::InputOwner::Entry(entry),
+        };
+        let cx = parts.cx::<AppHost>(self.views(), &self.measure);
+        let rect = real.focused_card_rect(&cx, ret.focus, At::Drawn);
+        Some(plx_screens::registry::ItemMenuArg { path, kind: menu, host: entry, focus: ret.focus, anchor: anchor_bits(rect) })
     }
 
     /// **The opener LIFT: the focused tile repainted above the modal dim.** Render-only, and the

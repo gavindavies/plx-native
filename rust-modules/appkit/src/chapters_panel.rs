@@ -1,5 +1,5 @@
 //! In-player Chapters strip: a horizontal row of chapter cards (thumbnail + name + timestamp) over
-//! the transport, opened from the HUD's Chapters tab. LEFT/RIGHT pick a chapter, OK seeks to its
+//! the transport, opened from the HUD's top menu. LEFT/RIGHT pick a chapter, OK seeks to its
 //! start. Card layout mirrors the detail-page episode picker; modal wiring mirrors info_panel.
 //!
 //! Data comes from the PLAYING leaf (`metadata::playing_chapters`, loaded with `?includeChapters=1`
@@ -166,11 +166,7 @@ impl ChaptersState {
             } else {
                 theme::TEXT_SECONDARY
             };
-            let name = if ch.title.trim().is_empty() {
-                plx_platform::i18n::msg::widgets_chapters_number(ch.index as i64)
-            } else {
-                ch.title.clone()
-            };
+            let name = chapter_name(ch);
             if let Ok(tc) = CString::new(plx_gfx::text::elide_by(&name, CH_W, false, |t| {
                 measure.width_str(t, theme::size::LABEL, true)
             })) {
@@ -192,7 +188,20 @@ fn chapters<'a>(meta: metadata::MetadataView<'a>) -> &'a [metadata::Chapter] {
 fn n(meta: metadata::MetadataView<'_>) -> c_int {
     chapters(meta).len() as c_int
 }
-/// whether the PLAYING item has chapters — drives showing/hiding the Chapters tab
+/// A chapter's name: its own title, else `Chapter N`.
+pub fn chapter_name(ch: &metadata::Chapter) -> String {
+    if ch.title.trim().is_empty() {
+        plx_platform::i18n::msg::widgets_chapters_number(ch.index)
+    } else {
+        ch.title.clone()
+    }
+}
+/// The name of the chapter `ms` falls in — what the scrub preview reads beside its time. `None`
+/// when the item has no chapters or `ms` is before the first.
+pub fn chapter_at(meta: metadata::MetadataView<'_>, ms: i64) -> Option<String> {
+    chapters(meta).iter().rev().find(|c| c.start_ms <= ms).map(chapter_name)
+}
+/// whether the PLAYING item has chapters — drives showing/hiding the menu's Chapters item
 pub fn has_chapters(meta: metadata::MetadataView<'_>) -> bool {
     n(meta) > 0
 }
@@ -279,10 +288,10 @@ where
             kind: GroupKind::Row { wrap: false },
             seat: Seat::Nearest,
             reachable: AxisMask::HORIZONTAL,
-            // UP is swallowed (no group above, as the old ladder's `_ => {}` left it); DOWN drops
-            // focus back onto the HUD tabs, which only the owning screen can do —
-            // `overlay.rs`'s `Key::Down => … FocusTabs`.
-            edge: [EdgeRule::Stop, EdgeRule::Screen, EdgeRule::Stop, EdgeRule::Stop],
+            // UP hands focus back to the transport's top menu the strip was opened from, which
+            // only the owning screen can do — `overlay.rs`'s `Key::Up => … FocusMenu`; DOWN is
+            // swallowed (nothing below the strip).
+            edge: [EdgeRule::Screen, EdgeRule::Stop, EdgeRule::Stop, EdgeRule::Stop],
             extent: strip_extent(),
             len: nn,
             elem: ElemKind::Card,

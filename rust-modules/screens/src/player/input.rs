@@ -159,17 +159,15 @@ impl Scrub {
 /// "reset the HUD focus" one assignment that `start_playback` cannot half-do.
 #[derive(Clone, Copy)]
 pub struct HudNav {
-    pub focus: i32, // 0 = scrubber, 1 = right buttons (Subtitles/Audio/More), 2 = bottom tabs
-    pub btn: i32,   // 0 = Subtitles, 1 = Audio, 2 = More (within the buttons row)
-    pub tab: i32,   // 0 = Info, 1 = Chapters (within the tabs row)
+    pub focus: i32, // 0 = scrubber, 1 = the top menu
+    pub btn: i32,   // the focused menu item, in `player_hud::menu_items` order
 }
 impl HudNav {
-    /// Focus parked on the scrubber, both indexed rows on their first item — where a fresh
+    /// Focus parked on the scrubber, the menu on its first item — where a fresh
     /// session starts and where an auto-hidden HUD is re-parked.
     pub const HOME: HudNav = HudNav {
         focus: 0,
         btn: 0,
-        tab: 0,
     };
 }
 /// Everything the player remembers ABOUT the transport HUD between frames: its auto-hide deadline,
@@ -286,10 +284,8 @@ pub enum ScrubPress {
     Reveal,
     /// A scrub-seek hop/gesture on the bar.
     Jump,
-    /// Walk the control row.
+    /// Walk the top menu.
     Row,
-    /// Walk the bottom tabs.
-    Tabs,
     /// On the bar with nothing to seek through.
     Nothing,
 }
@@ -301,7 +297,6 @@ pub fn scrub_press(hud_vis: bool, focus: i32, seekable: bool) -> ScrubPress {
     }
     match focus {
         1 => ScrubPress::Row,
-        2 => ScrubPress::Tabs,
         _ if seekable => ScrubPress::Jump,
         _ => ScrubPress::Nothing,
     }
@@ -426,7 +421,7 @@ mod hud_visibility_tests {
     /// "hidden but focus == 1" is an ordinary state, not a corner.
     #[test]
     fn a_hidden_hud_spends_the_press_on_itself() {
-        for focus in [0, 1, 2] {
+        for focus in [0, 1] {
             for seekable in [false, true] {
                 assert_eq!(
                     scrub_press(false, focus, seekable),
@@ -435,13 +430,11 @@ mod hud_visibility_tests {
                 );
             }
         }
-        // …and visible, the same three cursors act — this is what the reveal DEFERS to, one press later
+        // …and visible, the same two cursors act — this is what the reveal DEFERS to, one press later
         assert_eq!(scrub_press(true, 0, true), ScrubPress::Jump);
         assert_eq!(scrub_press(true, 1, true), ScrubPress::Row);
-        assert_eq!(scrub_press(true, 2, true), ScrubPress::Tabs);
         // Duration belongs only to the scrubber. Indexed rows remain live without one.
         assert_eq!(scrub_press(true, 1, false), ScrubPress::Row);
-        assert_eq!(scrub_press(true, 2, false), ScrubPress::Tabs);
         // the scrubber itself with nothing to move through is still not a Jump
         assert_eq!(scrub_press(true, 0, false), ScrubPress::Nothing);
     }

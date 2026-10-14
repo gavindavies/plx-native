@@ -45,6 +45,11 @@ pub enum Action {
     MarkUnwatched(String),
     /// Play this file ignoring its resume point.
     PlayFromStart(String),
+    /// Play this file with its audio track at this position (file order) — a title-page choice,
+    /// kept with the file's other choices (`local_progress::Choices`).
+    ChooseAudio(String, u32),
+    /// …and with this subtitle.
+    ChooseSubtitle(String, plx_data::local_progress::SubtitleChoice),
 }
 
 impl Action {
@@ -52,6 +57,7 @@ impl Action {
     pub fn path(&self) -> &str {
         match self {
             Action::MarkWatched(p) | Action::MarkUnwatched(p) | Action::PlayFromStart(p) => p,
+            Action::ChooseAudio(p, _) | Action::ChooseSubtitle(p, _) => p,
         }
     }
 
@@ -60,7 +66,7 @@ impl Action {
         match self {
             Action::MarkWatched(_) => Some(true),
             Action::MarkUnwatched(_) => Some(false),
-            Action::PlayFromStart(_) => None,
+            Action::PlayFromStart(_) | Action::ChooseAudio(..) | Action::ChooseSubtitle(..) => None,
         }
     }
 
@@ -69,8 +75,17 @@ impl Action {
             Action::MarkWatched(_) => 3,
             Action::MarkUnwatched(_) => 4,
             Action::PlayFromStart(_) => 5,
+            Action::ChooseAudio(_, i) => 0x100 + *i,
+            Action::ChooseSubtitle(..) => 6,
         };
         c.u32(tag).str(self.path());
+        if let Action::ChooseSubtitle(_, choice) = self {
+            match choice {
+                plx_data::local_progress::SubtitleChoice::Off => c.u32(0),
+                plx_data::local_progress::SubtitleChoice::Track(n) => c.u32(1).u32(*n),
+                plx_data::local_progress::SubtitleChoice::File(name) => c.u32(2).str(name),
+            };
+        }
     }
 }
 
@@ -97,6 +112,8 @@ pub enum ItemRow {
     MarkWatched,
     MarkUnwatched,
     PlayFromStart,
+    /// The `n`th choice of a track menu.
+    Track(u32),
 }
 
 impl ItemRow {
@@ -113,6 +130,7 @@ impl FormId for ItemRow {
             ItemRow::MarkWatched => 3,
             ItemRow::MarkUnwatched => 4,
             ItemRow::PlayFromStart => 5,
+            ItemRow::Track(n) => 100 + n,
         })
     }
 }
@@ -151,6 +169,20 @@ fn build(path: &str, mark: PosterMark) -> ItemForm {
             Action::PlayFromStart(path.to_string()),
             Row::new(plx_ui::widgets::play_from_start_verb()).licon(Icon::PlayStart),
         );
+    Form::new().section(sec)
+}
+
+/// The rows of a track menu: one per choice, the one that will play checked. Nothing here is
+/// destructive, so the menu opens on its first row.
+fn build_tracks(rows: &[crate::registry::TrackRow], current: Option<usize>) -> ItemForm {
+    let mut sec = FormSection::new("");
+    for (i, row) in rows.iter().enumerate() {
+        let mut r = Row::new(row.label.clone()).checked(current == Some(i));
+        if !row.detail.is_empty() {
+            r = r.detail(row.detail.clone());
+        }
+        sec = sec.item(ItemRow::Track(i as u32), RowKind::Button, row.act.clone(), r);
+    }
     Form::new().section(sec)
 }
 
@@ -222,7 +254,12 @@ impl ItemMenuScreen {
         self.built = true;
         // a short list of one-line actions — BODY labels, not menu-size HEADLINE
         self.form.table.compact = true;
-        self.form.set(build(&self.arg.path, self.arg.mark), None);
+        let (form, keep) = match &self.arg.kind {
+            crate::registry::MenuKind::Watch(mark) => (build(&self.arg.path, *mark), None),
+            // a track menu opens on the choice that will play
+            crate::registry::MenuKind::Tracks { rows, current } => (build_tracks(rows, *current), current.map(|i| ItemRow::Track(i as u32))),
+        };
+        self.form.set(form, keep.as_ref());
     }
 
     /// Where focus starts, and where it falls back to when the key it had is gone — the table's
@@ -288,7 +325,10 @@ impl<H: AppLike> Machine<H> for ItemMenuScreen {
                 self.build_rows();
                 // The menu is the thing the Home hold hint teaches; once ANY card screen has
                 // opened one the lesson is learned and the hint retires (`ui::hold_hint::learned`).
-                plx_ui::hold_hint::mark_learned();
+                // A title page's track menu is opened by a press, not a hold, and teaches nothing.
+                if matches!(self.arg.kind, crate::registry::MenuKind::Watch(_)) {
+                    plx_ui::hold_hint::mark_learned();
+                }
             }
             ScreenEvent::Tick(tick) => {
                 self.form.table.sel = cx
@@ -680,7 +720,7 @@ mod tests {
     }
 
     fn arg(path: &str, mark: PosterMark) -> ItemMenuArg {
-        ItemMenuArg { path: path.into(), mark, host: EntryId(1), focus: None, anchor: [0; 4] }
+        ItemMenuArg { path: path.into(), kind: crate::registry::MenuKind::Watch(mark), host: EntryId(1), focus: None, anchor: [0; 4] }
     }
 
     fn screen_with(path: &str, mark: PosterMark) -> ItemMenuScreen {
@@ -749,6 +789,24 @@ mod tests {
             },
         });
         step_ev(s, &ev)
+    }
+
+    /// A title page's track menu opens on the choice that will play, commits the row pressed, and
+    /// teaches nothing about holding OK.
+    #[test]
+    fn a_track_menu_opens_on_its_checked_row_and_commits_the_choice() {
+        use crate::registry::{MenuKind, TrackRow};
+        use plx_data::local_progress::SubtitleChoice;
+        plx_ui::hold_hint::reset_learned_for_test();
+        let row = |label: &str, choice| TrackRow { label: label.into(), detail: String::new(), act: Action::ChooseSubtitle("/a.mkv".into(), choice) };
+        let rows = vec![row("Off", SubtitleChoice::Off), row("English", SubtitleChoice::Track(0)), row("German", SubtitleChoice::File("a.de.srt".into()))];
+        let mut screen = ItemMenuScreen::new(EntryId(7), ItemMenuArg { path: "/a.mkv".into(), kind: MenuKind::Tracks { rows, current: Some(2) }, host: EntryId(1), focus: None, anchor: [0; 4] });
+        step_ev(&mut screen, &ScreenEvent::Mount);
+        assert!(!plx_ui::hold_hint::learned(), "a press opened it, not a hold");
+        let seat = with_cx(|cx| <ItemMenuScreen as Focusable<HostFixture>>::seat(&screen, GroupId(0), Placed { rect: Rect::FULL, rest_rect: Rect::FULL, clip: Rect::FULL, index: None }, cx));
+        assert_eq!(seat.elem, ItemRow::Track(2).focus_key(), "opens on the checked row");
+        let req = commit(&mut screen, ItemRow::Track(1).focus_key());
+        assert_eq!(req.act, Action::ChooseSubtitle("/a.mkv".into(), SubtitleChoice::Track(0)));
     }
 
     /// **Opening the menu from ANY card screen retires Home's "Hold OK for options" hint**: the
