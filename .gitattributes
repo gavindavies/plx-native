@@ -1,1 +1,0 @@
-design/demo-library/sources/*.mp4 filter=lfs diff=lfs merge=lfs -text

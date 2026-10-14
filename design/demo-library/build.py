@@ -49,7 +49,7 @@ STILL = (1280, 720)
 
 
 def cache_dir():
-    """Where the sources live: `sources/` beside this script, committed (Sintel through Git LFS),
+    """Where the sources live: `sources/` beside this script, committed (Sintel as 95 MiB parts),
     so a checkout builds the library without a download. `PITV_DEMO_CACHE` points elsewhere."""
     env = os.environ.get("PITV_DEMO_CACHE")
     return pathlib.Path(env) if env else HERE
@@ -79,6 +79,13 @@ def fetch(aid, asset):
     """The verified local copy of one asset, downloading it if it is missing or wrong."""
     dst = source_path(aid, asset)
     asset = stored(asset)
+    # A file over GitHub's 100 MiB limit (the film) is committed as numbered byte-for-byte parts.
+    parts = sorted(dst.parent.glob(dst.name + ".part-*"))
+    if parts and not dst.exists():
+        with open(dst, "wb") as out:
+            for part in parts:
+                with open(part, "rb") as f:
+                    shutil.copyfileobj(f, out)
     if dst.exists() and dst.stat().st_size == asset["bytes"] and sha256(dst) == asset["sha256"]:
         return dst
     dst.parent.mkdir(parents=True, exist_ok=True)

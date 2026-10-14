@@ -23,7 +23,14 @@
    "height": 1000,
    "licence": "CC BY 3.0",
    "author": "Blender Foundation",
-   "attribution": "(c) copyright Blender Foundation | www.bigbuckbunny.org"
+   "attribution": "(c) copyright Blender Foundation | www.bigbuckbunny.org",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e6/Big.Buck.Bunny.-.Landscape.png/1280px-Big.Buck.Bunny.-.Landscape.png",
+    "sha256": "fdb6b44d8e94797267487dff45d5309fcf766697f83613fdfbbb121c36871be0",
+    "bytes": 1251472,
+    "width": 1280,
+    "height": 667
+   }
   },
   "big-buck-bunny-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/c/c5/Big_buck_bunny_poster_big.jpg",
@@ -35,7 +42,14 @@
    "height": 2122,
    "licence": "CC BY 3.0",
    "author": "Blender Foundation",
-   "attribution": "(c) copyright Blender Foundation | www.bigbuckbunny.org"
+   "attribution": "(c) copyright Blender Foundation | www.bigbuckbunny.org",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Big_buck_bunny_poster_big.jpg/1280px-Big_buck_bunny_poster_big.jpg",
+    "sha256": "8e03d33d3d07fc9873dc2fd94f68ede5a966b2b72a4d190352b6e78d5b86db11",
+    "bytes": 256755,
+    "width": 1280,
+    "height": 1811
+   }
   },
   "bs-caminandes-3-header": {
    "url": "https://studio.blender.org/files/public/header/project/2f/89/2f897cfe4d6092c3ce77566de98019e1.jpg",
@@ -138,7 +152,14 @@
    "height": 1080,
    "licence": "CC BY 3.0",
    "author": "Pablo Vazquez, Beorn Leonard, Francesco Siddi",
-   "attribution": "Pablo Vazquez, Beorn Leonard, Francesco Siddi"
+   "attribution": "Pablo Vazquez, Beorn Leonard, Francesco Siddi",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/61/Pablo_Vazquez_-_Caminandes_-_Episode_1_-_Llama_Drama_-_Cover_thumbnail.png/1280px-Pablo_Vazquez_-_Caminandes_-_Episode_1_-_Llama_Drama_-_Cover_thumbnail.png",
+    "sha256": "dfe2d997181853e6b63acd62ec9f591fa7e76e6ba165b080f60208284a954cb3",
+    "bytes": 1154847,
+    "width": 1280,
+    "height": 720
+   }
   },
   "caminandes-s01e02": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/a/a8/Blender_Foundation_-_Caminandes_-_Episode_2_-_Gran_Dillama_-_Cover_thumbnail.png",
@@ -162,7 +183,14 @@
    "height": 1080,
    "licence": "CC BY 4.0",
    "author": "Blender Foundation",
-   "attribution": "Blender Foundation, caminandes.com"
+   "attribution": "Blender Foundation, caminandes.com",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/aa/Blender_Foundation_-_Caminandes_-_Episode_3_-_Llamigos_-_Cover_thumbnail.png/1280px-Blender_Foundation_-_Caminandes_-_Episode_3_-_Llamigos_-_Cover_thumbnail.png",
+    "sha256": "98a96c5d670e8ff375aa67a7fea2f084541c9e53d633852532dea8f136923daf",
+    "bytes": 1490898,
+    "width": 1280,
+    "height": 720
+   }
   },
   "charge-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/f/fd/Charge-movie_poster.jpg",
@@ -174,7 +202,14 @@
    "height": 6400,
    "licence": "CC BY 4.0",
    "author": "Blender Studio",
-   "attribution": "Blender Studio"
+   "attribution": "Blender Studio",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fd/Charge-movie_poster.jpg/1280px-Charge-movie_poster.jpg",
+    "sha256": "f0a32bcfa603d8e431e454c16a3b7ded051f38d47294b80b7bf12106bdedc3d5",
+    "bytes": 461155,
+    "width": 1280,
+    "height": 1810
+   }
   },
   "cosmos-laundromat-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/c/c5/CosmosLaundromatPoster.jpg",
@@ -186,7 +221,14 @@
    "height": 2172,
    "licence": "CC BY 4.0",
    "author": "Andy Goralczyk and the Blender Foundation",
-   "attribution": "CC-BY 2015, Blender Foundation, cloud.blender.org"
+   "attribution": "CC-BY 2015, Blender Foundation, cloud.blender.org",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/CosmosLaundromatPoster.jpg/1280px-CosmosLaundromatPoster.jpg",
+    "sha256": "269c9d0ffea2124541bf3305e16272779939b8bc59fe2dea69c0d3ab8237efc3",
+    "bytes": 399729,
+    "width": 1280,
+    "height": 1811
+   }
   },
   "elephants-dream-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/0/0c/ElephantsDreamPoster.jpg",
@@ -210,7 +252,14 @@
    "height": 2937,
    "licence": "Public domain",
    "author": "Columbia Pictures Corp",
-   "attribution": "Columbia Pictures Corp"
+   "attribution": "Columbia Pictures Corp",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6e/His_Girl_Friday_%281940_poster%29.jpg/1280px-His_Girl_Friday_%281940_poster%29.jpg",
+    "sha256": "6dca4d9bbc4613cf3fe3b4c89fdf2461e041728cc85b3a8fc0ef8b8058ed2816",
+    "bytes": 811835,
+    "width": 1280,
+    "height": 1972
+   }
   },
   "metropolis-1927-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/7/78/1927_Boris_Bilinski_%281900-1948%29_Plakat_f%C3%BCr_den_Film_Metropolis%2C_Staatliche_Museen_zu_Berlin.jpg",
@@ -222,7 +271,14 @@
    "height": 1080,
    "licence": "Public domain",
    "author": "Boris Konstantinovitch Bilinsky (1900-1948)",
-   "attribution": "Boris Konstantinovitch Bilinsky (1900-1948)"
+   "attribution": "Boris Konstantinovitch Bilinsky (1900-1948)",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/78/1927_Boris_Bilinski_%281900-1948%29_Plakat_f%C3%BCr_den_Film_Metropolis%2C_Staatliche_Museen_zu_Berlin.jpg/1280px-1927_Boris_Bilinski_%281900-1948%29_Plakat_f%C3%BCr_den_Film_Metropolis%2C_Staatliche_Museen_zu_Berlin.jpg",
+    "sha256": "cf8f2863aca60dd88b262a3adb86c32d0287be1eaf480232880896ec9d2f56ab",
+    "bytes": 317344,
+    "width": 1280,
+    "height": 947
+   }
   },
   "night-of-the-living-dead-1968-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/a/a7/Night_Of_The_Living_Dead_%281968%29_-_Poster.jpg",
@@ -234,7 +290,14 @@
    "height": 1319,
    "licence": "Public domain",
    "author": "Unknown (Image Ten / Continental)",
-   "attribution": "Unknown (Image Ten / Continental)"
+   "attribution": "Unknown (Image Ten / Continental)",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/Night_Of_The_Living_Dead_%281968%29_-_Poster.jpg/500px-Night_Of_The_Living_Dead_%281968%29_-_Poster.jpg",
+    "sha256": "7aed4db201bb6fd4ebd7f878325f4787827bed5e755f576417cda986721c551d",
+    "bytes": 158724,
+    "width": 500,
+    "height": 719
+   }
   },
   "nosferatu-1922-backdrop": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/b/b8/Nosferatu_Doorway_Frame.webp",
@@ -270,7 +333,14 @@
    "height": 4766,
    "licence": "Public domain",
    "author": "Reynolds Pictures, Inc.",
-   "attribution": "Reynolds Pictures, Inc."
+   "attribution": "Reynolds Pictures, Inc.",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/bd/Plan_9_from_Outer_Space%2C_poster%2C_gtfy.07034.jpg/1280px-Plan_9_from_Outer_Space%2C_poster%2C_gtfy.07034.jpg",
+    "sha256": "552d3cee1d4ab3c616eb3a1cf9a8724c611430219389990366cece8ec530aa48",
+    "bytes": 551693,
+    "width": 1280,
+    "height": 1996
+   }
   },
   "safety-last-1923-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/5/5e/Safety_last_poster.jpg",
@@ -294,7 +364,14 @@
    "height": 1576,
    "licence": "Public domain",
    "author": "Unknown",
-   "attribution": "Unknown"
+   "attribution": "Unknown",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Sherlock_jr_poster.jpg/960px-Sherlock_jr_poster.jpg",
+    "sha256": "4eda8d74df6ddb7439ba6652954d701e5d0c4d66565a27273a8a9092ca8739e9",
+    "bytes": 231672,
+    "width": 960,
+    "height": 1513
+   }
   },
   "sintel-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/8/8f/Sintel_poster.jpg",
@@ -343,7 +420,14 @@
    "height": 6400,
    "licence": "CC BY 4.0",
    "author": "Blender Studio",
-   "attribution": "Blender Studio"
+   "attribution": "Blender Studio",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e5/Sprite_Fright-movie_poster.jpg/1280px-Sprite_Fright-movie_poster.jpg",
+    "sha256": "24f4fccabc4e40572613c70a95251ba08317a3d972ad56fb67965ba57b5e7d06",
+    "bytes": 465417,
+    "width": 1280,
+    "height": 1810
+   }
   },
   "tears-of-steel-frame-07": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/7/7b/Tears_of_Steel_frame_07_3f.jpg",
@@ -355,7 +439,14 @@
    "height": 1600,
    "licence": "CC BY 3.0",
    "author": "Blender Foundation / Project Mango",
-   "attribution": "Blender Foundation / Project Mango"
+   "attribution": "Blender Foundation / Project Mango",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Tears_of_Steel_frame_07_3f.jpg/1280px-Tears_of_Steel_frame_07_3f.jpg",
+    "sha256": "20eab6704b4f8f9c60b5319dec32fdc2b10c4f8ec8bbceb853df4b7011bbfefc",
+    "bytes": 119933,
+    "width": 1280,
+    "height": 533
+   }
   },
   "tears-of-steel-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/7/70/Tos-poster.png",
@@ -367,7 +458,14 @@
    "height": 4000,
    "licence": "CC BY 3.0",
    "author": "Blender Foundation / Project Mango",
-   "attribution": "Blender Foundation / Project Mango"
+   "attribution": "Blender Foundation / Project Mango",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/70/Tos-poster.png/1280px-Tos-poster.png",
+    "sha256": "99b469e29c82e39dfe28bf458892c3b7410bd8700ff518bc5a935b3bb546afc5",
+    "bytes": 4101138,
+    "width": 1280,
+    "height": 1896
+   }
   },
   "the-cabinet-of-dr-caligari-1920-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/e/e1/Das_Kabinett_des_Doktor_Caligari_1920_Poster.jpg",
@@ -379,7 +477,14 @@
    "height": 1327,
    "licence": "Public domain",
    "author": "Rudolf Ledl and Fritz Bernhard",
-   "attribution": "Rudolf Ledl and Fritz Bernhard"
+   "attribution": "Rudolf Ledl and Fritz Bernhard",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e1/Das_Kabinett_des_Doktor_Caligari_1920_Poster.jpg/960px-Das_Kabinett_des_Doktor_Caligari_1920_Poster.jpg",
+    "sha256": "60548df6a1f0450dacfaf14fc849b5949544c38c947f9cca64b4483cc5b88fc5",
+    "bytes": 292491,
+    "width": 960,
+    "height": 1274
+   }
   },
   "the-general-1926-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/3/36/The_General_%281926%29_-_Movie_Poster.png",
@@ -403,7 +508,14 @@
    "height": 2939,
    "licence": "Public domain",
    "author": "First National",
-   "attribution": "First National"
+   "attribution": "First National",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b5/The_Kid_%281921%29_poster.jpg/1280px-The_Kid_%281921%29_poster.jpg",
+    "sha256": "df23ed2a22634ac6a27ce32cae5a26c48096faed174fdf03fb246c66aea7f8f6",
+    "bytes": 671008,
+    "width": 1280,
+    "height": 1889
+   }
   },
   "coffee-run-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/a/a7/Coffee_Run-movie_poster.png",
@@ -415,7 +527,14 @@
    "height": 8640,
    "licence": "CC BY 4.0",
    "author": "Hjalti Hjalmarsson (Blender Cloud)",
-   "attribution": "Hjalti Hjalmarsson (Blender Cloud)"
+   "attribution": "Hjalti Hjalmarsson (Blender Cloud)",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/Coffee_Run-movie_poster.png/1280px-Coffee_Run-movie_poster.png",
+    "sha256": "24e6f47c8b9c9a8f9175eec17d8f82020c148696fc4af9318da1a39fb6f40a27",
+    "bytes": 1818041,
+    "width": 1280,
+    "height": 1920
+   }
   },
   "the-daily-dweebs-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/0/0f/The_Daily_Dweebs-movie_poster.png",
@@ -427,7 +546,14 @@
    "height": 1024,
    "licence": "CC BY 4.0",
    "author": "Hjalti Hjalmarsson (Blender Cloud)",
-   "attribution": "Hjalti Hjalmarsson (Blender Cloud)"
+   "attribution": "Hjalti Hjalmarsson (Blender Cloud)",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/The_Daily_Dweebs-movie_poster.png/500px-The_Daily_Dweebs-movie_poster.png",
+    "sha256": "bf8fe24933d52df10326444c182783ceddbc9c7b123e6ed84253345c1b18fb38",
+    "bytes": 443729,
+    "width": 500,
+    "height": 705
+   }
   },
   "hero-still-red": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/c/c5/Hero_-_screenshot-hero_red.png",
@@ -439,7 +565,14 @@
    "height": 858,
    "licence": "CC BY 4.0",
    "author": "Blender Foundation",
-   "attribution": "Blender Foundation"
+   "attribution": "Blender Foundation",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Hero_-_screenshot-hero_red.png/1280px-Hero_-_screenshot-hero_red.png",
+    "sha256": "7570a7760ef4e8638c19ee0a5927056426017084da60aa2344fc94439a3a1628",
+    "bytes": 463945,
+    "width": 1280,
+    "height": 536
+   }
   },
   "glass-half-still-style": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/2/2c/Glass_Half_-_screenshot-Min_and_Max_artwork_style.png",
@@ -451,7 +584,14 @@
    "height": 2160,
    "licence": "CC BY 4.0",
    "author": "Blender Foundation",
-   "attribution": "Blender Foundation"
+   "attribution": "Blender Foundation",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2c/Glass_Half_-_screenshot-Min_and_Max_artwork_style.png/1280px-Glass_Half_-_screenshot-Min_and_Max_artwork_style.png",
+    "sha256": "56d354c641af726eb811aae6e54d55f38100505504a23a5fba0d2ac821a2757b",
+    "bytes": 586842,
+    "width": 1280,
+    "height": 720
+   }
   },
   "bs-coffee-run-header": {
    "url": "https://studio.blender.org/files/public/header/project/7a/43/7a43fa6b0bc44e62f1cbb21473800e07.png",
@@ -528,7 +668,14 @@
    "height": 2250,
    "licence": "CC0 1.0",
    "author": "Nina Paley",
-   "attribution": "Nina Paley"
+   "attribution": "Nina Paley",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b3/05.RamSitaGods.png/1280px-05.RamSitaGods.png",
+    "sha256": "fbfde8e417df70dfc38e27a65cc376a144dee140129baa0734bd06ce27169b15",
+    "bytes": 840252,
+    "width": 1280,
+    "height": 720
+   }
   },
   "seder-masochism-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/0/0b/SederMasochismPoster.jpg",
@@ -540,7 +687,14 @@
    "height": 1800,
    "licence": "CC0 1.0",
    "author": "Nina Paley",
-   "attribution": "Nina Paley"
+   "attribution": "Nina Paley",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/SederMasochismPoster.jpg/500px-SederMasochismPoster.jpg",
+    "sha256": "babf99b7ebad320968e848c04fe46e7a37d2ccc56d4f0933e07c0a233961b93d",
+    "bytes": 137164,
+    "width": 500,
+    "height": 750
+   }
   },
   "seder-masochism-still-moses-splits-sea": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/7/73/Moses-Splits-Sea_by_Nina_Paley.jpg",
@@ -552,7 +706,14 @@
    "height": 2160,
    "licence": "CC0 1.0",
    "author": "Nina Paley",
-   "attribution": "Nina Paley"
+   "attribution": "Nina Paley",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/73/Moses-Splits-Sea_by_Nina_Paley.jpg/1280px-Moses-Splits-Sea_by_Nina_Paley.jpg",
+    "sha256": "8c24a6da715d5f884301799fb39687c363d15d392bcecbf56a11b912c8c3fbf4",
+    "bytes": 124044,
+    "width": 1280,
+    "height": 720
+   }
   },
   "esa-hubble-heic1608a": {
    "url": "https://cdn.esahubble.org/archives/images/screen/heic1608a.jpg",
@@ -1085,7 +1246,14 @@
    "licence": "Public domain",
    "author": "Horst von Harbou",
    "attribution": "Horst von Harbou",
-   "notes": "A production photograph of the Maschinenmensch, not a frame of the film."
+   "notes": "A production photograph of the Maschinenmensch, not a frame of the film.",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3c/Maschinenmensch_in_a_scene_from_Metropolis.jpg/960px-Maschinenmensch_in_a_scene_from_Metropolis.jpg",
+    "sha256": "1fab1336c8e216796f8416e15ef75dfc04758152645dd95da4ede862c76ee114",
+    "bytes": 94310,
+    "width": 960,
+    "height": 600
+   }
   },
   "night-of-the-living-dead-1968-frame": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/24/Night_of_the_Living_Dead_%281968%29.webm/1280px-seek%3D1677-Night_of_the_Living_Dead_%281968%29.webm.jpg",
@@ -1150,7 +1318,14 @@
    "licence": "Public domain",
    "author": "Ed Wood Prod. / Valiant Pictures",
    "attribution": "Ed Wood Prod. / Valiant Pictures",
-   "notes": "A publicity still, not a frame of the film (the Commons description calls it a publicity still)."
+   "notes": "A publicity still, not a frame of the film (the Commons description calls it a publicity still).",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Plan_9_from_Outer_Space_still_1.jpg/960px-Plan_9_from_Outer_Space_still_1.jpg",
+    "sha256": "e01348956eb17f9f167e850e5b64e933951210e1097b8b79f4f63ed38f7c6d58",
+    "bytes": 121148,
+    "width": 960,
+    "height": 685
+   }
   },
   "the-kid-1921-frame": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/The_Kid_%281921%29.webm/1280px-seek%3D2307-The_Kid_%281921%29.webm.jpg",
@@ -1176,7 +1351,14 @@
    "licence": "Public domain",
    "author": "Hal Roach Studios",
    "attribution": "Hal Roach Studios",
-   "notes": "Commons records it as a screenshot of the film."
+   "notes": "Commons records it as a screenshot of the film.",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/55/Safety_Last_%281923%29_sceenshot.jpg/1280px-Safety_Last_%281923%29_sceenshot.jpg",
+    "sha256": "8ef0eae1228a8ea9ae5005492454cef23b748ca7c715b430d83c1be8c14cfd6e",
+    "bytes": 231574,
+    "width": 1280,
+    "height": 934
+   }
   },
   "the-cabinet-of-dr-caligari-1920-still": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/9/96/The_Cabinet_of_Dr_Caligari_Werner_Krauss.jpg",
@@ -1202,7 +1384,14 @@
    "licence": "Public domain",
    "author": "Georges Méliès",
    "attribution": "Georges Méliès",
-   "notes": "A production still printed in publicity materials for a Georges Méliès exhibition (La Caixa Foundation), not a frame cut from the film."
+   "notes": "A production still printed in publicity materials for a Georges Méliès exhibition (La Caixa Foundation), not a frame cut from the film.",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d9/M%C3%A9li%C3%A8s_Trip_to_the_Moon_cannon_still.jpg/1280px-M%C3%A9li%C3%A8s_Trip_to_the_Moon_cannon_still.jpg",
+    "sha256": "be54d3530cff90482b5781dbe072a7c0596583ca334b0fe4581c720e22bba651",
+    "bytes": 314032,
+    "width": 1280,
+    "height": 933
+   }
   },
   "bs-dailydweebs-header": {
    "url": "https://studio.blender.org/files/public/header/project/71/13/71139b6aa0eee73518288c3a8a756a90.png",
@@ -1410,7 +1599,14 @@
    "licence": "Public domain",
    "author": "George A. Romero",
    "attribution": "George A. Romero",
-   "notes": "The title screen of the film (a frame of the Internet Archive copy), on Commons as public domain; the lettering is cut from it."
+   "notes": "The title screen of the film (a frame of the Internet Archive copy), on Commons as public domain; the lettering is cut from it.",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/Night_of_the_Living_Dead_%281968%29_Title_Screen.png/1280px-Night_of_the_Living_Dead_%281968%29_Title_Screen.png",
+    "sha256": "33f2a104cda8e6d8c6a46439ca2dc261a33a9336edba27498db4db81dd106ce2",
+    "bytes": 1512761,
+    "width": 1280,
+    "height": 960
+   }
   },
   "a-trip-to-the-moon-1902-title-card": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/2/2b/Voyage_dans_la_lune_title_card.png",
