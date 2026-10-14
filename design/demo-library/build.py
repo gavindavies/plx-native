@@ -155,12 +155,28 @@ def derive_image(src, dst, size, recipe):
 
 
 def derive_logo(src, dst):
-    """A title logo, alpha kept, no wider than LOGO_MAX_W."""
+    """A title logo, alpha kept, no wider than LOGO_MAX_W. ffmpeg cannot decode every WebP (an
+    animated or extended one); Pillow is tried next when it is installed. A logo neither can read
+    is skipped with a warning: PiTV draws the title as type instead, so it is never worth failing
+    the build over."""
     if dst.exists():
         return
     tmp = dst.with_name(dst.stem + ".part.png")
-    ffmpeg(["-i", str(src), "-vf", f"scale='min({LOGO_MAX_W},iw)':-2:flags=lanczos,format=rgba",
-            "-frames:v", "1", str(tmp)])
+    try:
+        ffmpeg(["-i", str(src), "-vf", f"scale='min({LOGO_MAX_W},iw)':-2:flags=lanczos,format=rgba",
+                "-frames:v", "1", str(tmp)])
+    except subprocess.CalledProcessError:
+        tmp.unlink(missing_ok=True)
+        try:
+            from PIL import Image
+            with Image.open(src) as im:
+                im = im.convert("RGBA")
+                if im.width > LOGO_MAX_W:
+                    im = im.resize((LOGO_MAX_W, round(im.height * LOGO_MAX_W / im.width)), Image.LANCZOS)
+                im.save(tmp)
+        except Exception as e:  # noqa: BLE001 — any reason at all means "no logo", never a failed build
+            print(f"  logo skipped ({src.name}: {e})", flush=True)
+            return
     os.replace(tmp, dst)
 
 

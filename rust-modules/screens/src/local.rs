@@ -8,7 +8,8 @@
 //!
 //! **Two layouts, chosen by what the folder holds** (`PiTV Redesign.dc.html`, 1b):
 //!
-//! - **Shelves**, when the folder groups its titles: by collection (an `.nfo`'s `<set>`) and by
+//! - **Shelves**, when the folder groups its titles: by collection (an `.nfo`'s `<set>`, in name
+//!   order) and by
 //!   plain subfolder (a folder that is not a show — `Silent Classics/`, `Season 01/`). Each group
 //!   is one horizontal [`Shelf`](plx_ui::cards::Shelf), in that order, and whatever is left
 //!   (titles in no collection, shows) is a last shelf under the folder's own name. A subfolder's
@@ -93,7 +94,12 @@ const PREVIEW_TITLE_TOP: f32 = 248.0;
 const PREVIEW_META_TOP: f32 = 344.0;
 /// The preview's column: the mock's 1100.
 const PREVIEW_W: f32 = 1100.0;
-/// Where a shelf leaving upward is cut: just above the pinned heading, below the preview's facts.
+/// Air under every shelf (counted in its block), so the shelf above a pinned one ends well clear
+/// of the heading a popped poster lifts.
+const SHELF_FOOT: f32 = 30.0;
+/// Where a shelf leaving upward is cut: under the shelf above (it ends at `SHELF_TOP -
+/// SHELF_FOOT - cards::LABEL_BAND_COLLAPSED`) and above the pinned heading, which a popped poster
+/// lifts by up to `SHELF`'s heading lift.
 const SHELF_CUT: f32 = SHELF_TOP - 36.0;
 /// How many genres the facts line names.
 const GENRES_SHOWN: usize = 3;
@@ -216,6 +222,8 @@ fn groups(entries: &[Entry], name: &str, sub: impl Fn(&Path) -> Option<Arc<Vec<E
             None => out.push(Group { heading: e.collection().to_owned(), entries: vec![e.clone()], stills: false }),
         }
     }
+    // Collections in name order: the listing's order is its files', which says nothing about them.
+    out.sort_by(|a, b| plx_data::local::natural_cmp(&a.heading, &b.heading));
     for e in entries.iter().filter(|e| plain(e)) {
         let Some(inner) = sub(&e.path).filter(|l| !l.is_empty()) else { continue };
         let season = e.path.file_name().is_some_and(|n| plx_data::local::is_season_folder(&n.to_string_lossy()));
@@ -232,7 +240,7 @@ fn groups(entries: &[Entry], name: &str, sub: impl Fn(&Path) -> Option<Arc<Vec<E
 /// The scroll that pins shelf `n`'s heading at [`SHELF_TOP`]: the settled height of every shelf
 /// above it (each collapsed, since only the focused one holds its band open).
 fn pinned_scroll(lists: &[List], n: usize) -> f32 {
-    lists.iter().take(n).map(|l| SHELF_HEADING + l.style.h + cards::under_band(0.0)).sum()
+    lists.iter().take(n).map(|l| SHELF_HEADING + l.style.h + cards::under_band(0.0) + SHELF_FOOT).sum()
 }
 
 // ---- content ----------------------------------------------------------------------------------
@@ -524,6 +532,10 @@ impl<H: ContentLike> StackPage<H> for Page {
         SHELF_TOP
     }
 
+    fn shelf_foot(&self, k: Sec) -> f32 {
+        if matches!(k, Sec::Shelf(_)) { SHELF_FOOT } else { 0.0 }
+    }
+
     fn draw_heading(&self, k: Sec, f: &mut DrawFrame<'_, '_, H>, r: Rect, lift: f32) {
         let Sec::Shelf(n) = k else { return };
         let Some(list) = self.lists.get(n as usize) else { return };
@@ -574,8 +586,12 @@ impl LocalScreen {
     pub const SHAPE: &'static str = "LocalScreen{entry:u32,path:String,next_elem:u32,stack:Stack{scroll:{pos:f32,vel:f32},target:f32,sections:[Grid{bands,pop}|Shelf{pop,scroll}]}}";
 
     pub fn new(entry: EntryId, instance: InstanceId, arg: &LocalArg) -> Self {
-        let title = if arg.path.is_empty() {
+        let roots = plx_data::local::roots();
+        let title = if arg.path.is_empty() && roots.len() != 1 {
             plx_platform::i18n::msg::browse_local_title().to_owned()
+        } else if arg.path.is_empty() {
+            // a library of one folder is that folder: its name is the page's
+            roots[0].file_name().map_or_else(|| plx_platform::i18n::msg::browse_local_title().to_owned(), |n| n.to_string_lossy().into_owned())
         } else {
             Path::new(&arg.path).file_name().map_or_else(|| arg.path.clone(), |n| n.to_string_lossy().into_owned())
         };
@@ -665,10 +681,12 @@ impl<H: ContentLike> Machine<H> for LocalScreen {
             if self.drawn != Some(self.page.changes) {
                 fx.invalidate(Provenance::Landing(fx.from()));
             }
-            if !self.seated && self.page.ready() {
+            // A page of shelves may be ready before any shelf is: its subfolders' listings land
+            // after its own, so it seats on the first card there is, whenever that is.
+            let first = self.page.lists.iter().find_map(|l| l.elems.first()).copied();
+            if !self.seated && self.page.ready() && first.is_some() {
                 self.seated = true;
                 let ours = cx.focus.current.is_some_and(|key| key.entry == self.page.entry);
-                let first = self.page.lists.first().and_then(|l| l.elems.first()).copied();
                 if let (false, Some(first)) = (ours, first) {
                     fx.push(Fx::Deliver(MachineId::Instance(self.instance), Delivery::Screen(ScreenEvent::Enter(
                         Enter::Fresh { focus: FocusTarget::Elem(FocusKey { entry: self.page.entry, elem: first }) }))));
@@ -821,6 +839,7 @@ mod tests {
     #[test]
     fn collections_then_subfolders_then_the_rest_make_the_shelves() {
         let listing = vec![
+            film("A Trip to the Moon", "Méliès"),
             film("Charge", "Blender Open Movies"),
             film("Night of the Living Dead", ""),
             folder("Silent Classics", false),
@@ -834,9 +853,10 @@ mod tests {
         let shape: Vec<(&str, Vec<&str>)> = g.iter().map(|g| (g.heading.as_str(), g.entries.iter().map(|e| e.title.as_str()).collect())).collect();
         assert_eq!(shape, [
             ("Blender Open Movies", vec!["Charge", "Spring"]),
+            ("Méliès", vec!["A Trip to the Moon"]),
             ("Silent Classics", vec!["Nosferatu"]),
             ("Films", vec!["Night of the Living Dead", "Caminandes"]),
-        ], "a subfolder still being read has no shelf yet; a show is a card, not a shelf");
+        ], "collections by name, then subfolders (one still being read has no shelf yet); a show is a card");
         assert!(g.iter().all(|g| !g.stills));
     }
 
@@ -855,9 +875,11 @@ mod tests {
         let list = |style: &'static RowStyle| List { heading: String::new(), style, entries: Vec::new(), elems: Vec::new(), index: HashMap::new(), marks: Vec::new() };
         let lists = [list(&RowStyle::SHELF), list(&RowStyle::STILL_SHELF), list(&RowStyle::SHELF)];
         assert_eq!(pinned_scroll(&lists, 0), 0.0, "the first shelf rests where the page opens");
-        let poster = SHELF_HEADING + RowStyle::SHELF.h + cards::under_band(0.0);
-        let still = SHELF_HEADING + RowStyle::STILL_SHELF.h + cards::under_band(0.0);
+        let poster = SHELF_HEADING + RowStyle::SHELF.h + cards::under_band(0.0) + SHELF_FOOT;
+        let still = SHELF_HEADING + RowStyle::STILL_SHELF.h + cards::under_band(0.0) + SHELF_FOOT;
         assert_eq!(pinned_scroll(&lists, 1), poster);
         assert_eq!(pinned_scroll(&lists, 2), poster + still);
+        assert!(SHELF_TOP - SHELF_FOOT - cards::LABEL_BAND_COLLAPSED < SHELF_CUT, "the shelf above ends under the cut");
+        assert!(SHELF_CUT < SHELF_TOP - cards::heading_lift_max(&RowStyle::SHELF), "a lifted heading stays above it");
     }
 }

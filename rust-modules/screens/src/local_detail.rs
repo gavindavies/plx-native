@@ -585,6 +585,8 @@ impl<H: ContentLike> Screen<H> for LocalDetailScreen {
         self.drawn = Some(self.page.changes);
         let p = f.painter.alpha(f.page_alpha);
         let scroll = self.stack.scroll();
+        // The surface stands still under a page that has scrolled its backdrop up off the top.
+        p.rrect(Rect::FULL, 0.0, 0.0, theme::SURFACE_APP);
         self.ground.draw(p.translate(0.0, -scroll));
         self.draw_crumb(p.translate(0.0, -scroll), f.measure);
         self.draw_column(f, scroll);

@@ -1422,7 +1422,7 @@ pub fn keyline_chip(p: Painter, x: f32, cy: f32, text: &str, col: [f32; 4], meas
 // ---- Facts line: a title's one line of facts, and where it would resume ------------------------
 
 /// The gap between the facts and the resume run, which carries its own `·`.
-const FACTS_SEP: &str = "  ·  ";
+const FACTS_SEP: &str = " · ";
 /// The ▶ before a resume run, as a share of the line's type size, and the air after it.
 const FACTS_PLAY_SHARE: f32 = 0.72;
 const FACTS_PLAY_GAP: f32 = 8.0;
