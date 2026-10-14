@@ -15,7 +15,9 @@ pixel size, licence, author, attribution). This script
         Films/<Title> (<Year>)/poster.jpg  and  <Title> (<Year>).mkv
         TV Shows/<Show>/poster.jpg
         TV Shows/<Show>/Season 01/<Show> - S01E01 - <Episode>.mkv  and  .jpg beside it
-    with posters and stills cut per the catalog's recipes;
+    with posters and stills cut per the catalog's recipes, and each title's description in the
+    Kodi layout PiTV reads (`rust-modules/data/src/local_meta.rs`): `movie.nfo` / `tvshow.nfo` /
+    `<episode>.nfo`, a `fanart.jpg` backdrop and, where the catalog has one, a `clearlogo.png`;
   * gives every title a video: the real film where the catalog pins one (Sintel, 282 MB; skip it
     with --no-films), else a short H.264/AAC clip that pans across the title's own key art, with
     an English subtitle file holding its synopsis;
@@ -36,6 +38,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+from xml.sax.saxutils import escape
 
 HERE = pathlib.Path(__file__).resolve().parent
 UA = "PiTV/1.0 (https://github.com/gavindavies/plx-native)"
@@ -46,6 +49,8 @@ POLITE_PAUSE = 6.0
 RETRY_AFTER_CAP = 600
 ATTEMPTS = 6
 STILL = (1280, 720)
+FANART = (1920, 1080)
+LOGO_MAX_W = 1200
 
 
 def cache_dir():
@@ -149,6 +154,35 @@ def derive_image(src, dst, size, recipe):
     os.replace(tmp, dst)
 
 
+def derive_logo(src, dst):
+    """A title logo, alpha kept, no wider than LOGO_MAX_W."""
+    if dst.exists():
+        return
+    tmp = dst.with_name(dst.stem + ".part.png")
+    ffmpeg(["-i", str(src), "-vf", f"scale='min({LOGO_MAX_W},iw)':-2:flags=lanczos,format=rgba",
+            "-frames:v", "1", str(tmp)])
+    os.replace(tmp, dst)
+
+
+def nfo(root, fields, dst):
+    """A Kodi .nfo: `fields` is a list of (tag, value); a value that is a list repeats the tag, a
+    `set` is written as <set><name>."""
+    if dst.exists():
+        return
+    rows = ['<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>',
+            "<!-- written by design/demo-library/build.py from catalog.json -->", f"<{root}>"]
+    for tag, value in fields:
+        for v in (value if isinstance(value, list) else [value]):
+            if v is None or v == "":
+                continue
+            if tag == "set":
+                rows.append(f"    <set>\n        <name>{escape(str(v))}</name>\n    </set>")
+            else:
+                rows.append(f"    <{tag}>{escape(str(v))}</{tag}>")
+    rows.append(f"</{root}>")
+    dst.write_text("\n".join(rows) + "\n")
+
+
 def sentences(text):
     return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text or "") if s.strip()]
 
@@ -230,6 +264,7 @@ class Builder:
         d = self.out / "Films" / name
         d.mkdir(parents=True, exist_ok=True)
         self.image(m["poster"], d / "poster.jpg", POSTER)
+        self.describe(m, d, "movie")
         media = m.get("media")
         if media and self.films:
             asset = self.assets[media["asset"] if isinstance(media, dict) else media]
@@ -251,6 +286,7 @@ class Builder:
         root = self.out / "TV Shows" / safe(s["title"])
         root.mkdir(parents=True, exist_ok=True)
         self.image(s["poster"], root / "poster.jpg", POSTER)
+        self.describe(s, root, "tvshow")
         for season in s["seasons"]:
             sd = root / f"Season {season['index']:02}"
             sd.mkdir(exist_ok=True)
@@ -260,7 +296,26 @@ class Builder:
                 stem = safe(f"{s['title']} - S{season['index']:02}E{n:02} - {e['title']}")
                 thumb = sd / f"{stem}.jpg"
                 self.image(e.get("thumb") or s["art"], thumb, STILL)
+                nfo("episodedetails", [("title", e["title"]), ("season", season["index"]), ("episode", n),
+                                       ("plot", e.get("summary")), ("runtime", e.get("minutes"))], sd / f"{stem}.nfo")
                 clip(thumb, sd / f"{stem}.mkv", self.episode_seconds, e["title"], sentences(e.get("summary")))
+
+    def describe(self, t, d, root):
+        """A title's .nfo, fanart.jpg and (where the catalog has one) clearlogo.png, in folder `d`."""
+        sets = t.get("collections") or []
+        nfo(root, [("title", t["title"]), ("year", t.get("year")), ("premiered", t.get("originallyAvailableAt")),
+                   ("runtime", t.get("minutes")), ("plot", t.get("summary")), ("tagline", t.get("tagline")),
+                   ("genre", t.get("genres", [])), ("director", t.get("directors", [])),
+                   ("studio", t.get("studio")), ("set", sets[:1])], d / f"{root}.nfo")
+        if t.get("art"):
+            self.image(t["art"], d / "fanart.jpg", FANART)
+        logo = t.get("logo")
+        if logo:
+            aid = logo["asset"] if isinstance(logo, dict) else logo
+            if not (d / "clearlogo.png").exists():
+                derive_logo(self.src(aid), d / "clearlogo.png")
+            else:
+                self.used.add(aid)
 
     def mosaic(self, folder):
         """A folder's own poster: its first four titles' posters, two by two (fewer than four: the
