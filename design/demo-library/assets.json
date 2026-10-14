@@ -171,7 +171,14 @@
    "height": 1080,
    "licence": "CC BY 3.0",
    "author": "Blender Foundation",
-   "attribution": "Blender Foundation, caminandes.com"
+   "attribution": "Blender Foundation, caminandes.com",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Blender_Foundation_-_Caminandes_-_Episode_2_-_Gran_Dillama_-_Cover_thumbnail.png/1280px-Blender_Foundation_-_Caminandes_-_Episode_2_-_Gran_Dillama_-_Cover_thumbnail.png",
+    "sha256": "8618bc263bdd5d9592078d08918042a9e0211a55cefee5e8ba13514a2d03ca1f",
+    "bytes": 1090329,
+    "width": 1280,
+    "height": 720
+   }
   },
   "caminandes-s01e03": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/a/aa/Blender_Foundation_-_Caminandes_-_Episode_3_-_Llamigos_-_Cover_thumbnail.png",
@@ -240,7 +247,14 @@
    "height": 6000,
    "licence": "CC BY 4.0",
    "author": "Bassam Kurdali, Andy Goralczyk, and the Blender Foundation",
-   "attribution": "Bassam Kurdali, Andy Goralczyk, and the Blender Foundation"
+   "attribution": "Bassam Kurdali, Andy Goralczyk, and the Blender Foundation",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0c/ElephantsDreamPoster.jpg/1280px-ElephantsDreamPoster.jpg",
+    "sha256": "441df78e2d10853a9968035b5a4bbbeffda1d4dae2ec756e1132485fd431659e",
+    "bytes": 351323,
+    "width": 1280,
+    "height": 1810
+   }
   },
   "his-girl-friday-1940-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/6/6e/His_Girl_Friday_%281940_poster%29.jpg",
@@ -364,14 +378,7 @@
    "height": 1576,
    "licence": "Public domain",
    "author": "Unknown",
-   "attribution": "Unknown",
-   "file": {
-    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Sherlock_jr_poster.jpg/960px-Sherlock_jr_poster.jpg",
-    "sha256": "4eda8d74df6ddb7439ba6652954d701e5d0c4d66565a27273a8a9092ca8739e9",
-    "bytes": 231672,
-    "width": 960,
-    "height": 1513
-   }
+   "attribution": "Unknown"
   },
   "sintel-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/8/8f/Sintel_poster.jpg",
@@ -408,7 +415,14 @@
    "height": 3200,
    "licence": "CC BY 4.0",
    "author": "Blender Foundation",
-   "attribution": "Blender Foundation"
+   "attribution": "Blender Foundation",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/25/Spring2019AlphaPosterBlender.jpg/1280px-Spring2019AlphaPosterBlender.jpg",
+    "sha256": "23cbc944ceb062b3db476e9aee1e0f04ca66ebfee01f198d369c9f07658736ae",
+    "bytes": 419899,
+    "width": 1280,
+    "height": 1807
+   }
   },
   "sprite-fright-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/e/e5/Sprite_Fright-movie_poster.jpg",
@@ -496,7 +510,14 @@
    "height": 612,
    "licence": "Public domain",
    "author": "United Artists Corporation",
-   "attribution": "United Artists Corporation"
+   "attribution": "United Artists Corporation",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/The_General_%281926%29_-_Movie_Poster.png/330px-The_General_%281926%29_-_Movie_Poster.png",
+    "sha256": "69d647f94b28c792caacc4faf5d681138fd8984a5e43ad65c68bf5541db47698",
+    "bytes": 210367,
+    "width": 330,
+    "height": 518
+   }
   },
   "the-kid-1921-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/b/b5/The_Kid_%281921%29_poster.jpg",
@@ -689,11 +710,11 @@
    "author": "Nina Paley",
    "attribution": "Nina Paley",
    "file": {
-    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/SederMasochismPoster.jpg/500px-SederMasochismPoster.jpg",
-    "sha256": "babf99b7ebad320968e848c04fe46e7a37d2ccc56d4f0933e07c0a233961b93d",
-    "bytes": 137164,
-    "width": 500,
-    "height": 750
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/SederMasochismPoster.jpg/960px-SederMasochismPoster.jpg",
+    "sha256": "13bd1fca9c08c0d7b8a16a31a9155a313ee97ff18a1687790baa28d7a9bc8021",
+    "bytes": 395626,
+    "width": 960,
+    "height": 1440
    }
   },
   "seder-masochism-still-moses-splits-sea": {
@@ -1305,7 +1326,14 @@
    "licence": "Public domain",
    "author": "Columbia Pictures",
    "attribution": "Columbia Pictures",
-   "notes": "Commons records it as a screenshot of the film (the archive.org copy)."
+   "notes": "Commons records it as a screenshot of the film (the archive.org copy).",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/Frank_Orth_and_Cary_Grant_in_His_Girl_Friday.jpg/1280px-Frank_Orth_and_Cary_Grant_in_His_Girl_Friday.jpg",
+    "sha256": "5bb72f4a3b8bb27d0adf771028e1b1933cecc48a9bed03c0881c824fad443d14",
+    "bytes": 96900,
+    "width": 1280,
+    "height": 960
+   }
   },
   "plan-9-from-outer-space-1957-still": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/c/c9/Plan_9_from_Outer_Space_still_1.jpg",
@@ -1371,7 +1399,14 @@
    "licence": "Public domain",
    "author": "Robert Wiene",
    "attribution": "Robert Wiene",
-   "notes": "Commons records it as a screenshot taken from the film's Commons video file."
+   "notes": "Commons records it as a screenshot taken from the film's Commons video file.",
+   "file": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/96/The_Cabinet_of_Dr_Caligari_Werner_Krauss.jpg/1280px-The_Cabinet_of_Dr_Caligari_Werner_Krauss.jpg",
+    "sha256": "cde0068914407a5a9be612f7c711ece9bd82f9a4d70757cc4ac25e759afe80c0",
+    "bytes": 187460,
+    "width": 1280,
+    "height": 1071
+   }
   },
   "a-trip-to-the-moon-1902-still": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/d/d9/M%C3%A9li%C3%A8s_Trip_to_the_Moon_cannon_still.jpg",
