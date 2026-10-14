@@ -140,7 +140,7 @@ pub fn resume_ms(path: &Path, size: u64) -> u64 {
     get(path, size).map_or(0, |p| p.offset_ms)
 }
 
-/// The amber bar's fraction for a record: how far in the kept place is.
+/// The resume bar's fraction for a record: how far in the kept place is.
 pub fn fraction(p: &Progress) -> Option<f32> {
     (p.offset_ms > 0 && p.duration_ms > 0).then(|| (p.offset_ms as f64 / p.duration_ms as f64).clamp(0.0, 1.0) as f32)
 }

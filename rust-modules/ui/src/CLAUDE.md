@@ -472,7 +472,7 @@ viewports agree. Episode rows use landscape stills. `Art::Still` supplies the la
 `widgets::still_overlay` draws its labels and resume bar afterward. Both the artwork and
 its ground participate in backdrop discovery, including texture changes and UV cropping.
 
-- An **amber ▶** means **this press starts the video**. It is drawn where that is true and nowhere
+- A **white ▶** (`theme::RESUME_FILL`; amber until the 2026-10-14 redesign) means **this press starts the video**. It is drawn where that is true and nowhere
   else: the detail page's episode filmstrip always, and a Continue Watching deck only while
   Settings > Playback > Continue Watching is "Play" (`DeckPress::Play`; the default opens the page
   and draws none). Watch state does not
@@ -480,7 +480,7 @@ its ground participate in backdrop discovery, including texture changes and UV c
   the clause that failed first was the absent one: the glyph used to be decided by `PosterMark`
   FIRST, so an in-progress tile drew nothing and a Continue Watching deck — almost entirely
   in-progress tiles — announced nothing and then played.
-- An **amber resume BAR** means **how far in you already are**. It is a fact about the item, not a
+- A **white resume BAR** means **how far in you already are**. It is a fact about the item, not a
   promise about the press, so it is drawn wherever there is progress to report, including on a
   shelf that navigates. Hiding it there would hide something true; the triangle beside it was
   always the mark that read as "this will play".

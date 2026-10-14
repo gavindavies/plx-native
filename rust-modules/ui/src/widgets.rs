@@ -419,7 +419,7 @@ pub fn still_key<'a>(m: &TileFacts<'a>) -> &'a str {
 /// the focus pop without resizing.
 ///
 /// **`press_plays` is the whole of the app's play-indicator rule, at this one draw**, and
-/// [`still_glyph`] is the rule itself: the amber ▶ is a PROMISE — this press starts the video — so
+/// [`still_glyph`] is the rule itself: the white ▶ is a PROMISE — this press starts the video — so
 /// it is drawn on a surface whose press does that and on no other. The detail page's episode
 /// filmstrip always plays, and a Continue Watching deck plays only while the Playback setting says
 /// OK plays it (`DeckPress::Play`; by default OK opens the page and the deck draws no triangle,
@@ -436,7 +436,7 @@ pub fn still_key<'a>(m: &TileFacts<'a>) -> &'a str {
 ///
 /// Both are plain masks in ONE box, and the tick takes the line's own ink rather than a hue:
 /// a watched line is a statement about the past while an unstarted one is an invitation, and only
-/// the invitation earns the amber.
+/// the invitation earns the mark.
 ///
 /// **The ACTION wins the slot when there is one**, which is the rule the owner asked for on
 /// 2026-09-05 stated as a biconditional: *a play indicator means the press plays, a progress bar

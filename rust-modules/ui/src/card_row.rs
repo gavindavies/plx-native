@@ -760,7 +760,7 @@ pub fn draw_tile(
 pub struct TileLabel {
     pub title: Option<std::ffi::CString>,
     pub caption: Option<std::ffi::CString>,
-    /// lead the title with the amber play triangle (Continue Watching's tile has no play disc);
+    /// lead the title with the white play triangle (Continue Watching's tile has no play disc);
     /// set only while a press on the tile plays — see `widgets::still_line`'s `press_plays`
     pub glyph: bool,
     /// **How much of this block is on screen, 0..1** — [`band_reveal`] of the row's label band.
@@ -819,7 +819,7 @@ impl TileLabel {
             ..Self::title(t)
         }
     }
-    /// Title led by the amber play triangle — Continue Watching's focused primary line while a press there plays
+    /// Title led by the white play triangle — Continue Watching's focused primary line while a press there plays
     /// (`DeckPress::Play`).
     pub fn played(t: &str) -> Self {
         TileLabel {
@@ -1279,7 +1279,7 @@ pub fn place_label_wide(p: Painter, rect: Rect, sty: &RowStyle, w: f32, want: f3
 /// [`plx_machine::idle`] only on a frame the marquee is actually gliding, so a screen full of short
 /// (or resting) titles costs the present gate nothing.
 ///
-/// `glyph` leads the line with Continue-Watching's amber play triangle — the SAME clock and the
+/// `glyph` leads the line with Continue-Watching's white play triangle — the SAME clock and the
 /// SAME budget arithmetic as the plain title, just with the icon's width plus its gap subtracted
 /// from the window before anything is measured against it, so a played title that overflows
 /// marquees exactly like any other. This is ONE implementation with a glyph parameter rather than a
