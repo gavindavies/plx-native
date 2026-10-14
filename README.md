@@ -21,28 +21,63 @@ The interface is drawn straight on the GPU, and video is decoded by the machine'
 
 | | |
 |---|---|
-| ![Films](design/screenshots/linux/02-films.jpg) | ![Player](design/screenshots/linux/05-player.jpg) |
-| ![Audio tracks](design/screenshots/linux/07-audio-menu.jpg) | ![Subtitles](design/screenshots/linux/06-subtitles-menu.jpg) |
+| ![Films](design/screenshots/linux/02-films.jpg) | ![The hold menu](design/screenshots/linux/03-item-menu.jpg) |
+| ![Player](design/screenshots/linux/05-player.jpg) | ![Subtitles](design/screenshots/linux/06-subtitles-menu.jpg) |
+| ![Audio tracks](design/screenshots/linux/07-audio-menu.jpg) | ![A subtitle on screen](design/screenshots/linux/08-subtitle.jpg) |
 
 ## Building
 
-Linux only. You need a nightly Rust toolchain, SDL2 and GStreamer (with `gst-plugins-good`,
-`gst-plugins-bad` and `gst-libav`). The build compiles its own FFmpeg and libass and bundles them
-beside the binary.
+Linux only. You need a nightly Rust toolchain, a C compiler, SDL2 and SDL2_ttf, and GStreamer with
+its base, good, bad and libav plugin sets. On Debian, Ubuntu or Raspberry Pi OS:
 
 ```sh
-make linux                      # builds the app directory, dist/linux/plxnative
-dist/linux/plxnative/plxnative  # run it; pass a folder or a file to open it directly
+sudo apt install build-essential pkg-config cmake nasm curl libsdl2-dev libsdl2-ttf-dev \
+    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+    gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
+rustup toolchain install nightly
 ```
 
-A demo library of short sample films can be generated with `design/demo-library/generate.sh`.
+Then:
+
+```sh
+make             # builds the app into dist/linux/pitv (FFmpeg and libass the first time)
+make check       # the test suite
+```
+
+The first `make` also builds the pinned FFmpeg and libass under `vendor/` and bundles them beside
+the binary. `dist/linux/pitv` is self-contained apart from the system libraries above: copy it
+anywhere and run `pitv` from it.
+
+## Running
+
+```sh
+dist/linux/pitv/pitv                     # the library: ~/Videos
+PITV_MEDIA_DIRS=/srv/films:/srv/tv dist/linux/pitv/pitv   # other folders, ':'-separated
+dist/linux/pitv/pitv /path/to/film.mkv   # play one file
+PITV_FULLSCREEN=0 dist/linux/pitv/pitv   # a window instead of the whole screen
+```
+
+Arrows move, Enter is OK, holding Enter opens a title's menu (play from the start, mark as
+watched), and Escape (or Q) goes back. In the player, OK pauses and resumes, Left and Right seek,
+and Up reaches the subtitle and audio buttons; a remote's media keys work too. Logs and the per-file progress live in `~/.local/state/pitv`.
+
+## Demo library
+
+`design/demo-library/generate.sh` makes a small library of invented films and a show, from
+nothing but `ffmpeg` and the app's own fonts: posters, video, English and Spanish audio, and
+subtitle files beside each video. It is what the screenshots above show.
+
+```sh
+design/demo-library/generate.sh          # into design/demo-library/library (not committed)
+PITV_MEDIA_DIRS=design/demo-library/library dist/linux/pitv/pitv
+```
 
 ## Status
 
-PiTV began as a fork of PlxNative, a Plex client for LG televisions, and is being turned into a
-standalone local player. The Plex screens are gone; the work still in progress (the
-`wip/remove-plex-media` branch) removes the remaining Plex and webOS code from the media layer and
-the crates beneath it. Some internal names still carry the old `plx` prefix until that lands.
+PiTV began as a fork of PlxNative, a Plex client for LG televisions. The Plex client, its screens
+and the LG webOS build are gone. Internal crate names still carry the old `plx` prefix, and some
+webOS platform code below the player (device capability probes, the webOS key and storage layers)
+is still in the tree and has yet to be removed.
 
 ## Licence
 

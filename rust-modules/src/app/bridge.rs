@@ -537,7 +537,7 @@ pub(crate) fn dismiss_player_overlays(d: &mut Dispatcher<AppHost>) {
 }
 
 /// A live panel's own state, for the dev triggers that drive one by hand
-/// (`plxnative-menupick`) and for the focus probe's `sel=`.
+/// (`pitv-menupick`) and for the focus probe's `sel=`.
 pub(crate) fn player_overlay_mut(
     d: &mut Dispatcher<AppHost>,
 ) -> Option<&mut plx_screens::player::overlay::PlayerOverlayScreen> {

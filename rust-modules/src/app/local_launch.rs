@@ -1,4 +1,4 @@
-//! **Open a file from the command line**: `plxnative-sim /path/to/film.mkv` plays it.
+//! **Open a file from the command line**: `pitv /path/to/film.mkv` plays it.
 //!
 //! The Linux build's equivalent of handing a media player a file. The binary records the path
 //! before the app starts ([`set`]); once the app has drawn its first frames, [`tick`] probes the

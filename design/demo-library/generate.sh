@@ -6,7 +6,7 @@
 #
 #   design/demo-library/generate.sh [DIR]      (default: design/demo-library/library, the copy
 #                                              kept in the repository)
-#   PLXNATIVE_MEDIA_DIRS=design/demo-library/library dist/linux/plxnative/plxnative
+#   PITV_MEDIA_DIRS=design/demo-library/library dist/linux/pitv/pitv
 #
 # Takes a few minutes and about 40 MB at the defaults (VIDEO_SIZE=1280x720 CRF=26 gives a sharper
 # ~90 MB copy). Re-running skips files that already exist; delete a file to remake it.

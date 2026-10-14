@@ -13,7 +13,7 @@
 //! * audio → decoded to PCM (LG's four codecs by name; FLAC, Opus, Vorbis, TrueHD, MP3/MP2 and PCM
 //!   from the parameters the demuxer reports, [`note_audio`]) → `audioconvert ! audioresample` →
 //!   the system audio sink
-//!   (`autoaudiosink`, or `PLXNATIVE_GST_AUDIOSINK`), which also provides the clock both lanes
+//!   (`autoaudiosink`, or `PITV_GST_AUDIOSINK`), which also provides the clock both lanes
 //!   present against.
 //!
 //! # The contract it keeps
@@ -400,7 +400,7 @@ fn describe(video: (&str, &str), audio: Option<AudioLane>, audio_sink: &str) -> 
 }
 
 fn audio_sink_description() -> String {
-    std::env::var("PLXNATIVE_GST_AUDIOSINK")
+    std::env::var("PITV_GST_AUDIOSINK")
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "autoaudiosink".to_owned())

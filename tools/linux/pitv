@@ -1,19 +1,19 @@
 #!/bin/sh
-# PlxNative for Linux — the launcher `make linux` stages beside the binary.
+# PiTV — the launcher `make linux` stages beside the binary.
 #
-# The app finds its fonts and bundled libraries beside itself (PLXNATIVE_APP_DIR) and keeps its
-# logs and state in one per-user directory (PLXNATIVE_RUNTIME_DIR): $XDG_STATE_HOME/plxnative,
-# else ~/.local/state/plxnative. Both can be overridden from the environment.
+# The app finds its fonts and bundled libraries beside itself (PITV_APP_DIR) and keeps its
+# logs and state in one per-user directory (PITV_RUNTIME_DIR): $XDG_STATE_HOME/pitv,
+# else ~/.local/state/pitv. Both can be overridden from the environment.
 #
-#   plxnative                       open the library (PLXNATIVE_MEDIA_DIRS, else ~/Videos)
-#   plxnative /path/to/film.mkv     play one file
+#   pitv                            open the library (PITV_MEDIA_DIRS, else ~/Videos)
+#   pitv /path/to/film.mkv          play one file
 #
-#   PLXNATIVE_MEDIA_DIRS=/srv/films:/srv/tv   library folders, ':'-separated
-#   PLXNATIVE_FULLSCREEN=0                    a window instead of the whole screen
+#   PITV_MEDIA_DIRS=/srv/films:/srv/tv   library folders, ':'-separated
+#   PITV_FULLSCREEN=0                    a window instead of the whole screen
 set -eu
 here=$(dirname "$(readlink -f "$0")")
-state=${XDG_STATE_HOME:-$HOME/.local/state}/plxnative
-export PLXNATIVE_RUNTIME_DIR="${PLXNATIVE_RUNTIME_DIR:-$state}"
-export PLXNATIVE_APP_DIR="${PLXNATIVE_APP_DIR:-$here}"
-mkdir -p "$PLXNATIVE_RUNTIME_DIR"
-exec "$here/plxnative-bin" "$@"
+state=${XDG_STATE_HOME:-$HOME/.local/state}/pitv
+export PITV_RUNTIME_DIR="${PITV_RUNTIME_DIR:-$state}"
+export PITV_APP_DIR="${PITV_APP_DIR:-$here}"
+mkdir -p "$PITV_RUNTIME_DIR"
+exec "$here/pitv-bin" "$@"

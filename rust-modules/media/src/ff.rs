@@ -9,7 +9,7 @@
 //! capture stream's MPEG1 + MPEG-TS muxer, kept here because every FFmpeg ABI
 //! detail — struct offsets, AVOption names, custom AVIO — belongs in one module.
 //! The struct layouts below are the FFmpeg n3.3 ABI, confirmed on-device by the
-//! Phase A probe (/tmp/plxnative-ffprobe logs codec_id/width/height for a known title).
+//! Phase A probe (/tmp/pitv-ffprobe logs codec_id/width/height for a known title).
 use crate::aq::AuQueue;
 use crate::player::threads::SendPtr;
 use crate::player::SHARED;
@@ -17,7 +17,7 @@ use std::os::raw::{c_char, c_int, c_long, c_uint, c_void};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Once;
 
-/// Feed audio (es=2) to the pipeline. Cleared by the /tmp/plxnative-noaudio dev trigger to
+/// Feed audio (es=2) to the pipeline. Cleared by the /tmp/pitv-noaudio dev trigger to
 /// A/B whether the audio ES (E-AC3/Atmos) is what stalls the sink on 4K HEVC.
 static FEED_AUDIO: AtomicBool = AtomicBool::new(true);
 /// Does the FFmpeg on this device have the ABI these offsets were written for? Set once by

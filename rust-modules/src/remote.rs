@@ -1,6 +1,6 @@
 //! Remote-control channel (dev / on-device testing): a FIFO the event loop drains
 //! once per frame, so a key token written from another machine — `echo down >
-//! /tmp/plxnative-remote` over SSH — drives the UI exactly like the physical remote.
+//! /tmp/pitv-remote` over SSH — drives the UI exactly like the physical remote.
 //!
 //! Why in-app instead of injecting system input: on this webOS 4.5 build the wayland
 //! compositor (`surface-manager`) opens a FIXED set of evdev nodes at boot (the RCU /
@@ -9,18 +9,18 @@
 //! `com.webos.service.tv.keymanager/createKeyEvent` injects into the webOS web-app key
 //! layer, not the wayland path we read. The reliable path is therefore in-app: read a
 //! token here, and let `app.rs` synthesize the SDL key event so the ONE real key
-//! handler runs unchanged. This mirrors the existing `/tmp/plxnative-*` dev-trigger
+//! handler runs unchanged. This mirrors the existing `/tmp/pitv-*` dev-trigger
 //! design; `tools/stream-screen.py` is the host-side driver. Boot-neutral: the FIFO is
 //! excluded from `automated_boot`, so its presence never changes the boot flow.
 
 use libc::c_void;
 use std::os::unix::io::RawFd;
 
-/// The control FIFO. Kept in the `plxnative-*` dev namespace for consistency — and resolved
+/// The control FIFO. Kept in the `pitv-*` dev namespace for consistency — and resolved
 /// through [`plx_base::paths`] rather than a literal, so a host build running several simulators at
 /// once gives each its own FIFO instead of all of them draining one.
 fn fifo_path() -> std::path::PathBuf {
-    plx_base::paths::in_runtime_dir("plxnative-remote")
+    plx_base::paths::in_runtime_dir("pitv-remote")
 }
 
 pub struct Remote {

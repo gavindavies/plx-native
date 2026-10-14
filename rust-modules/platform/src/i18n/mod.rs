@@ -342,11 +342,11 @@ pub fn initialize(preference: Preference, controlled: bool) {
         .as_ref()
         .map(|v| (v.ui.as_deref(), v.fmt.as_deref(), v.clock.as_deref()))
         .unwrap_or_default();
-    let simulated_format = std::env::var("PLXNATIVE_FORMAT_LOCALE").ok();
+    let simulated_format = std::env::var("PITV_FORMAT_LOCALE").ok();
     let fmt = simulated_format.as_deref().or(fmt);
     #[allow(unused_mut)]
     let mut cx = LocaleContext::resolve(preference, ui, fmt, clock, env.as_deref());
-    if let Ok(forced) = std::env::var("PLXNATIVE_LOCALE") {
+    if let Ok(forced) = std::env::var("PITV_LOCALE") {
         cx = LocaleContext::resolve(
             Preference::from_tag(&forced),
             Some(&forced),

@@ -15,20 +15,20 @@
 //! Environment, read ONCE at first use (the whole app reads its dev config at boot by contract —
 //! see `dev.rs` — and this runs before every swap, so re-reading it per frame would be both
 //! against that convention and pointless work):
-//!   PLXNATIVE_SHOT=<path>          where to write (default: `shot.png` in the instance root)
-//!   PLXNATIVE_SHOT_FRAME=<n>       ALSO capture automatically at presented frame n (default: no
+//!   PITV_SHOT=<path>          where to write (default: `shot.png` in the instance root)
+//!   PITV_SHOT_FRAME=<n>       ALSO capture automatically at presented frame n (default: no
 //!                                  automatic capture — only the `shot` token fires one)
-//!   PLXNATIVE_SHOT_SETTLE=<ms>     ALSO capture automatically once the screen has been at REST for
+//!   PITV_SHOT_SETTLE=<ms>     ALSO capture automatically once the screen has been at REST for
 //!                                  <ms>: no motion, no damage, no queued upload, no pending page
 //!                                  capture (`plx_machine::idle`'s own change signal, which ignores the
 //!                                  keepalive and the bound video plane). The screenshot pipeline's
 //!                                  trigger: it waits on the app's state, never on a wall clock.
-//!   PLXNATIVE_SHOT_AFTER=<ms>      …and not before <ms> since the first frame (default 0), so a
+//!   PITV_SHOT_AFTER=<ms>      …and not before <ms> since the first frame (default 0), so a
 //!                                  scene whose trigger fires late cannot be captured before it
-//!   PLXNATIVE_SHOT_EXIT=1          end the run after an automatic capture — the headless one-shot
+//!   PITV_SHOT_EXIT=1          end the run after an automatic capture — the headless one-shot
 //!                                  mode (an orderly stop through the app's own shutdown, never an
 //!                                  `exit()` from inside the frame: see [`maybe_capture`])
-//!   PLXNATIVE_SHOT_ALPHA=1         write RGBA (premultiplied, as the framebuffer holds it)
+//!   PITV_SHOT_ALPHA=1         write RGBA (premultiplied, as the framebuffer holds it)
 //!
 //! The `shot` token on the remote FIFO captures on demand instead, which is what an interactive
 //! agent session uses: drive the UI, then ask for the frame. Those are NUMBERED (`shot-1.png`,
@@ -74,22 +74,22 @@ fn cfg() -> &'static Cfg {
     static C: OnceLock<Cfg> = OnceLock::new();
     C.get_or_init(|| Cfg {
         // Defaulting the path is what lets the `shot` token work in ANY session, including
-        // `make sim-run`, rather than only in one that happened to export PLXNATIVE_SHOT.
-        path: std::env::var_os("PLXNATIVE_SHOT")
+        // `make sim-run`, rather than only in one that happened to export PITV_SHOT.
+        path: std::env::var_os("PITV_SHOT")
             .map(PathBuf::from)
             .unwrap_or_else(|| plx_base::paths::in_runtime_dir("shot.png")),
-        frame: std::env::var("PLXNATIVE_SHOT_FRAME")
+        frame: std::env::var("PITV_SHOT_FRAME")
             .ok()
             .and_then(|s| s.parse().ok()),
-        settle: std::env::var("PLXNATIVE_SHOT_SETTLE")
+        settle: std::env::var("PITV_SHOT_SETTLE")
             .ok()
             .and_then(|s| s.parse().ok()),
-        after: std::env::var("PLXNATIVE_SHOT_AFTER")
+        after: std::env::var("PITV_SHOT_AFTER")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0),
-        exit: std::env::var_os("PLXNATIVE_SHOT_EXIT").is_some(),
-        alpha: std::env::var("PLXNATIVE_SHOT_ALPHA").as_deref() == Ok("1"),
+        exit: std::env::var_os("PITV_SHOT_EXIT").is_some(),
+        alpha: std::env::var("PITV_SHOT_ALPHA").as_deref() == Ok("1"),
     })
 }
 
@@ -104,7 +104,7 @@ static ON_DEMAND: AtomicBool = AtomicBool::new(false);
 static SETTLED: AtomicBool = AtomicBool::new(false);
 /// The settled capture has been asked for once; it never repeats in one process.
 static SETTLE_FIRED: AtomicBool = AtomicBool::new(false);
-/// `now` of the first [`tick`], the origin of `PLXNATIVE_SHOT_AFTER`.
+/// `now` of the first [`tick`], the origin of `PITV_SHOT_AFTER`.
 static FIRST_TICK: OnceLock<u32> = OnceLock::new();
 
 /// Is the settled capture due? `quiet` is how long nothing has changed, `age` how long since the
@@ -209,7 +209,7 @@ pub(crate) fn read_flipped(vx: c_int, vy: c_int, vw: c_int, vh: c_int, ch: usize
     // opaque RGB image is the FAITHFUL screenshot, and the one that compares to a device capture,
     // where the TV's compositor has likewise already flattened the two planes.
     //
-    // `PLXNATIVE_SHOT_ALPHA=1` keeps it anyway, for compositing a shot over a picture of your own:
+    // `PITV_SHOT_ALPHA=1` keeps it anyway, for compositing a shot over a picture of your own:
     // the channels are then exactly what the framebuffer holds, i.e. PREMULTIPLIED, so the
     // composite is `out = shot.rgb + picture * (1 - shot.a)` — not the straight-alpha "over" a
     // viewer applies to a PNG, which is why this file will look wrong opened on its own.
@@ -233,7 +233,7 @@ pub(crate) fn read_flipped(vx: c_int, vy: c_int, vw: c_int, vh: c_int, ch: usize
 /// undefined by specification, and on a real driver they are whatever the compositor left there —
 /// a screenshot taken after would be intermittently blank, which is worse than never working.
 ///
-/// Returns `true` when this was the headless one-shot (`PLXNATIVE_SHOT_EXIT`) and the caller must
+/// Returns `true` when this was the headless one-shot (`PITV_SHOT_EXIT`) and the caller must
 /// now stop the run loop. It used to call `std::process::exit(0)` right here, and that crashed the
 /// Linux simulator in CI on some runners most launches: libc's `exit` runs the process's `atexit`
 /// handlers, among them OpenSSL 3's `OPENSSL_cleanup`, which frees libcrypto's global tables while

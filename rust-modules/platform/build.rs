@@ -4,7 +4,7 @@
 //! belongs to the application crate's build script, which owns the final binary.
 //!
 //! Both generators write into this crate's `OUT_DIR` and both are included only from this crate
-//! (`i18n/mod.rs`, `storage/state.rs`). The storage helper (`plxnative-storage`) includes
+//! (`i18n/mod.rs`, `storage/state.rs`). The storage helper (`pitv-storage`) includes
 //! `storage/state.rs` by `#[path]` and runs `install_identities` from its own build script, so the
 //! client and the helper cannot disagree about which installs exist.
 //!

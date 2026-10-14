@@ -49,7 +49,7 @@ impl Class {
     ///   was a wait, not layout. With the warm offscreen, upload frames read prepare p50 3.9 /
     ///   p90 6.1 ms on Library (was 10.0 / 12.9) and the clock admits two per frame (uploads per
     ///   frame {1:18, 2:12, 3:1}; a 19-poster burst in 12 frames, was 19).
-    /// * `Residency` — **[M-dev]** 6 ms, device-measured 2026-09-02 with `plxnative-framedrop`:
+    /// * `Residency` — **[M-dev]** 6 ms, device-measured 2026-09-02 with `pitv-framedrop`:
     ///   a 1280x720 backdrop landing cost 6 ms in the pump and 116 ms in the NEXT frame's draw
     ///   without the `warm_tex` that now follows it (`gfx.rs`'s `warm_tex`, whose doc is the
     ///   record). That 6 ms is the pair this class prices.
@@ -109,7 +109,7 @@ pub struct Budget {
     stats_solo: Option<Class>,
     /// The frame clock of the last `budget solo=` line, for the rate limit.
     solo_logged_us: Option<u64>,
-    /// `plxnative-nobudget`: the budget as it was BEFORE phase 11 — quota only, no time ceiling,
+    /// `pitv-nobudget`: the budget as it was BEFORE phase 11 — quota only, no time ceiling,
     /// no solo rule, `Residency` spending the `Poster` quota. The A/B control leg.
     relaxed: bool,
 }
@@ -131,7 +131,7 @@ impl Budget {
         }
     }
 
-    /// The `plxnative-nobudget` control leg: admission as it was before phase 11 — the `Poster`
+    /// The `pitv-nobudget` control leg: admission as it was before phase 11 — the `Poster`
     /// quota of 3 per frame and nothing else. The time ceiling is off, the solo rule is off, and
     /// `Residency` is treated as `Poster` (before phase 11 there was no such class: every upload,
     /// backdrop included, spent one of the three). It exists so a device A/B measures THIS
@@ -431,7 +431,7 @@ mod tests {
         assert_eq!(b.solo(), None);
     }
 
-    /// The A/B control leg (`plxnative-nobudget`).
+    /// The A/B control leg (`pitv-nobudget`).
     #[test]
     fn the_pre_phase_11_budget_is_quota_only() {
         let mut b = Budget::pre_phase_11();

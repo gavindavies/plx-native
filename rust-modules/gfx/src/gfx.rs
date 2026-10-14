@@ -484,7 +484,7 @@ fn probed_clear(clear: impl FnOnce()) {
 
 /// The frame's first framebuffer-0 command is where this driver parks the wait for a free back
 /// buffer, and on every route but the player it is the page's [`frame_clear`]. The dev frame
-/// probe (`/tmp/plxnative-framecb`) prices that wait, but its clock is `platform`'s and this
+/// probe (`/tmp/pitv-framecb`) prices that wait, but its clock is `platform`'s and this
 /// crate does not depend on `platform`, so the application hands the two edges down once at boot:
 /// `waiting` runs just before the clear, `acquired` just after it returns.
 pub fn install_clear_probe(waiting: fn(), acquired: fn()) {
@@ -856,13 +856,13 @@ fn try_compile(ty: c_uint, src: *const c_char) -> Option<c_uint> {
                 .to_string_lossy()
                 .into_owned();
             // The EVENT log is the only surface anyone reads over ssh, and neither of the two lines
-            // below reaches it: `eprintln!` goes to /tmp/plxnative-stderr.log (main.c replaces
+            // below reaches it: `eprintln!` goes to /tmp/pitv-stderr.log (main.c replaces
             // stderr), and `process::exit` is a CLEAN exit, so the crash tracer never fires and
-            // /tmp/plxnative-crash.log stays empty. Without this the window flashes, the app is back
+            // /tmp/pitv-crash.log stays empty. Without this the window flashes, the app is back
             // at the launcher, the event log simply stops mid-boot, and triage correctly reports
             // "not a crash" with nothing pointing at the shader. `eprintln!` stays because it costs
             // nothing, NOT because it is the durable copy: `main.c` truncates both sinks at every
-            // launch, so neither survives the relaunch that `plxnative-crash.log` is append-only for.
+            // launch, so neither survives the relaunch that `pitv-crash.log` is append-only for.
             log(&format!("shader compile FAILED: {msg}"));
             eprintln!("shader error: {msg}");
             return None;
@@ -928,7 +928,7 @@ const FIELD_VERTS: usize = FIELD_N * FIELD_N * 6;
 /// half an 8-bit code at 16 for the largest twist a colour can have; the test
 /// `the_field_mesh_is_the_bilinear_field_within_half_a_code` walks this very list.
 ///
-/// Measured on the set (2026-09-19, `plxnative-hwcnt`, `docs/backdrop-blur-profiling.md`): the
+/// Measured on the set (2026-09-19, `pitv-hwcnt`, `docs/backdrop-blur-profiling.md`): the
 /// full-screen wash drawn this way cost ~0.4M fewer GPU cycles a frame on Home's fold and grid —
 /// four varyings down to two — for 1536 vertices the vertex stage does not notice.
 fn field_mesh() -> Vec<f32> {
@@ -1344,7 +1344,7 @@ pub fn draw_rect(
             return;
         }
         // A flat two-stop gradient STAYS on this program, and that was measured rather than assumed
-        // (`plxnative-hwcnt`, 2026-09-02): routed through the ambient program instead, the hero's
+        // (`pitv-hwcnt`, 2026-09-02): routed through the ambient program instead, the hero's
         // two full-width ramp quads made the frame 0.6M GPU cycles DEARER, because `fs_src`'s
         // early-out below is one `mix` where a four-corner field is three. What this program pays
         // for on a flat quad is its size — Midgard sizes the register file for the whole shader,
@@ -2051,9 +2051,9 @@ pub fn art_wash_ok() -> bool {
 ///
 /// **Measured, dev television, 2026-09-28.** Home's snap dive draws the opaque wash and then the
 /// hero photograph fading by `1 - snap` over most of the panel, and the poster dive ran every frame
-/// of its curve at 17–24 ms (`plxnative-framedrop`, `snap=` 0.04–0.91, GPU-bound in `clear`) —
+/// of its curve at 17–24 ms (`pitv-framedrop`, `snap=` 0.04–0.91, GPU-bound in `clear`) —
 /// 56.9 moving fps against a 55 floor, and 54.9 on a bad run. Masking the wash
-/// (`plxnative-drawmask=ambient`) took it to 59.6; drawing the wash only where the art is NOT took
+/// (`pitv-drawmask=ambient`) took it to 59.6; drawing the wash only where the art is NOT took
 /// it to 59.9 with no frame over 18 ms. The frame is arithmetic-bound
 /// (`docs/perf-damage-tracking-verdict.md`), so the second pass over those pixels is what has to
 /// go, and here the wash is evaluated where the art already is. Folding the SCRIMS in too was
@@ -2301,7 +2301,7 @@ pub fn snapshot_pending() -> bool {
 ///
 /// On this driver `glTexImage2D` returns after the copy and defers the rest — the allocation and
 /// the tile/layout conversion the GPU actually samples from — to the FIRST DRAW that binds the
-/// texture. Measured on the television (2026-09-02, `plxnative-framedrop`): a 1280x720 backdrop
+/// texture. Measured on the television (2026-09-02, `pitv-framedrop`): a 1280x720 backdrop
 /// landing cost 6 ms in the pump and then 116 ms in the NEXT frame's draw, billed to the frame's
 /// first framebuffer command (`hm.clear`) where this driver parks its GPU wait — while `dt.cast`,
 /// the row that was actually scrolling, took under 1 ms. That is the hitch a headshot shelf shows
@@ -3129,12 +3129,12 @@ const _: () = assert!(
 ///
 /// 0.22/0.5 is the floor rather than the target: there the hero's individual hairs and the star
 /// field behind it come through, and the bar stops reading as a frosted material and becomes
-/// tinted glass. `/tmp/plxnative-blurtaps` walks the ladder without a rebuild. Note the offsets are no longer half-texel
+/// tinted glass. `/tmp/pitv-blurtaps` walks the ladder without a rebuild. Note the offsets are no longer half-texel
 /// aligned, which the previous version of this note called for so GL_LINEAR would resolve each tap
 /// as an exact 2x2 box — a real property, and a smaller one than what it costs: the alignment buys
 /// a marginally cleaner kernel, and structure at the scale of a letterform is the entire effect.
 const BLUR_TAPS: [f32; 2] = [0.35, 0.75];
-/// `/tmp/plxnative-blurtaps=<a>,<b>` — those offsets, swept.
+/// `/tmp/pitv-blurtaps=<a>,<b>` — those offsets, swept.
 ///
 /// The taps are now the WHOLE of "how much structure survives" that anyone gets to tune — the
 /// source scale is pinned to the direct path's, see [`BLUR_REDUCTIONS`] — and until this existed
@@ -3400,7 +3400,7 @@ const STANDING_LENS: f32 = 24.0;
 /// **It is 0, and the whole second source is therefore dormant** — the copy that feeds it is
 /// skipped, the texture unit is left alone, and the shader takes its single-source path. It is kept
 /// rather than deleted because it costs exactly nothing while off and because the judgement it
-/// encodes belongs to whoever is looking at the television: `/tmp/plxnative-tracksharp` brings it
+/// encodes belongs to whoever is looking at the television: `/tmp/pitv-tracksharp` brings it
 /// back at any weight without a rebuild.
 ///
 /// The source existed for one stated reason — "a quarter-res blur has nothing left to compress, so
@@ -3423,7 +3423,7 @@ const STANDING_SHARP: f32 = 0.0;
 /// fill. Shedding it at the edge costs the interior nothing — the ramp is zero where the bevel
 /// meets the flat middle, so the density the labels were solved against is untouched.
 const STANDING_RIMCLEAR: f32 = 0.6;
-/// `/tmp/plxnative-rimclear=<w>` — that shed, swept. `0` is the uniform scrim.
+/// `/tmp/pitv-rimclear=<w>` — that shed, swept. `0` is the uniform scrim.
 #[cfg(feature = "devtriggers")]
 fn rimclear_sweep() -> Option<f32> {
     static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
@@ -3437,7 +3437,7 @@ fn rimclear_sweep() -> Option<f32> {
 fn rimclear_sweep() -> Option<f32> {
     None
 }
-/// `/tmp/plxnative-tracksharp=<w>` — that weight, swept. `0` is the single-source material.
+/// `/tmp/pitv-tracksharp=<w>` — that weight, swept. `0` is the single-source material.
 #[cfg(feature = "devtriggers")]
 fn sharp_sweep() -> Option<f32> {
     static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
@@ -3451,7 +3451,7 @@ fn sharp_sweep() -> Option<f32> {
 fn sharp_sweep() -> Option<f32> {
     None
 }
-/// `/tmp/plxnative-paneldeep=<px>` — the panel's extra sample radius, swept. `0` is the bar's own
+/// `/tmp/pitv-paneldeep=<px>` — the panel's extra sample radius, swept. `0` is the bar's own
 /// single-fetch material.
 #[cfg(feature = "devtriggers")]
 fn deep_sweep() -> Option<f32> {
@@ -3558,7 +3558,7 @@ pub enum GlassRim {
     /// bar can read as a slab with thickness. Held against the reference (iOS 26's tab bar and its
     /// search button, filmed over moving content), what a container does at its edge is BEND the
     /// page around the arc; a drawn line bends nothing, and no weight of line ever will. So the
-    /// geometry was swept — `plxnative-tracklens`, against synthetic grounds — and 12/24 chosen by
+    /// geometry was swept — `pitv-tracklens`, against synthetic grounds — and 12/24 chosen by
     /// looking at the ladder.
     ///
     /// **The ramp is SHORT and the pull is LONG, and that ordering is the whole result.** Nine
@@ -3638,7 +3638,7 @@ impl GlassRim {
     }
 }
 
-/// **`/tmp/plxnative-tracklens=<bevel>,<lens>,<spec>[,<edge_a>,<shade>]` — the container, swept.**
+/// **`/tmp/pitv-tracklens=<bevel>,<lens>,<spec>[,<edge_a>,<shade>]` — the container, swept.**
 ///
 /// [`GlassRim::Standing`] was for a while the one material parameter in this app decided by an
 /// argument rather than by looking at a ladder: a 38px lens in a 2px band is a smear, so the lens
@@ -5297,7 +5297,7 @@ impl Drop for DirectPass {
 
 /// The axis divisor the direct source pass renders at — 1/4, and the only value.
 ///
-/// This used to answer `None` unless `/tmp/plxnative-blurdirect` was armed, and `None` meant "use
+/// This used to answer `None` unless `/tmp/pitv-blurdirect` was armed, and `None` meant "use
 /// the capture path instead". The A/B it existed for is over: the direct pass is 4.5x cheaper gross
 /// and 5.8x cheaper net than the `glCopyTexSubImage2D` plus two reductions it replaces, -3.3% of
 /// the whole frame, and it is what takes a refresh frame from 111% of a vsync slot to 99.5% — i.e.
@@ -5692,7 +5692,7 @@ pub fn draw_blur_backdrop(
             // **The BAND, not the region.** The sample never travels further than `lens` outside
             // the container, so the sharp source only has to hold the panel plus that margin —
             // 595x124 against the blur region's 728x200 on the dev set, which is where half of
-            // this feature's cost went. Measured whole-frame on the T820 with `plxnative-hwcnt`:
+            // this feature's cost went. Measured whole-frame on the T820 with `pitv-hwcnt`:
             // the region copy put GPU_ACTIVE up 5.1%, the band 2.7%.
             let m = rim.params().1.ceil() + 2.0;
             let sc = c.gw as f32 / SCR_W;

@@ -26,7 +26,7 @@
 //!
 //! ## The grammar
 //!
-//! `/tmp/plxnative-glassload` holds an optional `hold=<seconds>;` prefix and then a comma-separated
+//! `/tmp/pitv-glassload` holds an optional `hold=<seconds>;` prefix and then a comma-separated
 //! list of steps:
 //!
 //! ```text
@@ -65,7 +65,7 @@
 //! is designed around. Two surfaces at opposite corners are a different (worse) case and are not
 //! what this dial produces; that asymmetry is recorded in `docs/glass-hardware-budget.md`.
 //!
-//! ## The transition prototype (`/tmp/plxnative-navblur`)
+//! ## The transition prototype (`/tmp/pitv-navblur`)
 //!
 //! The route change is a DIP today (see [`crate::nav`]): the outgoing page fades to
 //! `theme::SURFACE_APP`, the route flips at the floor, the incoming page fades up. The design
@@ -330,7 +330,7 @@ impl Dial {
         plx_gfx::gfx::profile::publish_dial(self.step, self.armed());
     }
 
-    /// Arm the dial from `/tmp/plxnative-glassload`'s content. Logs what it will actually run, because
+    /// Arm the dial from `/tmp/pitv-glassload`'s content. Logs what it will actually run, because
     /// a sweep that silently dropped a step reports a curve with a hole in it.
     pub fn configure(&mut self, spec: &str) {
         match parse(spec) {
@@ -389,7 +389,7 @@ impl Dial {
     }
 }
 
-/// Arm the blurred-transition prototype from `/tmp/plxnative-navblur`'s content
+/// Arm the blurred-transition prototype from `/tmp/pitv-navblur`'s content
 /// (`[<mode>][:<cadence>]`, mode 1 or 2, cadence in presents).
 pub fn parse_navblur(spec: &str) -> Option<(u32, u32, bool)> {
     let (head, cad) = spec.trim().split_once(':').unwrap_or((spec.trim(), "1"));

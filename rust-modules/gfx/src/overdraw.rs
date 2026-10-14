@@ -8,11 +8,11 @@
 //! module answers the two questions that follow, and neither of them needs a GPU counter:
 //!
 //! 1. **What does the APP submit?** [`gate`] sums, per draw class, the screen-visible area of every
-//!    quad the app actually issues, on the CPU, exactly. `/tmp/plxnative-overdraw` arms it and it
+//!    quad the app actually issues, on the CPU, exactly. `/tmp/pitv-overdraw` arms it and it
 //!    logs one `OVERDRAW` line a second. This is immune to the two traps that make per-phase HWCNT
 //!    cycle counts a bad budget — it is not `glFinish`-serialised and it cannot be billed for
 //!    another process's work.
-//! 2. **What does a class COST?** `/tmp/plxnative-drawmask=<classes>` refuses every draw of the
+//! 2. **What does a class COST?** `/tmp/pitv-drawmask=<classes>` refuses every draw of the
 //!    named classes, so a whole-frame `frame.ui` HWCNT A/B against the unmasked control prices that
 //!    class *as the frame sees it*, un-serialised. `drawmask=all` draws nothing at all and is
 //!    therefore the **compositor floor**: whatever `frame.ui` still costs with an empty page is
@@ -59,7 +59,7 @@ pub enum Class {
 
 pub const NCLASS: usize = 10;
 
-/// The name each class answers to in `/tmp/plxnative-drawmask`, in [`Class`] order.
+/// The name each class answers to in `/tmp/pitv-drawmask`, in [`Class`] order.
 pub const NAMES: [&str; NCLASS] = [
     "ambient", "grad", "rect", "shadow", "card", "image", "text", "glass", "blur", "field",
 ];
@@ -91,7 +91,7 @@ mod imp {
         static FRAMES: Cell<u32> = const { Cell::new(0) };
     }
 
-    /// Arm the ledger (`/tmp/plxnative-overdraw`).
+    /// Arm the ledger (`/tmp/pitv-overdraw`).
     pub fn set_ledger(on: bool) {
         ON.with(|f| f.set(on));
         if on {

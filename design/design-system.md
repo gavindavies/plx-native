@@ -1,4 +1,4 @@
-# PlxNative design system
+# PiTV design system
 
 This is an index, not a specification. Every claim below points at the file that actually enforces
 it, because those files are checked by the compiler, by the lint gate, or by a test, and prose is
@@ -11,9 +11,9 @@ The rules you must follow when writing UI code live in
 ## The surface
 
 One fixed surface: 1920x1080, `ui::consts::SCR_W` / `SCR_H`. There is no responsive work here and no
-second viewport. Input is a webOS remote, so focus is a first-class state and hover is not a
-discovery mechanism. Text is rasterized by the TV's own text engine, so there is no font stack to
-pick and no web typography to tune.
+second viewport. Input is a remote (or the arrow keys), so focus is a first-class state and hover is
+not a discovery mechanism. Text is rasterized by the app itself from its bundled fonts, so there is
+no font stack to pick and no web typography to tune.
 
 Distance changes what legible means. `CAPTION` 24 is the stated floor for ordinary content, and
 that number is a couch measurement rather than a taste call.
@@ -32,8 +32,7 @@ From `ui/CLAUDE.md` rule 1, enforced in `rust-modules/ui/src/theme.rs`:
   hue.
 
 No raw colour literal, anywhere. Need a shade that does not exist? Add a role with a doc line saying
-what job it does. The two layers mirror the external PlxNative Design System project
-(`tokens/primitives.css` plus `tokens/colors.css`), so a palette decision is one edit in each place.
+what job it does.
 
 ## Size is a scale
 
@@ -153,5 +152,3 @@ Its contextual answer verbs share one horizontal row, separated from BODY-sized 
 | anything behind hero text | `rust-modules/ui/src/landing_hero.rs` and `widgets.rs`'s scrim section, then re-grade the anchor table |
 | a horizontal row | `rust-modules/ui/src/card_row.rs` |
 | playback UI | `rust-modules/media/src/player/CLAUDE.md` |
-| Plex data feeding UI | `rust-modules/plex/src/plex/CLAUDE.md` and `docs/pms-api.md` |
-| known gaps against official clients | `docs/parity-gaps.md` |

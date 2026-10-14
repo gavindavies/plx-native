@@ -159,7 +159,7 @@ pub(crate) fn sys_grab_wayland(winp: *mut c_void) {
 use plx_base::eventlog::log;
 
 // ------------------------------------------------------------------------------------------
-// EXPERIMENT (`/tmp/plxnative-opaque`): declare the UI surface OPAQUE where nothing is behind it
+// EXPERIMENT (`/tmp/pitv-opaque`): declare the UI surface OPAQUE where nothing is behind it
 // ------------------------------------------------------------------------------------------
 //
 // `docs/perf-damage-tracking-verdict.md` §5 is the design. The whole app has run with
@@ -203,7 +203,7 @@ pub(crate) fn opaque_region_init() {}
 /// to hint. The simulator keeps the same call site rather than growing a `cfg` at it.
 pub(crate) fn opaque_route(_player: bool) {}
 
-// ---- The COMPOSITOR FRAME-CALLBACK PROBE (`/tmp/plxnative-framecb`) -----------------------------
+// ---- The COMPOSITOR FRAME-CALLBACK PROBE (`/tmp/pitv-framecb`) -----------------------------
 //
 // A present's wait for a free back buffer is paid inside the frame's first framebuffer-0 command
 // (the `clear` span), and from inside the app that wait reads the same whether the compositor

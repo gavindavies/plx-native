@@ -247,7 +247,7 @@ pub fn available(bus: &mut impl Rpc) -> bool {
     // the closed key-not-found error. No stored key or arbitrary platform value is read.
     match bus.call(
         &format!("{URI}/begin"),
-        &json!({"name":"plxnative-capability-probe","params":params(&["encrypt"])}),
+        &json!({"name":"pitv-capability-probe","params":params(&["encrypt"])}),
     ) {
         Ok(v) if v["returnValue"] == false && v["errorCode"] == -10001 => true,
         Ok(v) if v["returnValue"] == true => {

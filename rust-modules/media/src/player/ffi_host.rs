@@ -16,14 +16,14 @@
 //! an agent that playback is broken when it is merely absent. Failing honestly and immediately is
 //! the whole contract of that path.
 //!
-//! # Opt-in: a REFUSED Load (`plxnative-refuseload[=N]`)
+//! # Opt-in: a REFUSED Load (`pitv-refuseload[=N]`)
 //!
 //! With the sink armed, refuse the first N Loads (bare flag: every Load) the way webOS 10.3.1
 //! refused the 4K60 H.264 envelope — asynchronously, by callback, after `Load()` returned ok=1.
 //! See `sf_load`. It exists so the failure read-out that refusal reaches can be driven and
 //! screenshotted on a Mac, and so a rollback that reloads can be made to fail a second time.
 //!
-//! # Opt-in: the CLOCK SINK (`plxnative-clocksink`)
+//! # Opt-in: the CLOCK SINK (`pitv-clocksink`)
 //!
 //! **It accepts access units, throws them away, and advances a presentation clock at real time.**
 //! Nothing decodes and nothing is displayed. What it makes runnable on a Mac is everything
@@ -88,7 +88,7 @@ const TICK_MS: u64 = 200;
 
 /// **Test-only arming, deliberately NOT the trigger file.** `enabled()` latches in a `OnceLock`
 /// and the runtime root it consults latches in another, both process-wide — so a unit test that
-/// armed the sink by writing `plxnative-clocksink` would pass alone and fail in a full run,
+/// armed the sink by writing `pitv-clocksink` would pass alone and fail in a full run,
 /// depending on which test touched a root first. It would also have to write into the same
 /// directory a real simulator reads. This overrides the answer directly instead, so the test is
 /// deterministic and leaves no file behind.
@@ -454,7 +454,7 @@ unsafe fn sf_load(_payload: *const c_char, epoch: u32) -> c_int {
     OBJECT_READY.store(true, Relaxed);
     LOADED.store(true, Relaxed);
     if take_refusal() {
-        // **`plxnative-refuseload[=N]`: the webOS 10.3.1 refusal, on a Mac.** The sequence is the
+        // **`pitv-refuseload[=N]`: the webOS 10.3.1 refusal, on a Mac.** The sequence is the
         // lab set's own (`docs/webos10-lab-report.md` §3.2): the pipeline acknowledges, echoes the
         // sink envelope it was handed as `type=5`, and then refuses with `type=18 num=601` —
         // AFTER `Load()` has returned ok=1. That asynchronous shape is what left the app on a black
@@ -503,7 +503,7 @@ unsafe fn sf_load(_payload: *const c_char, epoch: u32) -> c_int {
     1
 }
 
-/// How many more host Loads `plxnative-refuseload[=N]` still refuses. Read once (a trigger is a
+/// How many more host Loads `pitv-refuseload[=N]` still refuses. Read once (a trigger is a
 /// boot-time fact like every other), counted down per `sf_load`; `i64::MAX` for the bare flag.
 static REFUSALS_LEFT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
 fn take_refusal() -> bool {
@@ -516,7 +516,7 @@ fn take_refusal() -> bool {
         };
         if n > 0 {
             plx_base::eventlog::log(&format!(
-                "clocksink: plxnative-refuseload armed — the next {} Load(s) get the webOS 10.3.1 \
+                "clocksink: pitv-refuseload armed — the next {} Load(s) get the webOS 10.3.1 \
                  type=18 num=601 refusal after Load() returns ok=1",
                 if n == i64::MAX { "∞".to_string() } else { n.to_string() }
             ));

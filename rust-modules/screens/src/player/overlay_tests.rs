@@ -241,7 +241,7 @@ fn stop_stays_swallowed_by_the_three_reading_panels() {
 
 
 
-/// `resolve_menupick_row` is the `/tmp/plxnative-menupick` trigger's own parser: a plain number
+/// `resolve_menupick_row` is the `/tmp/pitv-menupick` trigger's own parser: a plain number
 /// always wins (the original "row N" contract, on either tab); a name is only ever tried on the
 /// Audio tab, and an unrecognized one — or a name asked of the Subtitles tab, which has no such
 /// map — resolves to nothing, which `menupick_arm` turns into its "unknown target" log rather than

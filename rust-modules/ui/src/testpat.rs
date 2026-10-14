@@ -7,7 +7,7 @@
 //! simulator instances launched together drift apart within seconds, and a comparison assembled by
 //! matching log lines can silently pair two different pictures. All three bit this work.
 //!
-//! So the ground becomes an input. `plxnative-testpat=<spec>` at boot, or the `pat:<spec>` remote
+//! So the ground becomes an input. `pitv-testpat=<spec>` at boot, or the `pat:<spec>` remote
 //! token live, replaces the page's picture with a pattern we choose:
 //!
 //! | spec | what it is | what it answers |
@@ -212,7 +212,7 @@ pub fn set(spec: &str) -> bool {
     true
 }
 
-/// Armed at boot from `/tmp/plxnative-testpat`. Called once, from the same place every other
+/// Armed at boot from `/tmp/pitv-testpat`. Called once, from the same place every other
 /// boot trigger is read.
 pub fn boot() {
     if let Some(v) = plx_base::devtrig::read("testpat") {

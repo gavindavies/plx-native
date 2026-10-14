@@ -109,7 +109,7 @@ mod window_activity;
 pub(crate) mod events;
 pub(crate) mod lifecycle;
 pub(crate) mod playback;
-pub(crate) mod local_launch; // `plxnative-sim <file>`: play a file from the command line
+pub(crate) mod local_launch; // `pitv <file>`: play a file from the command line
 pub(crate) mod toast;
 mod local_watch; // follows a local file's playback and keeps its place // the Linux build's toast, drawn by the app (the port delivers to it)
 pub(crate) mod input;
@@ -243,7 +243,7 @@ pub(crate) struct App {
     /// write, so it stays here rather than on `dev::scenarios::Scenarios`.
     pub(crate) t0: u32,
     /// The frame's instruments: the eight phase stamps, FRAMEDROP, the per-second peaks
-    /// (`diag::heartbeat`), armed by `plxnative-framedrop`.
+    /// (`diag::heartbeat`), armed by `pitv-framedrop`.
     instr: plx_base::diag::heartbeat::Instruments,
     /// The Input machine: owner of the press (restructure spec §2.2); the ladders borrow it.
     pub(crate) input: plx_ui::input::Input,

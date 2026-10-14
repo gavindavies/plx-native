@@ -3,7 +3,7 @@
 //!
 //! `FRAMEDROP … draw=61.5` says the draw phase ate the frame and nothing about which part of it:
 //! the page, the host snapshot's full-screen copy, the underlay field's readback, a surface's
-//! first paint. `plxnative-cpuprof` measures every `ui::profile::phase` but aggregates over sixty
+//! first paint. `pitv-cpuprof` measures every `ui::profile::phase` but aggregates over sixty
 //! frames, so the one slow frame of a modal's open — the frame this instrument exists for — is
 //! averaged into fifty-nine quick ones. A span here is per FRAME, reset at every presented frame
 //! and printed only beside the frame it belongs to.
@@ -11,9 +11,9 @@
 //! **Wall time on the render thread, no `glFinish`.** A span that contains a pipeline stall — a
 //! `glReadPixels`, a framebuffer-0 command that waits on the previous frame — reports that wait as
 //! its own time, and that is the point: the stall IS the frame's cost, and a span is where it was
-//! paid. It is not GPU time; `plxnative-hwcnt` is.
+//! paid. It is not GPU time; `pitv-hwcnt` is.
 //!
-//! Armed with the rest of the frame instrument (`plxnative-framedrop`); unarmed, [`span`] is one
+//! Armed with the rest of the frame instrument (`pitv-framedrop`); unarmed, [`span`] is one
 //! relaxed atomic load and a direct call.
 
 use std::cell::RefCell;
@@ -26,7 +26,7 @@ thread_local! {
     static SPANS: RefCell<Vec<(&'static str, u32, f64)>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Arm the instrument — `app::boot`, beside `Instruments::new`, when `plxnative-framedrop` is set.
+/// Arm the instrument — `app::boot`, beside `Instruments::new`, when `pitv-framedrop` is set.
 pub fn arm() {
     ON.store(true, Relaxed);
 }

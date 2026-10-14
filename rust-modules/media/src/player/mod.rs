@@ -56,10 +56,10 @@ fn sink() -> &'static dyn plx_platform::tv::sink::VideoSink {
     &ffi_host::HostSink
 }
 
-/// `/tmp/plxnative-tracknames[=<audio>;<subs>]` — **stand in for the container's own track names**,
+/// `/tmp/pitv-tracknames[=<audio>;<subs>]` — **stand in for the container's own track names**,
 /// which nothing off-device can read.
 ///
-/// It exists for the same reason `/tmp/plxnative-personbio` does, and the shape of the problem is
+/// It exists for the same reason `/tmp/pitv-personbio` does, and the shape of the problem is
 /// identical: the data comes from a source no automated or host run can reach, so without a seed
 /// every headless look at the screen shows the degenerate state. Here the source is the DEMUXER —
 /// `ff::track_names` publishes these when it opens a part — and the desktop simulator has no
@@ -107,7 +107,7 @@ pub fn seed_dev_track_names() {
     let (audio, subs) = (list(a), list(sub));
     #[cfg(feature = "devtriggers")]
     plx_base::eventlog::log(&format!(
-        "player: DEV track names seeded (a={} s={}) — /tmp/plxnative-tracknames",
+        "player: DEV track names seeded (a={} s={}) — /tmp/pitv-tracknames",
         audio.len(),
         subs.len()
     ));
@@ -1446,7 +1446,7 @@ fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
         // through the fault it exists to catch is worse than no instrument, because it is quoted.
         //
         // The real per-frame cadence is only observable from LG's own tracing — `GST_DEBUG=
-        // dualsequencer:6` via `/tmp/plxnative-gstlog`, whose `push_dual` and `lxvideosink`
+        // dualsequencer:6` via `/tmp/pitv-gstlog`, whose `push_dual` and `lxvideosink`
         // timestamps give one line per frame. That was long avoided as perturbing; it is not, at
         // level 6: the same scene measured 123 LUT misses uninstrumented and 122 with the trace
         // running. Level 9 IS perturbing and is what that reputation came from.

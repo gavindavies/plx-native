@@ -77,7 +77,7 @@ pub fn publish(page: f32, chrome: f32, tab: Option<usize>) {
 
 /// The cascade alpha for PAGE CONTENT — everything a screen draws that does not survive the swap.
 ///
-/// **Except under the `/tmp/plxnative-navblur` prototype**, where it is a flat 1: that experiment
+/// **Except under the `/tmp/pitv-navblur` prototype**, where it is a flat 1: that experiment
 /// replaces the grey trough with a full-bleed blur cross-faded OVER the page (see
 /// [`crate::glassload`]), and a page that also dipped would be showing both transitions at
 /// once. Everything else about the transition is unchanged, so [`blur_amount`] is exactly the ramp

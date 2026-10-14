@@ -302,7 +302,7 @@ pub fn probe() {
         // EGL_SWAP_BEHAVIOR_PRESERVED_BIT the `eglSurfaceAttrib` route is closed by the config,
         // not by policy, and no amount of asking will open it.
         probe_config(dpy, ctx, &mut lib);
-        // Only with `/tmp/plxnative-eglprobe`, because it MUTATES the live surface: ask for
+        // Only with `/tmp/pitv-eglprobe`, because it MUTATES the live surface: ask for
         // EGL_BUFFER_PRESERVED, read back what we got, and put it back the way SDL had it.
         // Empirical, because a config bit and a driver's answer have disagreed before.
         if plx_base::devtrig::flag("eglprobe") {
@@ -463,7 +463,7 @@ fn try_damage(dpy: *mut c_void, surface: *mut c_void, lib: &mut Option<Handle>) 
 }
 
 // ---------------------------------------------------------------------------------------------
-// EXPERIMENT (`/tmp/plxnative-egldamage[=WxH]`): is the unadvertised damage region REAL?
+// EXPERIMENT (`/tmp/pitv-egldamage[=WxH]`): is the unadvertised damage region REAL?
 // ---------------------------------------------------------------------------------------------
 //
 // `eglSetDamageRegionKHR` resolves and returns `EGL_TRUE`/`EGL_SUCCESS` on this driver, but
@@ -491,7 +491,7 @@ static mut DMG_WARMUP: u32 = 0;
 /// must be full damage" rule of any shippable version, arrived at from the wrong end.
 const DMG_WARMUP_FRAMES: u32 = 180;
 
-/// Resolve the damage entry points once, if `/tmp/plxnative-egldamage` is armed. `WxH` in the
+/// Resolve the damage entry points once, if `/tmp/pitv-egldamage` is armed. `WxH` in the
 /// trigger sets the rect (default 480x270, a sixteenth of the panel), anchored bottom-left
 /// because both damage specs use GL's origin, not the authored top-left one.
 fn damage_init(dpy: *mut c_void, surface: *mut c_void, lib: &mut Option<Handle>) {

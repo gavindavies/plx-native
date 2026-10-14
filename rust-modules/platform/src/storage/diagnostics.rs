@@ -1183,7 +1183,7 @@ mod tests {
         );
         assert_eq!(std::fs::read(&unrelated).unwrap(), b"sentinel");
         assert_eq!(std::fs::read_dir(&root.0).unwrap().count(), 1);
-        assert!(!unique().to_str().unwrap().starts_with("plxnative-"));
+        assert!(!unique().to_str().unwrap().starts_with("pitv-"));
         assert_eq!(
             probe(Directory::Runtime, &root.0.join("absent")).open,
             libc::ENOENT

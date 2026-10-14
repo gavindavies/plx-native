@@ -203,7 +203,7 @@ pub fn reset_shown_for_test() {
 
 /// Mark the hint as taught for this run, on every screen kind: the viewer-has-opened-a-menu state
 /// ([`mark_learned`]) and every [`Kind`]'s one showing already spent. Called once at boot by the dev
-/// trigger `plxnative-hintoff` (`app::boot`), so the site demo film, which is shot headless with no
+/// trigger `pitv-hintoff` (`app::boot`), so the site demo film, which is shot headless with no
 /// viewer to teach, is not the one place a one-time teaching overlay appears. It changes no timing
 /// and no rest clock: it only sets the two latches the hint already honours. Compiled only with
 /// `devtriggers`, so no shipping build carries it.

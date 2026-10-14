@@ -41,7 +41,7 @@ pub enum PageEdge {
 }
 
 /// The focus read-out for card `i` of `src`, drawn at `rect`: its slot in the held window and its
-/// place in the whole listing the window is part of (`plxnative-focusx`).
+/// place in the whole listing the window is part of (`pitv-focusx`).
 #[cfg(feature = "devtriggers")]
 pub(super) fn note_focused<H: Host, S: CardSource<H>>(pr: Painter, rect: Rect, i: usize, src: &S) {
     let at = pr.to_screen(rect).0;

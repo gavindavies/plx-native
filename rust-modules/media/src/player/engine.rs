@@ -580,7 +580,7 @@ pub(crate) fn load_video_refused(lv: LoadVideo, caps: &plx_platform::devcaps::Ca
 ///
 /// `maxFrameRate`: **H.264 declares the stream's own rate class** (24/25/30/50/60, never below
 /// the stream; 60 when the rate is unknown) — see the measurement inside; HEVC stays at 60, the
-/// value every Dolby Vision verification was taken under. `/tmp/plxnative-sinkmax=WxH@F`
+/// value every Dolby Vision verification was taken under. `/tmp/pitv-sinkmax=WxH@F`
 /// overrides the whole result so the remaining legs are an A/B with no rebuild. Pure; the
 /// wrappers feed it the route.
 ///
@@ -604,7 +604,7 @@ fn sink_envelope(
     // On the dev set (webOS 4.10) a 4K H.264 24p direct play declared at 60 makes the pipeline
     // announce `frameRate:24` and then, about a second later, `frameRate:30` for the same stream
     // — a 24p picture on a 30 fps lattice, i.e. pulldown judder the viewer can see. Declared at
-    // 24 or at 30 it announces 24 once and holds it (2026-09-03, `plxnative-sinkmax` A/B, three
+    // 24 or at 30 it announces 24 once and holds it (2026-09-03, `pitv-sinkmax` A/B, three
     // legs; 4K HEVC under 60 announces 24 and holds it, and 1080p H.264 under 60 does too, so
     // the rate is left at 60 for HEVC and for an unknown stream rate). **And the sink's own
     // displayed-frame counter (callback type 47, see the payload note above) put a number on
@@ -634,7 +634,7 @@ fn sink_envelope(
 
 /// The sink envelope for THIS Load, from the route (main thread), with the dev override applied.
 /// **What the two STATIC payloads declare**, as the numbers written into their strings — used on
-/// every arm that sends one (the local-sample feeds and the streamed `/tmp/plxnative-noaudio`
+/// every arm that sends one (the local-sample feeds and the streamed `/tmp/pitv-noaudio`
 /// path), so the `load:` line's `max=` reports what was SENT rather than the streamed builder's
 /// initializer. The test below pins these to the strings themselves.
 fn static_envelope(video: LoadVideo) -> SinkEnvelope {
@@ -671,7 +671,7 @@ fn sink_envelope_now(ps: &crate::playback::PlaybackSession, video: LoadVideo) ->
         if let Some(env) = parse_sinkmax(&spec) {
             #[cfg(feature = "devtriggers")]
             log(&format!(
-                "sinkmax: envelope OVERRIDDEN to {}x{}@{} by /tmp/plxnative-sinkmax",
+                "sinkmax: envelope OVERRIDDEN to {}x{}@{} by /tmp/pitv-sinkmax",
                 env.w, env.h, env.fps
             ));
             return env;
@@ -744,7 +744,7 @@ fn build_av_payload(ps: &crate::playback::PlaybackSession, video: &str, audio: &
     // Real source frame rate (direct-play only; 0 on transcode → skip): give the pipeline the true
     // fps for A/V timing instead of the sink-envelope default, + adaptiveResolution so it adapts if
     // the coded dims change. libpf parses videoFpsValue/videoFpsScale/adaptiveResolution (verified).
-    // `/tmp/plxnative-nofps` withholds the pair, for one experiment: the Dolby Vision display
+    // `/tmp/pitv-nofps` withholds the pair, for one experiment: the Dolby Vision display
     // -management lookup misses because the LUT ring is keyed ONE 90 kHz tick above what the
     // display firmware asks for (measured 2026-08-21 — 38 of 40 misses, written key == requested
     // + 1, with LG's own level-2 KADP logging armed mid-playback). Neither derivation is ours: the
@@ -754,7 +754,7 @@ fn build_av_payload(ps: &crate::playback::PlaybackSession, video: &str, audio: &
     // what it builds that lattice FROM, so it is the one remaining lever on our side.
     if plx_base::devtrig::flag("nofps") {
         #[cfg(feature = "devtriggers")]
-        log("esInfo: videoFps WITHHELD by /tmp/plxnative-nofps");
+        log("esInfo: videoFps WITHHELD by /tmp/pitv-nofps");
     } else if let Some((num, den)) = fps_rational(crate::playback::stream_fps(ps)) {
         p = p
             .replace(
@@ -973,7 +973,7 @@ fn start_bufferfeed_inner(
         return Err(crate::playback::RouteStartResult::StartFailed);
     }
     // Pick the Load codecs from the file: the video codec, and the audio codec the demuxer feeds.
-    // dev A/B: /tmp/plxnative-noaudio feeds video only (needAudio:false + skip es=2) to isolate
+    // dev A/B: /tmp/pitv-noaudio feeds video only (needAudio:false + skip es=2) to isolate
     // whether the audio ES (E-AC3/Atmos) is what stalls the sink on 4K HEVC.
     let no_audio = plx_base::devtrig::flag("noaudio");
     // On the Linux build a local file with no audio track at all plays silent
@@ -1740,7 +1740,7 @@ impl FeedSlice {
 /// What is now open is why the slot the firmware asks for — using, we measured, dualsequencer's
 /// own key — is not in the ring. That points at pairing or at slot lifetime, not at rounding.
 ///
-/// `/tmp/plxnative-ptsnudge=<ns>` is kept because it is the instrument that produced that result
+/// `/tmp/pitv-ptsnudge=<ns>` is kept because it is the instrument that produced that result
 /// and the next candidate value is one run away. Anything from 1 to ~11110 is in range; beyond
 /// that an already-correct frame is pushed a tick the other way.
 fn pts_nudge_ns() -> i64 {
@@ -2635,7 +2635,7 @@ mod prime_livelock_tests {
     fn a_segment_that_lands_whole_still_starts_the_picture() {
         let _serial = plx_base::testlock::serial();
         // Arm the host clock sink so `sf_feed` accepts AUs. See `ffi_host::FORCE_ENABLED` for why
-        // this is an explicit override and not the `plxnative-clocksink` trigger file. RESTORED on
+        // this is an explicit override and not the `pitv-clocksink` trigger file. RESTORED on
         // the way out, panic or not: it is a process-global, and leaving it armed would silently
         // change what every later test's `sf_feed` returns.
         struct DisarmSink;
@@ -3359,7 +3359,7 @@ mod lifecycle_clock_tests {
     }
 }
 
-/// **LG App Self Checklist #46 — replay after completion.** A `plxnative-playurl` stream that
+/// **LG App Self Checklist #46 — replay after completion.** A `pitv-playurl` stream that
 /// reaches EOS is started AGAIN, and that second start does not travel the UI's asynchronous
 /// request path: `app.rs` re-arms `auto_tried`, the fixture entry calls `start_playback`, and
 /// `start_bufferfeed_tracked` asks the reducer for a start owner directly. So the phase a

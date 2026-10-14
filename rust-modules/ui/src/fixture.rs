@@ -1910,13 +1910,13 @@ fn the_adapter_drain_order_is_the_documented_one() {
 
 // `dev_flags_reach_machines_only_as_recorded_sys_results` (was phase 2) — DELETED, not
 // implemented. It named a mechanism that was never built the way its own name describes: a
-// "Sys" adapter/result kind that would let a store or screen learn about an armed `/tmp/plxnative-*`
+// "Sys" adapter/result kind that would let a store or screen learn about an armed `/tmp/pitv-*`
 // trigger only as a REPLAYED, recorded async result (the same shape an HTTP or store landing takes
 // through the dispatcher's adapter drain), so a recording could pin which flags were live the way
 // it already pins HTTP and store traffic. No such kind exists: `AppFx` (`screens/registry.rs`) has
 // no `Sys` variant, `ui::dispatch::ADAPTER_RANKS` names exactly the eleven data-fetch adapters
 // (`auth, pms, browse, search, metadata/season, person, play, metadata/detail, viewstate,
-// alt_sources, poster`) and no twelfth for triggers, and `dev.rs` — the one door onto `/tmp/plxnative-*`
+// alt_sources, poster`) and no twelfth for triggers, and `dev.rs` — the one door onto `/tmp/pitv-*`
 // — is read directly at the point a boot or a screen needs a flag (`devtrig::flag`/`devtrig::read`), gated
 // on the `devtriggers` feature, never through a store or the adapter machinery (see `AGENTS.md`'s
 // "Dev trigger files" section). The design went a different, simpler way: trigger reads are not

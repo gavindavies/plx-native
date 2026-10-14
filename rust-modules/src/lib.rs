@@ -10,7 +10,7 @@
 //! `acb_on_event`, `plx_media`'s player/mod.rs). Everything else is Rust-internal (the per-module `repr(C)`
 //! shapes are migration legacy, not ABI).
 mod app; // run_application — the Rust app core / event loop (the entry inverted from main.c; port.rs's `plex_run` hands over to it)
-mod dev; // the /tmp/plxnative-* trigger surface, behind one `devtriggers` feature — read it before adding a trigger
+mod dev; // the /tmp/pitv-* trigger surface, behind one `devtriggers` feature — read it before adding a trigger
 // Pure RELEASE_LINE-parsing helpers, `include!`d verbatim by build.rs so `cargo test --lib`
 // actually runs their unit tests (see the module for why). Nothing in the app itself calls
 // them at runtime — the version rule they implement is applied once, at compile time, by
@@ -28,7 +28,7 @@ mod system;
 /// directory and truncate the event log inside it before the app starts. Exposing the resolver
 /// keeps ONE definition of where that is — a second `env::var` read in the binary would be a
 /// second answer waiting to drift from this one.
-/// Play `path` once the app is running — `plxnative-sim <file>` (see `app::local_launch`).
+/// Play `path` once the app is running — `pitv <file>` (see `app::local_launch`).
 pub fn set_launch_file(path: std::path::PathBuf) {
     app::local_launch::set(path);
 }

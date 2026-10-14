@@ -305,7 +305,7 @@ fn probe_jail() {
 /// failed — the log line says what was ASKED, never that it worked, and the screenshot is what
 /// says whether it did.
 ///
-/// `/tmp/plxnative-gohome=<sam|minimize>` forces one leg, so both can be exercised in one device
+/// `/tmp/pitv-gohome=<sam|minimize>` forces one leg, so both can be exercised in one device
 /// session instead of only whichever happens to answer first. Compiled out under `RELEASE=1`.
 ///
 /// **Not rate-limited here** — [`crate::tv::home::take_root_press`] is, and `app.rs` claims the

@@ -1,4 +1,4 @@
-//! The developer-trigger surface: files under the runtime's `plxnative-*` trigger names that
+//! The developer-trigger surface: files under the runtime's `pitv-*` trigger names that
 //! switch on a diagnostic for one run.
 //!
 //! Every read goes through [`plx_base::devtrig`], a base-layer module that is `#[cfg]`-gated on the

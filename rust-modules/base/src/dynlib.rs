@@ -418,7 +418,7 @@ mod tests {
     /// Cheap, but it is the branch every non-TV host takes, including this test runner.
     #[test]
     fn absent_library_is_reported_not_opened() {
-        assert!(Handle::open(&["libplxnative-does-not-exist.so.99"]).is_none());
+        assert!(Handle::open(&["libpitv-does-not-exist.so.99"]).is_none());
     }
 
     /// `load_into` on an absent library must report `NoLibrary` and leave every cell null, so a
@@ -427,7 +427,7 @@ mod tests {
     fn a_failed_load_publishes_nothing() {
         static A: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
         static B: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
-        static CAND: &[&str] = &["libplxnative-nope.so.99"];
+        static CAND: &[&str] = &["libpitv-nope.so.99"];
         let v = load_into(None, CAND, &[("x", &A), ("y", &B)]);
         assert!(matches!(v, Loaded::NoLibrary));
         assert!(A.load(Ordering::Acquire).is_null() && B.load(Ordering::Acquire).is_null());
@@ -469,7 +469,7 @@ mod tests {
     /// through to the real one, which is precisely the 57-vs-58 behaviour the TV path depends on.
     #[test]
     fn first_openable_candidate_wins() {
-        assert!(Handle::open(&["libplxnative-nope.so.1", HOST_LIBC[0]]).is_some());
+        assert!(Handle::open(&["libpitv-nope.so.1", HOST_LIBC[0]]).is_some());
     }
 
     /// `open_loaded` answers only for a library that is already mapped, and never loads one:
@@ -478,8 +478,8 @@ mod tests {
     #[test]
     fn open_loaded_finds_only_what_is_already_mapped() {
         let mapped = "libc.so.6";
-        assert!(Handle::open_loaded(&["libplxnative-nope.so.1"]).is_none());
-        let (h, name) = Handle::open_loaded(&["libplxnative-nope.so.1", mapped])
+        assert!(Handle::open_loaded(&["libpitv-nope.so.1"]).is_none());
+        let (h, name) = Handle::open_loaded(&["libpitv-nope.so.1", mapped])
             .expect("the C library is mapped in every process");
         assert_eq!(name, mapped);
         assert!(h.sym("malloc").is_some_and(|p| !p.is_null()));

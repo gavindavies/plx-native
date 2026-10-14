@@ -334,7 +334,7 @@ const STALL_MS: u64 = 250;
 /// Join a worker and report what THIS thread paid for it.
 ///
 /// The counterpart to [`spawn`], and the reason it exists rather than a bare `let _ = h.join();`:
-/// the frame loop has an FPS heartbeat, `/tmp/plxnative-framedrop` catches the frames that blow the
+/// the frame loop has an FPS heartbeat, `/tmp/pitv-framedrop` catches the frames that blow the
 /// budget, and `ui::profile` splits a frame by draw phase — but none of them can see a worker, and
 /// every teardown stall this engine has had was the main thread parked in one of these joins with
 /// no number left behind. Unconditional: an `Instant` pair around a call whose whole purpose is to

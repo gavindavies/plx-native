@@ -3,7 +3,7 @@ use super::wire::ErrorCode;
 use std::path::Path;
 
 pub fn app_identity(executable: &Path) -> Result<&str, ErrorCode> {
-    if executable.file_name().and_then(|n| n.to_str()) != Some("plxnative-storage") {
+    if executable.file_name().and_then(|n| n.to_str()) != Some("pitv-storage") {
         return Err(ErrorCode::Invalid);
     }
     let dir = executable.parent().ok_or(ErrorCode::Invalid)?;
@@ -37,17 +37,17 @@ mod tests {
 
     #[test]
     fn nightly_app_identity() {
-        assert_eq!(app_identity(Path::new("/media/developer/apps/usr/palm/services/com.beb.plxnative.nightly.storage/plxnative-storage")), Ok("com.beb.plxnative.nightly"));
+        assert_eq!(app_identity(Path::new("/media/developer/apps/usr/palm/services/com.beb.plxnative.nightly.storage/pitv-storage")), Ok("com.beb.plxnative.nightly"));
     }
 
     #[test]
     fn rejects_foreign_or_malformed_install_paths() {
         for path in [
-            "/usr/palm/services/com.beb.plxnative.typo.storage/plxnative-storage",
-            "/usr/palm/services/com.beb.plxnative.nightly/plxnative-storage",
-            "/usr/palm/applications/com.beb.plxnative.nightly.storage/plxnative-storage",
+            "/usr/palm/services/com.beb.plxnative.typo.storage/pitv-storage",
+            "/usr/palm/services/com.beb.plxnative.nightly/pitv-storage",
+            "/usr/palm/applications/com.beb.plxnative.nightly.storage/pitv-storage",
             "/usr/palm/services/com.beb.plxnative.nightly.storage/other",
-            "plxnative-storage",
+            "pitv-storage",
         ] {
             assert_eq!(app_identity(Path::new(path)), Err(ErrorCode::Invalid));
         }

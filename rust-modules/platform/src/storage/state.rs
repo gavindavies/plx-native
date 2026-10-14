@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
 
-pub const FORMAT: &str = "plxnative-state";
+pub const FORMAT: &str = "pitv-state";
 pub const SCHEMA: u32 = 1;
 pub const MAX_LOGICAL_BYTES: usize = 256 * 1024;
 pub const MAX_ENCODED_BYTES: usize = 512 * 1024;

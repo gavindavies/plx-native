@@ -21,7 +21,7 @@ pub mod state;
 #[path = "../storage_service/wire.rs"]
 pub mod wire;
 
-const FORMAT: &str = "plxnative-record";
+const FORMAT: &str = "pitv-record";
 const VERSION: u64 = 1;
 const MAX_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -866,7 +866,7 @@ mod tests {
     #[test]
     fn ordinary_missing_file_is_reported_absent_by_the_production_helper() {
         let path =
-            std::env::temp_dir().join(format!("plxnative-cleanup-missing-{}", std::process::id()));
+            std::env::temp_dir().join(format!("pitv-cleanup-missing-{}", std::process::id()));
         let _ = std::fs::remove_file(&path);
         assert_eq!(
             remove_file_or_prove_absent(&path).unwrap(),
@@ -879,7 +879,7 @@ mod tests {
     impl Scratch {
         fn new() -> Self {
             let p = std::env::temp_dir().join(format!(
-                "plxnative-storage-{}-{}",
+                "pitv-storage-{}-{}",
                 std::process::id(),
                 rand_suffix()
             ));
@@ -961,7 +961,7 @@ mod tests {
         let s = JsonStore::new(d.0.clone()).unwrap();
         std::fs::write(d.0.join("session.json"), br#"{"format":"other"}"#).unwrap();
         assert_eq!(s.load(RecordKey::Session), Err(StoreError::UnknownFormat));
-        std::fs::write(d.0.join("session.json"), br#"{"format":"plxnative-record","version":1,"domain":"consent","key":"session","revision":1,"state":"Cleared"}"#).unwrap();
+        std::fs::write(d.0.join("session.json"), br#"{"format":"pitv-record","version":1,"domain":"consent","key":"session","revision":1,"state":"Cleared"}"#).unwrap();
         assert_eq!(
             s.load(RecordKey::Session),
             Err(StoreError::DomainKeyMismatch)
@@ -1157,7 +1157,7 @@ mod tests {
 
     #[test]
     fn a_future_record_version_is_not_a_missing_record() {
-        let bytes = br#"{"format":"plxnative-record","version":2,"domain":"session","key":"session","revision":1,"state":"Cleared"}"#;
+        let bytes = br#"{"format":"pitv-record","version":2,"domain":"session","key":"session","revision":1,"state":"Cleared"}"#;
         assert_eq!(
             parse_record(bytes, RecordKey::Session),
             Err(StoreError::UnsupportedVersion)
@@ -1166,7 +1166,7 @@ mod tests {
             parse_record(&[0xff], RecordKey::Session),
             Err(StoreError::InvalidUtf8)
         );
-        let future_with_new_field = br#"{"format":"plxnative-record","version":2,"domain":"session","key":"session","revision":1,"state":"Cleared","new_field":true}"#;
+        let future_with_new_field = br#"{"format":"pitv-record","version":2,"domain":"session","key":"session","revision":1,"state":"Cleared","new_field":true}"#;
         assert_eq!(
             parse_record(future_with_new_field, RecordKey::Session),
             Err(StoreError::UnsupportedVersion)

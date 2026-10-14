@@ -15,12 +15,12 @@ const KEY: &str = "tv.config.supportDolbyHDRContents";
 static STARTED: OnceLock<()> = OnceLock::new();
 
 plx_base::devtrig::latched_flag!(
-    /// `/tmp/plxnative-dvcaps0` — force the boot's platform answer to unsupported.
+    /// `/tmp/pitv-dvcaps0` — force the boot's platform answer to unsupported.
     pub fn forced_unsupported = "dvcaps0";
 );
 
 plx_base::devtrig::latched_flag!(
-    /// `/tmp/plxnative-dvcaps1` — force the boot's platform answer to supported.
+    /// `/tmp/pitv-dvcaps1` — force the boot's platform answer to supported.
     pub fn forced_supported = "dvcaps1";
 );
 

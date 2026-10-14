@@ -25,12 +25,12 @@ extern "C" fn remove_owned() {
     }
 }
 
-/// `$TMPDIR/plxnative-<label>-<pid>`: empty, created now, and removed (read-only subdirectories
+/// `$TMPDIR/pitv-<label>-<pid>`: empty, created now, and removed (read-only subdirectories
 /// included) when this process exits normally. Each call with the same `label` returns the same
 /// directory afresh each time (and replaces an earlier one), so callers hold the result in a
 /// `OnceLock`.
 pub fn process_dir(label: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("plxnative-{label}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("pitv-{label}-{}", std::process::id()));
     // A directory a dead process with this pid left behind is nothing this run may read.
     remove_tree(&dir);
     let _ = std::fs::create_dir_all(&dir);

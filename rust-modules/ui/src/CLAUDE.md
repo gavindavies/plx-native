@@ -303,8 +303,8 @@ process freeze, suspend, debugger stop or observer starvation from a main-thread
 rebases the stall origin, clears any warning, resets the fatal latch and reports nothing for
 that sample. A fresh uninterrupted two-second stall can still become fatal after the rebase.
 A guard's own `abort()` instead records the abort path; its log label identifies the guarded call.
-To investigate without termination, write `log` into `/tmp/plxnative-guard` before launch
-(`/tmp/plxnative-guard=log` notation; simulator: instance runtime directory). This DIAG trigger
+To investigate without termination, write `log` into `/tmp/pitv-guard` before launch
+(`/tmp/pitv-guard=log` notation; simulator: instance runtime directory). This DIAG trigger
 is latched at loop start and downgrades both fatal paths to log plus warning. It requires
 `devtriggers`; it never suppresses the profile picker. Release builds contain neither warning,
 fatal policy nor signal call, and keep the existing guard/watchdog logs.

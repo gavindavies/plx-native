@@ -1,6 +1,6 @@
-//! The `/tmp` developer-trigger PRIMITIVES: the one door onto `/tmp/plxnative-*`.
+//! The `/tmp` developer-trigger PRIMITIVES: the one door onto `/tmp/pitv-*`.
 //!
-//! This app is driven headlessly by ~44 files under `/tmp/plxnative-*`: which screen to boot to,
+//! This app is driven headlessly by ~44 files under `/tmp/pitv-*`: which screen to boot to,
 //! which item to play, which URL to stream, whether to auto-press OK, which PMS token to use.
 //! That is how `tests/run.py` and every capture scene work, and it is not going away. This module
 //! is the READ side of that surface — [`flag`], [`read`], [`read_sample`], the per-process latch
@@ -14,9 +14,9 @@
 //! It must not exist in a public build. `/tmp` is the SHARED system `/tmp` in the production jail
 //! too (mode 1777, both jail profiles), so on an ordinary user's TV every one of those files is a
 //! behaviour switch any co-resident process can throw. Three are outright takeovers:
-//! `plxnative-token` beats the signed-in session (`app.rs`'s boot gate), `plxnative-servers` hands
+//! `pitv-token` beats the signed-in session (`app.rs`'s boot gate), `pitv-servers` hands
 //! the app a whole additional server — an address AND the token to trust it with — and
-//! `plxnative-url` replaces the stream the player feeds.
+//! `pitv-url` replaces the stream the player feeds.
 //!
 //! So every read goes through here, and here is `#[cfg]`-gated on the `devtriggers` feature. In a
 //! `--no-default-features` build [`flag`] is `false` and [`read`] is `None` at COMPILE time, so
@@ -28,13 +28,13 @@
 //! `nobudget` flag on `DevFlags`), the optimizer may keep the branch and its string literals
 //! in a release build, and `ci/check-package.py` fails the package because it greps the shipped
 //! bytes for every trigger name `dev`'s `DIAG` list and [`CONTROLLED`] declare. So every
-//! statement whose literal names a trigger (a log line saying `/tmp/plxnative-…`) carries its own
+//! statement whose literal names a trigger (a log line saying `/tmp/pitv-…`) carries its own
 //! `#[cfg(feature = "devtriggers")]`. Never rely on constant folding for this.
 //!
-//! **Never open a `/tmp` path directly.** The grep that audits this (`/tmp/plxnative-` outside
+//! **Never open a `/tmp` path directly.** The grep that audits this (`/tmp/pitv-` outside
 //! `dev` and the unconditional log sinks, `ci/check-deps.sh`'s `tmppath`) is the only thing
 //! keeping the property true. A trigger's bare name is the argument to [`flag`] / [`read`] and the
-//! `plxnative-` prefix is added in [`path`], so no literal path exists to find.
+//! `pitv-` prefix is added in [`path`], so no literal path exists to find.
 
 /// The triggers a CONTROLLED boot (`app::bootstrap`: the recorder, a replay, an explicit
 /// `app-init`) may carry, as bare names. Anything else armed on a recording boot makes its typed
@@ -42,7 +42,7 @@
 ///
 /// One gated table rather than literals at each consumer, for the reason `dev`'s `DIAG` is
 /// gated: a full trigger name in the release binary is exactly what `ci/check-package.py` grades as
-/// "dev triggers compiled in", and `plxnative-noidle` is its witness. A release build never arms a
+/// "dev triggers compiled in", and `pitv-noidle` is its witness. A release build never arms a
 /// trigger (`dev::armed_triggers` is empty there), so it has no vocabulary to check against
 /// and the accessors below answer "not supported" / "not listed" without naming one.
 ///
@@ -54,11 +54,11 @@ const CONTROLLED: &[&str] = &[
     "detail", "detailsec", "detailok", "filmography", "personcredits", "nowan",
 ];
 
-/// Is the recorded trigger `trigger` (full `plxnative-<name>` form, as `dev::armed_triggers`
+/// Is the recorded trigger `trigger` (full `pitv-<name>` form, as `dev::armed_triggers`
 /// lists it) one a controlled boot supports? See [`CONTROLLED`].
 #[cfg(any(feature = "devtriggers", test, feature = "test-support"))]
 pub fn controlled_trigger(trigger: &str) -> bool {
-    trigger.strip_prefix("plxnative-").is_some_and(|name| CONTROLLED.contains(&name))
+    trigger.strip_prefix("pitv-").is_some_and(|name| CONTROLLED.contains(&name))
 }
 #[cfg(not(any(feature = "devtriggers", test, feature = "test-support")))]
 pub fn controlled_trigger(_trigger: &str) -> bool {
@@ -70,14 +70,14 @@ pub fn controlled_trigger(_trigger: &str) -> bool {
 /// was captured with, never the filesystem. Always `false` in a release build, whose list is empty.
 #[cfg(any(feature = "devtriggers", test, feature = "test-support"))]
 pub fn listed(triggers: &[String], name: &str) -> bool {
-    triggers.iter().any(|trigger| trigger.strip_prefix("plxnative-") == Some(name))
+    triggers.iter().any(|trigger| trigger.strip_prefix("pitv-") == Some(name))
 }
 #[cfg(not(any(feature = "devtriggers", test, feature = "test-support")))]
 pub fn listed(_triggers: &[String], _name: &str) -> bool {
     false
 }
 
-/// Is the trigger `name` (bare, without the `plxnative-` prefix) present?
+/// Is the trigger `name` (bare, without the `pitv-` prefix) present?
 #[cfg(feature = "devtriggers")]
 pub fn flag(name: &str) -> bool {
     path(name).exists()
@@ -91,7 +91,7 @@ pub fn flag(_name: &str) -> bool {
 ///
 /// **A `devtrig::flag` is a `stat`, so a trigger read every frame is a syscall on the 60 fps path.**
 /// Latching also fixes a correctness wrinkle that has nothing to do with cost: `tests/run.py`
-/// clears `/tmp/plxnative-*` between cases, so a later read can legitimately find the file gone
+/// clears `/tmp/pitv-*` between cases, so a later read can legitimately find the file gone
 /// mid-run and a per-frame probe would change its answer half way through a case.
 ///
 /// A macro rather than a function because the latch has to be a `static` per trigger, and a
@@ -106,7 +106,7 @@ pub fn flag(_name: &str) -> bool {
 ///
 /// ```ignore
 /// crate::devtrig::latched_flag!(
-///     /// `/tmp/plxnative-flattabs` — the material off, for an A/B against the flat capsule.
+///     /// `/tmp/pitv-flattabs` — the material off, for an A/B against the flat capsule.
 ///     fn flat_tabs_armed = "flattabs";
 /// );
 /// ```
@@ -144,7 +144,7 @@ pub fn guard_log_only() -> bool {
     *MODE.get_or_init(|| read("guard").as_deref() == Some("log"))
 }
 
-/// **`/tmp/plxnative-nowan` — refuse every name lookup, as a dead resolver would.**
+/// **`/tmp/pitv-nowan` — refuse every name lookup, as a dead resolver would.**
 ///
 /// The offline-mode reproduction. A household whose internet is down but whose LAN is up resolves
 /// no public name at all: `plex.tv`, `discover.provider.plex.tv` and — the one that matters — the
@@ -174,7 +174,7 @@ pub fn no_wan() -> Option<NoWan> {
     })
 }
 
-/// **Hold the Load-returned flag** — `plxnative-holdload[=ms]`.
+/// **Hold the Load-returned flag** — `pitv-holdload[=ms]`.
 ///
 /// `Some(ms)` when armed (default 30000 for a bare/empty trigger, per its own `parse` fallback),
 /// else `None`. `player::threads::load_thread` sleeps this many milliseconds right after the real
@@ -199,8 +199,8 @@ pub fn holdload_delay_ms() -> Option<u64> {
 }
 
 /// A raw dev payload in the runtime root, by bare NAME — only `sample.h264` and `sample.h265`,
-/// which predate the `plxnative-` prefix and feed the player a local Annex-B sample instead of a
-/// stream. Everything else here is `plxnative-<name>`; these two are the exception, so they get
+/// which predate the `pitv-` prefix and feed the player a local Annex-B sample instead of a
+/// stream. Everything else here is `pitv-<name>`; these two are the exception, so they get
 /// their own door rather than a prefix they do not have.
 ///
 /// It took an ABSOLUTE path until the flavour split, which left them as the last two runtime
@@ -221,7 +221,7 @@ pub fn read_sample(_name: &str) -> Option<Vec<u8>> {
 /// call sites gating a whole subsystem (the capture listener, the remote FIFO) rather than a read.
 pub const ENABLED: bool = cfg!(feature = "devtriggers");
 
-/// The trigger's absolute path. `/tmp/plxnative-<name>` on the television; see
+/// The trigger's absolute path. `/tmp/pitv-<name>` on the television; see
 /// [`crate::paths::runtime_dir`] for why a host build may put the whole namespace elsewhere.
 ///
 /// `test` is in the cfg beside the feature, and only for a compile reason: the test below writes
@@ -237,20 +237,20 @@ pub const ENABLED: bool = cfg!(feature = "devtriggers");
 pub fn path(name: &str) -> std::path::PathBuf {
     #[cfg(any(test, feature = "test-support"))]
     if let Some(root) = private::root() {
-        return root.join(format!("plxnative-{name}"));
+        return root.join(format!("pitv-{name}"));
     }
-    crate::paths::in_runtime_dir(&format!("plxnative-{name}"))
+    crate::paths::in_runtime_dir(&format!("pitv-{name}"))
 }
 
 /// Run `f` with THIS thread's trigger namespace redirected to a fresh private directory, which is
 /// removed afterwards (also when `f` panics).
 ///
 /// **A host test that arms a trigger must not do it in the shared runtime root.** A host test run
-/// resolves that root to the bare `/tmp` (only the `hostsim` feature lets `PLXNATIVE_RUNTIME_DIR`
+/// resolves that root to the bare `/tmp` (only the `hostsim` feature lets `PITV_RUNTIME_DIR`
 /// steer it, [`crate::paths::ENV_STEERABLE`]), and the root is one directory for the whole
 /// machine: every test binary of this `make check`, and of any other checkout's, reads the same
-/// `/tmp/plxnative-*`. `jail_fixture_keeps_repair_open_through_the_screen_tick` armed
-/// `plxnative-failtest` there for a few milliseconds, and a second process's
+/// `/tmp/pitv-*`. `jail_fixture_keeps_repair_open_through_the_screen_tick` armed
+/// `pitv-failtest` there for a few milliseconds, and a second process's
 /// `a_click_on_the_picture_toggles_play_pause_but_not_over_a_failure` that read the file in that
 /// window saw a failed playback and swallowed its click (`left: []  right: [Transport(None)]`;
 /// 119 of 150 runs with the two side by side). `serial()` cannot help, it is one process's lock.

@@ -72,7 +72,7 @@ pub trait Source {
     /// texture may still be waiting for upload). A miss claims a slot and starts the fetch —
     /// UNLESS the source declines the request, which it may do for its own admission reasons
     /// (today: an unknown card placement, a fast-moving one only under the dev
-    /// trigger `plxnative-cardspeed`, and a slot cooling down from rapid re-eviction). So `None` means empty, DEFERRED, in flight or failed, and
+    /// trigger `pitv-cardspeed`, and a slot cooling down from rapid re-eviction). So `None` means empty, DEFERRED, in flight or failed, and
     /// the cache must go on drawing its placeholder without inferring that work is under way —
     /// asking again next frame is how a deferred request is eventually honoured. Touches the
     /// source's LRU.

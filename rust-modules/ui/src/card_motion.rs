@@ -12,7 +12,7 @@
 //! held-scroll tiles stayed dark under that gate (measured on the TV, 1000-movie mock), and the
 //! at-rest lookahead plus an ungated draw shows far fewer of them. The classification is still
 //! made, because `card_motion_metrics` and the poster-gate scenes count it; the dev trigger
-//! `plxnative-cardspeed=<px/s>` brings the old decline back ([`declines_request`]).
+//! `pitv-cardspeed=<px/s>` brings the old decline back ([`declines_request`]).
 //!
 //! This is render history, never LogicalState. Two reused vectors retain only the
 //! previous/current drawn frame; walking a 1000-item document does not retain 1000
@@ -23,7 +23,7 @@ use std::cell::{Cell, RefCell};
 
 /// The speed (px/s) above which a card is classified `Moving`. A MEASUREMENT, not a gate: by
 /// default a `Moving` card still gets its poster work ([`declines_request`]). The dev trigger
-/// `plxnative-cardspeed` replaces it ([`moving_limit`]) and turns the classification back into the
+/// `pitv-cardspeed` replaces it ([`moving_limit`]) and turns the classification back into the
 /// decline the shipping app used to apply.
 const MOVING_SPEED: f32 = 120.0;
 const MAX_SAMPLE_MS: u32 = 250;
@@ -85,7 +85,7 @@ impl History {
     }
 }
 
-/// The speed limit the dev trigger `plxnative-cardspeed=<px/s>` imposed, if it did: while it is
+/// The speed limit the dev trigger `pitv-cardspeed=<px/s>` imposed, if it did: while it is
 /// `Some`, a card faster than it is `Moving` AND declines poster work ([`declines_request`]), which
 /// reproduces the gate this app shipped with (`cardspeed=120`) for an A/B on the device. Read ONCE
 /// (at the first card drawn, i.e. before any measured frame) so the hot path is an atomic load,
@@ -93,7 +93,7 @@ impl History {
 /// feature, so a release build is always `None` and this carries no `#[cfg]` pair.
 ///
 /// This crate's own unit tests never read the host's trigger file (a leftover
-/// `/tmp/plxnative-cardspeed` on a dev machine would change every speed they classify): they see
+/// `/tmp/pitv-cardspeed` on a dev machine would change every speed they classify): they see
 /// no trigger, and [`parse_limit`] is the pure rule they grade.
 fn enforced_limit() -> Option<f32> {
     static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
@@ -106,9 +106,9 @@ fn enforced_limit() -> Option<f32> {
         let limit = parse_limit(&text);
         match limit {
             Some(limit) => plx_base::eventlog::log(&format!(
-                "card_motion: moving cards above {limit} px/s decline poster work (plxnative-cardspeed)")),
+                "card_motion: moving cards above {limit} px/s decline poster work (pitv-cardspeed)")),
             None => plx_base::eventlog::log(&format!(
-                "card_motion: plxnative-cardspeed {:?} ignored (want px/s > 0); moving cards keep their poster work",
+                "card_motion: pitv-cardspeed {:?} ignored (want px/s > 0); moving cards keep their poster work",
                 text.trim())),
         }
         limit
@@ -161,13 +161,13 @@ impl Scope {
 }
 
 /// While the guard lives, a `Moving` card declines ([`declines_request`]) as it does under
-/// `plxnative-cardspeed`; the default admits it. The limit itself is untouched.
+/// `pitv-cardspeed`; the default admits it. The limit itself is untouched.
 #[cfg(any(test, feature = "test-support"))]
 pub struct EnforceGuard(Option<bool>);
 #[cfg(any(test, feature = "test-support"))]
 pub fn enforce_for_test() -> EnforceGuard { EnforceGuard(ENFORCE_FOR_TEST.with(|c| c.replace(Some(true)))) }
 /// While the guard lives, a `Moving` card is admitted - the shipping default - whatever
-/// `/tmp/plxnative-cardspeed` the host happens to hold. A test that asserts the default takes this
+/// `/tmp/pitv-cardspeed` the host happens to hold. A test that asserts the default takes this
 /// instead of trusting the latched trigger read, which a leftover file on a dev machine flips.
 #[cfg(any(test, feature = "test-support"))]
 pub fn default_for_test() -> EnforceGuard { EnforceGuard(ENFORCE_FOR_TEST.with(|c| c.replace(Some(false)))) }
@@ -181,7 +181,7 @@ impl Drop for Scope {
 
 pub fn verdict() -> Option<Verdict> { ADMISSION.with(|s| s.get()) }
 
-/// Whether a `Moving` card declines (the trigger `plxnative-cardspeed` is armed).
+/// Whether a `Moving` card declines (the trigger `pitv-cardspeed` is armed).
 fn declines_moving() -> bool {
     #[cfg(any(test, feature = "test-support"))]
     if let Some(forced) = ENFORCE_FOR_TEST.with(Cell::get) { return forced; }
@@ -189,7 +189,7 @@ fn declines_moving() -> bool {
 }
 
 /// Should a card DRAW decline to start art work for this card? An `Unknown` placement always does
-/// (one sample is needed to know a speed); a `Moving` one only under `plxnative-cardspeed`.
+/// (one sample is needed to know a speed); a `Moving` one only under `pitv-cardspeed`.
 ///
 /// **Never in a frame dump** ([`plx_gfx::dump`]): a held repeat samples at `dt == 0`, which is
 /// `Unknown` by construction, and a card that scrolled in `Moving` is `Moving` for the same reason
@@ -237,7 +237,7 @@ mod tests {
         // change what the default is.
         assert_eq!(parse_limit("junk"), None, "an unusable trigger is ignored and the default stands");
         assert_eq!(parse_limit("480"), Some(480.0));
-        assert!(!declines_in(false, Some(Verdict::Moving), false), "no plxnative-cardspeed trigger");
+        assert!(!declines_in(false, Some(Verdict::Moving), false), "no pitv-cardspeed trigger");
         let _default = default_for_test();
         assert!(!declines_moving());
     }
@@ -347,7 +347,7 @@ mod tests {
         assert!(!declines_request());
         {
             let _scope = Scope::moving_for_test();
-            assert!(declines_request(), "under plxnative-cardspeed a moving card declines");
+            assert!(declines_request(), "under pitv-cardspeed a moving card declines");
             let _inner = Scope::enter(Verdict::Settled);
             assert!(!declines_request());
         }

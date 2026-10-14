@@ -471,7 +471,7 @@ impl Material {
         }
     }
 
-    /// `/tmp/plxnative-material=<ultrathin|thin|regular|thick|ultrathick>` — the panel's material,
+    /// `/tmp/pitv-material=<ultrathin|thin|regular|thick|ultrathick>` — the panel's material,
     /// swept. Absent, [`PANEL_MATERIAL`] stands.
     pub fn parse(s: &str) -> Option<Self> {
         Some(match s.trim().to_ascii_lowercase().as_str() {
@@ -548,7 +548,7 @@ mod material_tests {
         );
     }
 
-    /// Every name the sweep accepts round-trips, so `plxnative-material` cannot silently fall back
+    /// Every name the sweep accepts round-trips, so `pitv-material` cannot silently fall back
     /// to the default on a typo it half-recognises.
     #[test]
     fn every_material_parses_from_its_own_name() {
@@ -709,7 +709,7 @@ pub mod underlay {
     /// `1 - DIM_PANEL * (1 - TINT)` = 0.70 for the middle-of-the-frame role. One number for every
     /// role, because the frost on top (`PANEL_MATERIAL`, .85) is what makes the panel read as the
     /// panel material; this only decides how much of the page's hue shows through it, and where.
-    /// `/tmp/plxnative-paneltint=<w>` sweeps it on a devtriggers build.
+    /// `/tmp/pitv-paneltint=<w>` sweeps it on a devtriggers build.
     pub const PANEL_TINT: f32 = 0.70;
     /// **The brightest the field may be under a panel**, Rec.709 over display codes — the same
     /// measure and the same number as the page ground's ceiling (`widgets::GROUND_LUMA`), and for
@@ -960,7 +960,7 @@ pub const GLASS_RIM_LIGHT: [f32; 4] = with_a(WHITE, 0.28);
 /// where the ramp flattens into [`GLASS_RIM_LIGHT`] and there is no travel at all — matches the
 /// look slightly better and the number slightly worse; the extra tenth is kept because this is a
 /// television seen from three metres, and it is the case where the ground is BRIGHT that the ramp
-/// was built for. `/tmp/plxnative-rimmax` sweeps it without a rebuild.
+/// was built for. `/tmp/pitv-rimmax` sweeps it without a rebuild.
 ///
 /// (`line/face` stays far from the reference at every rung, and that is NOT this constant's to fix:
 /// our face is 50 where theirs is 89, which is the density policy, not the edge.)
@@ -1120,7 +1120,7 @@ pub const HINT_GLASS_BOT: [f32; 4] = TAB_TRACK_TOP;
 /// tab bar's −27% on its own page — i.e. ours is CLOSER to its backdrop than the reference is to
 /// its own, which is the opposite of the story these numbers were first told to support.
 ///
-/// So the constant stays where it was. `/tmp/plxnative-trackmax` sweeps it, and the honest way to
+/// So the constant stays where it was. `/tmp/pitv-trackmax` sweeps it, and the honest way to
 /// make this bar lighter is [`super::widgets::TRACK_INK_CONTRAST`] — the 4:1 promise is what puts
 /// the density where it is, and `the_lift_never_spends_the_labels_contrast` marks the boundary: the
 /// guarantee survives a ceiling of .62 and dies at .60.

@@ -190,7 +190,7 @@ pub(crate) fn close_player_overlays(pages: &mut plx_ui::dispatch::Dispatcher<sup
 /// `route::commit_audio_selection`/`commit_subtitle_selection` take the playback session's `&mut`,
 /// which no screen has (§2.2) — the panel returns a
 /// [`TrackCommit`](plx_appkit::track_menu::TrackCommit) and this is where it lands, from the
-/// overlay's `PlayerReq` and from the headless `plxnative-menupick` trigger alike.
+/// overlay's `PlayerReq` and from the headless `pitv-menupick` trigger alike.
 pub(crate) fn commit_track(
     ps: &mut plx_media::playback::PlaybackSession,
     commit: plx_appkit::track_menu::TrackCommit,

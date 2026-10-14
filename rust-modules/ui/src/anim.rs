@@ -1,5 +1,5 @@
 //! Animation diagnostic — probe the critically-damped springs that drive the UI and, when enabled
-//! (via /tmp/plxnative-anim, or the ANIM overlay toggle), (a) log each spring's settle metrics (frames,
+//! (via /tmp/pitv-anim, or the ANIM overlay toggle), (a) log each spring's settle metrics (frames,
 //! ms, overshoot %) and (b) draw a live overlay with the approach curve. Instrument a spring by
 //! calling `anim::probe(name, pos, vel, target, dt)` right after `Spring::step`. Zero cost when off.
 #![allow(dead_code)]
@@ -113,14 +113,14 @@ pub fn probe(name: &'static str, pos: f32, vel: f32, target: f32, dt: f32) {
 }
 
 // Separate stream from the main event log — the per-settle (and, if extended, per-frame) trace can
-// get large, and it should never drown the primary /tmp/plxnative-events.log debugging surface.
+// get large, and it should never drown the primary /tmp/pitv-events.log debugging surface.
 //
 // Gated on `devtriggers` — like every other per-trigger diagnostic sink (`gpu_timer`'s
-// `plxnative-gputime.jsonl`, `ui::profile`'s `plxnative-hwcnt.jsonl`) — rather than left to
+// `pitv-gputime.jsonl`, `ui::profile`'s `pitv-hwcnt.jsonl`) — rather than left to
 // `enabled()`'s runtime `false`: `ENABLED` is only ever flipped true from
 // `dev::scenarios::arm_anim`, which is itself compiled out without the feature, but a runtime
 // latch is not how this crate keeps a trigger's own NAME out of a release binary's bytes. Without
-// this gate the literal `plxnative-anim.log` path stayed in `--no-default-features` release
+// this gate the literal `pitv-anim.log` path stayed in `--no-default-features` release
 // binaries even though nothing could ever open it — exactly the class of leak
 // `ci/check-package.py`'s dev-trigger-catalog check now audits for.
 #[cfg(feature = "devtriggers")]

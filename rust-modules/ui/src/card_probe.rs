@@ -1,4 +1,4 @@
-//! `plxnative-focusx` for every card section: what the FOCUSED card of a [`Shelf`](crate::cards::Shelf)
+//! `pitv-focusx` for every card section: what the FOCUSED card of a [`Shelf`](crate::cards::Shelf)
 //! or [`Grid`](crate::cards::Grid) looked like on the frame just drawn, read by the focus
 //! fingerprint (`src/app/bridge.rs`) and graded by `tests/paging_link.py`.
 //!
@@ -76,7 +76,7 @@ fn note(seen: &mut HashMap<u64, Seen>, id: u64, now: u64, ready: bool) -> Draw {
 }
 
 plx_base::devtrig::latched_flag!(
-    /// `/tmp/plxnative-focusx`, resolved once: a per-card `stat` is not affordable.
+    /// `/tmp/pitv-focusx`, resolved once: a per-card `stat` is not affordable.
     fn trigger_armed = "focusx";
 );
 

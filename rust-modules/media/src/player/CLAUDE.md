@@ -25,7 +25,7 @@ is not one any `shutdown(2)` of ours can reach. Exactly one of the two ever has 
 and pinned to majors 63/63/61, and is built `--disable-network` with `file` as its only protocol —
 so the AVIO is not merely how bytes reach it today, it is the only way they *can*. See the root
 `docs/agent-reference.md` linking section for why. It
-emits Annex-B video AUs (param sets prepended at each keyframe) and, for AV1, Section-5 temporal units (TD OBU first, the av1C sequence header and metadata OBUs in-band on keyframes; `/tmp/plxnative-av1obu` = notd,noseq,raw tokens varies it on a debug build), for VP9 the demuxed packet unchanged (a frame carries its own headers and libpf's `video/x-vp9` caps have no `codec_data`), and AC3/EAC3, ADTS-framed AAC, or DTS core audio frames,
+emits Annex-B video AUs (param sets prepended at each keyframe) and, for AV1, Section-5 temporal units (TD OBU first, the av1C sequence header and metadata OBUs in-band on keyframes; `/tmp/pitv-av1obu` = notd,noseq,raw tokens varies it on a debug build), for VP9 the demuxed packet unchanged (a frame carries its own headers and libpf's `video/x-vp9` caps have no `codec_data`), and AC3/EAC3, ADTS-framed AAC, or DTS core audio frames,
 and seeks by time via `av_seek_frame` (libavformat's own Cues index).
 
 ## Threading model (this is the whole ballgame)
@@ -100,7 +100,7 @@ something.
   declares the stream's rate class
   (`fps_class`), HEVC keeps 60 (4K HEVC under 60 holds 24), and a transcode with no known rate
   keeps 60. AV1 (only on a set whose codec table lists an AV1 decoder) keeps HEVC's 4K60 rule,
-  clamped by `Caps::av1_row`; the clamp is unmeasured (one owner reports AV1 playing on a webOS 10.3.1 set, with no log). `/tmp/plxnative-sinkmax=WxH@F`
+  clamped by `Caps::av1_row`; the clamp is unmeasured (one owner reports AV1 playing on a webOS 10.3.1 set, with no log). `/tmp/pitv-sinkmax=WxH@F`
   overrides the envelope for the legs still unrun on 10.3.1.
 - **There IS a presented-frame instrument now, and it is not a GStreamer trace.** The payload's
   `streamQualityInfo` / `streamQualityInfoNonFlushable` keys make libpf read the video sink's
@@ -209,7 +209,7 @@ something.
   `setState(LOADED)` → *wait for decoded frames* → `setMediaVideoData(<sourceInfo envelope
   as captured; a PQ VP9 gets its HDR keys written in first, see below>)` → `setDisplayWindow` → `setState(PLAYING)`. The payload passed to
   `setMediaVideoData` is the **whole `sourceInfo` envelope** captured verbatim from the pipeline's
-  callback (`sourceInfoRaw`), not a reconstructed one — with ONE exception: a VP9 stream whose container says PQ gets `hdrType` / `mediaVui` / `mediaSei` written in first (`player/vp9_hdr.rs`), because a VP9 bitstream cannot carry the transfer function, so the pipeline's own envelope says `"hdrType":"none"` and the panel stays SDR (device-measured on the dev set, whose ACB path is the only one that sends the envelope: the TV's `picture.dynamicRange` flips to HDR with the rewrite and stays SDR with `/tmp/plxnative-novp9hdr`; webOS 5+ has no ACB, so nothing is sent there and its VP9 HDR behaviour is unknown). The envelope is otherwise untouched, and an envelope that already names an HDR type is never overridden. Audio is owned by the pipeline — **never feed
+  callback (`sourceInfoRaw`), not a reconstructed one — with ONE exception: a VP9 stream whose container says PQ gets `hdrType` / `mediaVui` / `mediaSei` written in first (`player/vp9_hdr.rs`), because a VP9 bitstream cannot carry the transfer function, so the pipeline's own envelope says `"hdrType":"none"` and the panel stays SDR (device-measured on the dev set, whose ACB path is the only one that sends the envelope: the TV's `picture.dynamicRange` flips to HDR with the rewrite and stays SDR with `/tmp/pitv-novp9hdr`; webOS 5+ has no ACB, so nothing is sent there and its VP9 HDR behaviour is unknown). The envelope is otherwise untouched, and an envelope that already names an HDR type is never overridden. Audio is owned by the pipeline — **never feed
   ACB an audio SINK or elementary stream**. That half is real and unchanged. Its long-stated
   consequence is not: `SOUND_ERROR_019` is a literal that exists in **no library on this
   television** (swept across ~70 harvested libraries including 92 MB of Chromium), and the clause
@@ -308,6 +308,6 @@ once gated `#[link]` directives out of `cfg(test)` to keep the pure logic host-t
 everything on `dynlib!` those are gone, so a test that actually calls FFmpeg now fails by taking
 `dlopen`'s `None` branch on Darwin rather than by failing to link), and the host is Darwin while the TV is
 Linux, which is why `tools/sockprobe.c` exists. So anything about *playback behaviour* is only
-observable on device: deploy and read `/tmp/plxnative-events.log` (feed stats, bind steps,
+observable on device: deploy and read `/tmp/pitv-events.log` (feed stats, bind steps,
 seek/rebase, `RECEIVE_GOOD_VIDEO`). The `tests/` harness drives real playback per case — see the root
 `docs/agent-reference.md` testing section (run as GUEST by default; never run two harness jobs at once).

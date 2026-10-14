@@ -18,14 +18,14 @@ use super::*;
 ///
 /// Falls back to the canvas size if SDL cannot answer, which is the behaviour this replaced.
 pub(crate) fn desktop_window_size() -> (c_int, c_int) {
-    // `PLXNATIVE_WIN=<w>x<h>` overrides the fit entirely — `make sim-shot SIM_W=1920 SIM_H=1080`.
+    // `PITV_WIN=<w>x<h>` overrides the fit entirely — `make sim-shot SIM_W=1920 SIM_H=1080`.
     // It exists because the fit below is chosen for a HUMAN looking at a window, and a screenshot
     // is not that: on a 1x display the divisor lands on 2 and every shot comes back 960x540, which
     // is half the canvas the UI is authored at. A hairline, a 1px edge-sheen and a snapped glyph
     // are exactly the things that do not survive that, so a shot taken to JUDGE the interface has
     // to be asked for at full size. Off-screen edges are fine for a headless grab: the drawable is
     // the window's own framebuffer, not the part of it the compositor happens to show.
-    if let Some(v) = std::env::var_os("PLXNATIVE_WIN") {
+    if let Some(v) = std::env::var_os("PITV_WIN") {
         let v = v.to_string_lossy().to_lowercase();
         if let Some((w, h)) = v.split_once('x') {
             if let (Ok(w), Ok(h)) = (w.trim().parse::<c_int>(), h.trim().parse::<c_int>()) {
@@ -145,13 +145,13 @@ pub(crate) unsafe fn boot(
         let (w, h) = desktop_window_size();
         (0x2FFF_0000u32 as c_int, 0x2FFF_0000u32 as c_int, w, h)
     };
-    let title = c"PlxNative";
+    let title = c"PiTV";
     let window_flags = SDL_WINDOW_FLAGS;
     // The Linux build is a media player on a television: full screen on the display it opens on
-    // (`SDL_WINDOW_FULLSCREEN_DESKTOP`, no mode switch), unless `PLXNATIVE_FULLSCREEN=0` asks for
-    // the desktop window. A fixed `PLXNATIVE_WIN` size (screenshots) keeps the window too.
-    let fullscreen = !(std::env::var_os("PLXNATIVE_FULLSCREEN").is_some_and(|v| v == "0")
-        || std::env::var_os("PLXNATIVE_WIN").is_some());
+    // (`SDL_WINDOW_FULLSCREEN_DESKTOP`, no mode switch), unless `PITV_FULLSCREEN=0` asks for
+    // the desktop window. A fixed `PITV_WIN` size (screenshots) keeps the window too.
+    let fullscreen = !(std::env::var_os("PITV_FULLSCREEN").is_some_and(|v| v == "0")
+        || std::env::var_os("PITV_WIN").is_some());
     let window_flags = if fullscreen { window_flags | 0x1001 } else { window_flags };
     // Created AT the display's size, not resized to it afterwards: the GL surface of a window that
     // goes full screen after creation can stay at the requested size for the first frames (seen
@@ -222,7 +222,7 @@ pub(crate) unsafe fn boot(
     let glass = plx_ui::frame::glass::GlassPlan::new();
     plx_ui::testpat::boot();
     plx_media::player::seed_dev_track_names();
-    // dev: /tmp/plxnative-framedrop — the FRAME-DROP DETECTOR. Each frame is timed (pump / draw /
+    // dev: /tmp/pitv-framedrop — the FRAME-DROP DETECTOR. Each frame is timed (pump / draw /
     // swap, no glFinish) and any frame whose total exceeds a threshold (ms; the file's content
     // overrides the 22 ms default) is logged with its phase breakdown.
     let framedrop = plx_base::devtrig::read("framedrop");
@@ -262,7 +262,7 @@ pub(crate) unsafe fn boot(
         ptr: Pointer::IDLE,
         prev: 0,
         ev: [0u8; 128],
-        // dev/testing remote: tokens written to the `plxnative-remote` FIFO become synthetic key
+        // dev/testing remote: tokens written to the `pitv-remote` FIFO become synthetic key
         // events, consumed by the ONE real key handler.
         remote: crate::remote::Remote::open(),
         win,

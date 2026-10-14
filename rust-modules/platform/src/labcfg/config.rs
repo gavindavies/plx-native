@@ -2,7 +2,7 @@
 //!
 //! # Why the app directory and not `/tmp`
 //!
-//! Every other knob in this app arrives as a `/tmp/plxnative-*` trigger written over ssh, and on a
+//! Every other knob in this app arrives as a `/tmp/pitv-*` trigger written over ssh, and on a
 //! Cloud Test Lab set there is no ssh: the **.ipk is the only channel into the device**. So the
 //! session's endpoint, secret and certificate pin are staged into the package beside the binary
 //! (`make LAB=1 … ipk`, `ci/mkipk.py`) and resolved here through [`plx_base::paths::in_app_dir`] — the

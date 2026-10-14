@@ -708,7 +708,7 @@ impl Sources {
             // Query the scene that produced the retained image at the CURRENT sampling rects.
             // Growing into an unchanged part of its captured union is not underlay damage.
             if current != captured {
-                // Armed probe only (`plxnative-framedrop`): name the draw that made the compare
+                // Armed probe only (`pitv-framedrop`): name the draw that made the compare
                 // unequal. Unarmed this is one relaxed load and nothing else.
                 if e.valid && plx_base::diag::spans::armed() {
                     let region = e.members.iter().copied().reduce(union).map_or([0.0; 4], |r| {

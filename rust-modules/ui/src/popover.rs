@@ -9,7 +9,7 @@
 //! whole cost of having the modal up. Measured on the television at commit `c75d50ae`: the detail
 //! page under an open track panel presented every frame at `draw≈75 ms` — `loop=30` while paging —
 //! against 60 fps and `worstframe≈29 ms` for the same page with no panel. The class bisect
-//! (`/tmp/plxnative-drawmask`) priced it as fill and nothing else: `all` 17 ms (the compositor
+//! (`/tmp/pitv-drawmask`) priced it as fill and nothing else: `all` 17 ms (the compositor
 //! floor), `glass` 50, `rect` 51, `grad` 50, `card` 73, `text` 75 — i.e. the page's own full-screen
 //! ground, the modal scrim and the panel's glass each cost a vsync slot and they overlap.
 //!

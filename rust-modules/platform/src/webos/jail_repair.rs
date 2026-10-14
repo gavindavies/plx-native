@@ -8,8 +8,8 @@ use crate::tv::sandbox::Failure;
 use serde_json::Value;
 use std::path::Path;
 
-const OK_MARKER: &str = "PLXNATIVE_JAIL_REPAIR_OK_74";
-const NOT_ROOT_MARKER: &str = "PLXNATIVE_JAIL_REPAIR_NOT_ROOT_74";
+const OK_MARKER: &str = "PITV_JAIL_REPAIR_OK_74";
+const NOT_ROOT_MARKER: &str = "PITV_JAIL_REPAIR_NOT_ROOT_74";
 const HBC_ABSENT_TEXT: &str = "Service does not exist: org.webosbrew.hbchannel.service.";
 
 /// Called only by the PlayerAdapter worker after the owner accepts explicit confirmation.
@@ -116,8 +116,8 @@ mod tests {
         for output in [
             "",
             "ok",
-            "PLXNATIVE_JAIL_REPAIR_OK_74\n",
-            "PLXNATIVE_JAIL_REPAIR_OK_74 extra",
+            "PITV_JAIL_REPAIR_OK_74\n",
+            "PITV_JAIL_REPAIR_OK_74 extra",
         ] {
             assert_eq!(
                 repair(|_| Ok(reply(output)), &dir(id), id, || true),

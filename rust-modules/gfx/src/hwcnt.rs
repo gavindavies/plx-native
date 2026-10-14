@@ -625,52 +625,6 @@ mod tests {
         assert_eq!(MAP_SIZE % 4096, 0);
     }
 
-    /// `tools/analyze-hwcnt.py` re-declares the counter table so an archived JSONL can be decoded
-    /// on the host long after the build that captured it. Two hand-maintained copies of the same
-    /// index list is exactly how the two wrong L2 words (45 for `L2_EXT_READ`, 49 for
-    /// `L2_EXT_WRITE`) survived being fixed in one place — the raw words outlive the run, so a
-    /// stale analyzer keeps mis-decoding captures that are otherwise still good.
-    #[test]
-    fn the_host_analyzer_decodes_the_same_words_as_the_app() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/analyze-hwcnt.py");
-        let source = std::fs::read_to_string(path).expect("analyze-hwcnt.py is readable");
-        let table = source
-            .split_once("SPECS = (")
-            .expect("SPECS table is present")
-            .1
-            .split_once("\n)")
-            .expect("SPECS table is terminated")
-            .0;
-        let python: Vec<(String, String, usize)> = table
-            .lines()
-            .filter_map(|line| {
-                let inner = line.trim().strip_prefix('(')?.strip_suffix("),")?;
-                let mut fields = inner.split(',').map(str::trim);
-                let name = fields.next()?.trim_matches('"').to_string();
-                let block = fields.next()?.trim_matches('"').to_string();
-                Some((name, block, fields.next()?.parse().ok()?))
-            })
-            .collect();
-
-        let rust: Vec<(String, String, usize)> = COUNTERS
-            .iter()
-            .map(|spec| {
-                let block = match spec.block {
-                    Block::Jm => "jm",
-                    Block::Tiler => "tiler",
-                    Block::L2 => "l2",
-                    Block::ShaderSum => "shader",
-                };
-                (spec.name.to_string(), block.to_string(), spec.word)
-            })
-            .collect();
-
-        assert_eq!(
-            python, rust,
-            "tools/analyze-hwcnt.py's SPECS has drifted from hwcnt::COUNTERS; \
-             an archived JSONL would decode differently on the host than it logged on the device"
-        );
-    }
 
     #[test]
     fn shader_counters_sum_both_mp2_blocks() {

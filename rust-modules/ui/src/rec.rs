@@ -52,7 +52,7 @@ mod measurements_tests; // `Measurements` over a memoizing native source (moved 
 /// not: the only per-frame arrival it recorded was the dispatcher's `async`, so every result the
 /// legacy pumps drain OUTSIDE that drain had no recorded frame at all, and a schema-1 recording
 /// replayed under the gate would silently grade nothing. Refusing it is the honest answer;
-/// `tools/plxnative-rec rerecord` is the verb (`tests/fixtures/replay/README.md`).
+/// `tools/pitv-rec rerecord` is the verb (`tests/fixtures/replay/README.md`).
 pub const SCHEMA: u32 = 3;
 /// Segment rotation.
 pub const SEGMENT_BYTES: usize = 2 * 1024 * 1024;
@@ -69,12 +69,12 @@ pub const CAP_BYTES: usize = 64 * 1024 * 1024;
 pub fn erase_owned_artifacts(root: &Path,
     remove_file: fn(&Path) -> std::io::Result<()>) -> Vec<String> {
     let mut failures = Vec::new();
-    for name in ["plxnative-rec", "plxnative-recplay", "plxnative-app-init", "plxnative-recordings"] {
+    for name in ["pitv-rec", "pitv-recplay", "pitv-app-init", "pitv-recordings"] {
         let path = root.join(name);
         let result = match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error),
-            Ok(metadata) if name == "plxnative-recordings" && metadata.is_dir() => fs::remove_dir_all(&path),
+            Ok(metadata) if name == "pitv-recordings" && metadata.is_dir() => fs::remove_dir_all(&path),
             Ok(_) => remove_file(&path),
         };
         if result.is_err() { failures.push(format!("{name}: could not remove owned recording artifact")); }
@@ -116,7 +116,7 @@ pub struct Header {
     /// application state; the host's state-shape fingerprint versions this payload.
     pub init_data: Value,
     pub clock_start_ms: u32,
-    /// `true` when blob capture was opted into (`plxnative-rec=blobs`).
+    /// `true` when blob capture was opted into (`pitv-rec=blobs`).
     pub blobs: bool,
 }
 
@@ -1287,7 +1287,7 @@ mod tests {
     struct LoadRoot(PathBuf);
     impl LoadRoot {
         fn new(tag: &str) -> Self {
-            let path = std::env::temp_dir().join(format!("plxnative-record-load-{}-{tag}",std::process::id()));
+            let path = std::env::temp_dir().join(format!("pitv-record-load-{}-{tag}",std::process::id()));
             fs::create_dir(&path).expect("unique recording test directory");
             let root = Self(path);
             fs::write(root.0.join("manifest.json"),serde_json::to_vec(&Header::new(17,&Init).to_json()).unwrap()).unwrap();

@@ -495,7 +495,7 @@ pub fn pump(ps: &mut crate::playback::PlaybackSession, pa: &mut super::adapter::
         if let Some(mut bytes) = bytes {
             // A VP9 stream's PQ lives in the container, which the pipeline never sees, so its own
             // envelope says "hdrType":"none". Say HDR10 here when the demuxer found PQ (see
-            // `vp9_hdr`). `/tmp/plxnative-novp9hdr` sends the envelope as the pipeline made it.
+            // `vp9_hdr`). `/tmp/pitv-novp9hdr` sends the envelope as the pipeline made it.
             let container_hdr = *SHARED.container_hdr.lock().unwrap();
             if let Some(h) = container_hdr {
                 if !plx_base::devtrig::flag("novp9hdr") {

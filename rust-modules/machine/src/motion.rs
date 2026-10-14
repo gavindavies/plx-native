@@ -8,7 +8,7 @@
 //! without a flag (the grep gate on `fp-contract`/`fast-math`/`+fma`), and the armv7 soft-float
 //! routines are correctly rounded for the five operations — which is what
 //! [`differential_table`] exists to measure: the same 4,096 operands through the same code on
-//! the host and on the television (`make softfloat-probe`, the `plxnative-softfloat` trigger),
+//! the host and on the television (`make softfloat-probe`, the `pitv-softfloat` trigger),
 //! compared as one hash. The host half is pinned here, and **the ARM half was measured on the
 //! television on 2026-09-07 (TV session 3, phase 5b) and MATCHES BIT FOR BIT**:
 //! `softfloat: n=4096 hash=0x65a8e905a259246d host=0x65a8e905a259246d MATCH`, on webOS 4.5 /
@@ -244,7 +244,7 @@ impl Phase {
 
 #[cfg(feature = "devtriggers")]
 thread_local! {
-    /// `/tmp/plxnative-stillclock=<ms>` (`dev::scenarios::screenshot`): every [`Phase`] on this
+    /// `/tmp/pitv-stillclock=<ms>` (`dev::scenarios::screenshot`): every [`Phase`] on this
     /// thread reads this many elapsed ms and reports NO motion, so a spinner is drawn at one fixed
     /// angle and a waiting screen can settle. `u32::MAX` = not held. Thread-local because the one
     /// writer and every reader are the UI thread, and a process global would leak between tests.

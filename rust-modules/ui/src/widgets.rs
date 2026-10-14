@@ -206,8 +206,8 @@ fn panel_tint_sweep() -> Option<f32> {
 /// move; what changed instead is that the panel now also gets the extra sample the bar declines,
 /// because lightening the shared snapshot for the bar had lightened the menus with it.
 ///
-/// `/tmp/plxnative-material=<ultrathin|thin|regular|thick|ultrathick>` swaps the whole material,
-/// and `/tmp/plxnative-panelfrost=<a>` still overrides the density alone for a finer sweep.
+/// `/tmp/pitv-material=<ultrathin|thin|regular|thick|ultrathick>` swaps the whole material,
+/// and `/tmp/pitv-panelfrost=<a>` still overrides the density alone for a finer sweep.
 fn panel_material() -> theme::Material {
     material_sweep().unwrap_or(theme::PANEL_MATERIAL)
 }
@@ -1978,7 +1978,7 @@ pub fn tracked_run(
 }
 
 plx_base::devtrig::latched_flag!(
-    /// **`/tmp/plxnative-tileglass` — an episode still's label band as a frosted MATERIAL instead
+    /// **`/tmp/pitv-tileglass` — an episode still's label band as a frosted MATERIAL instead
     /// of a black gradient.** An EXPERIMENT, default off, and it exists to be measured rather than
     /// to be shipped by whoever finds it.
     ///
@@ -2291,7 +2291,7 @@ pub fn hero_scrim(p: Painter, strength: f32, right: bool) {
     }
 }
 
-/// Is the one-pass hero ground armed? `/tmp/plxnative-heroground`, read once at boot.
+/// Is the one-pass hero ground armed? `/tmp/pitv-heroground`, read once at boot.
 ///
 /// EXPERIMENT, not a default. The shipped path is the four blended quads, and it stays reachable
 /// on one binary so the two are an A/B rather than a replacement.
@@ -2350,7 +2350,7 @@ pub fn hero_ground_wedge(strength: f32) -> [f32; 4] {
 /// this quantises once).
 ///
 /// **Why it is worth a program of its own.** Measured on the dev television with
-/// `/tmp/plxnative-overdraw`: Home's hero submits 5.39M authored pixels against a 2.07M-pixel panel
+/// `/tmp/pitv-overdraw`: Home's hero submits 5.39M authored pixels against a 2.07M-pixel panel
 /// — 2.60x — and the ramp (1,368,576 px) plus the wedge (1,410,048 px) are 52% of it, for fields
 /// that are three ALU operations each. Their cost is not their shading, it is that they are 2.78M
 /// more fragments through the blender landing on pixels the art has already written.
@@ -2483,7 +2483,7 @@ pub fn profile_chip_at(mx: f32, my: f32) -> bool {
 // document shape no longer has; `git log -S nav_scrim` is the recipe if a route ever grows a fixed
 // bar again.
 //
-// It took `/tmp/plxnative-navglass` with it — the frosted-material prototype of the same band. The
+// It took `/tmp/pitv-navglass` with it — the frosted-material prototype of the same band. The
 // idea (content should FROST under the top chrome rather than dissolve into flat grey) keeps coming
 // back, and the reason it lost is a television measurement, not a taste: both screens held a
 // flawless 60 fps with nothing over 20.6 ms, and the material put every second's worst frame at
@@ -5911,7 +5911,7 @@ fn track_density_step(dt: f32, d: &mut TrackDensity) {
 /// The weight is [`track_density`]'s — [`track_alpha_for`]'s solve after the attack/release spring,
 /// never the raw solve. The override bypasses both, which is what makes it a fixed-weight leg.
 ///
-/// `/tmp/plxnative-tabglassdim=<0..1>` replaces [`theme::TAB_GLASS_TOP`]'s alpha and keeps the
+/// `/tmp/pitv-tabglassdim=<0..1>` replaces [`theme::TAB_GLASS_TOP`]'s alpha and keeps the
 /// authored spread to the bottom stop, so a sweep moves ONE variable. Absent, the theme's own
 /// values are returned and the draw is byte-identical.
 ///
@@ -5989,7 +5989,7 @@ fn track_lift(ground: [f32; 3], a: f32) -> f32 {
     0.0
 }
 
-/// The lift's floor, swept by `/tmp/plxnative-tracklift=<floor>`.
+/// The lift's floor, swept by `/tmp/pitv-tracklift=<floor>`.
 ///
 /// `0` is the material as it was before the floor existed, which is what makes an A/B one launch
 /// rather than one build. Read once per process, like every other material sweep here.
@@ -6098,7 +6098,7 @@ fn track_alpha_for(ground: [f32; 3]) -> f32 {
     hi
 }
 
-/// `/tmp/plxnative-trackmax=<a>` — the density CEILING, swept.
+/// `/tmp/pitv-trackmax=<a>` — the density CEILING, swept.
 ///
 /// The ceiling is what decides how dark this bar is allowed to get over bright artwork, and it is
 /// the one remaining number between our material and the reference. Measured on a stripe ground:
@@ -6190,7 +6190,7 @@ fn track_rim(density: f32) -> ([f32; 4], [f32; 4]) {
     )
 }
 
-/// `/tmp/plxnative-rimmax=<a>` — the ceiling that ramp climbs toward, swept.
+/// `/tmp/pitv-rimmax=<a>` — the ceiling that ramp climbs toward, swept.
 ///
 /// It exists because the ramp's ceiling is the one number that decides whether the edge reads as a
 /// LIT EDGE or as a drawn white outline, and it had never been held against the reference. Measured
@@ -6366,7 +6366,7 @@ const GLASS_TRACK_BUDGET_MAX: f32 = 2.0
 
 /// Is the shared tab track wearing glass this frame?
 ///
-/// **Glass is the material.** `/tmp/plxnative-flattabs` takes it away, which is how the two are
+/// **Glass is the material.** `/tmp/pitv-flattabs` takes it away, which is how the two are
 /// compared on one television without a second binary — and the one thing that made the flat track
 /// the answer for a while is gone: the density is no longer a constant that had to be legible over
 /// every possible hero at once, so it is not forced up to the flat capsule's own weight. See
@@ -6382,11 +6382,11 @@ fn tab_glass_on(track_w: f32) -> bool {
 use plx_base::devtrig::latched_flag;
 
 latched_flag!(
-    /// `/tmp/plxnative-flattabs` — the material off, for an A/B against the flat capsule.
+    /// `/tmp/pitv-flattabs` — the material off, for an A/B against the flat capsule.
     fn flat_tabs_armed = "flattabs";
 );
 latched_flag!(
-    /// `/tmp/plxnative-groundlog` — what the sampler read and what density it chose.
+    /// `/tmp/pitv-groundlog` — what the sampler read and what density it chose.
     fn ground_log_armed = "groundlog";
 );
 
@@ -6696,7 +6696,7 @@ impl StripRender {
         } else {
             flat_ground
         };
-        // `/tmp/plxnative-groundlog` — the density is now a FUNCTION of something invisible, so the
+        // `/tmp/pitv-groundlog` — the density is now a FUNCTION of something invisible, so the
         // instrument that says what it read and what it chose is not optional. It is how the first
         // version of this was caught reading Plex's `UltraBlurColors`, which gave (0.30,0.23,0.18)
         // for a hero whose top edge is (0.00,0.68,0.91) and left the bar at its floor.

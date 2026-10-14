@@ -15,7 +15,7 @@ pub struct GlassPlan {
     /// frame's material. The strip borrows it during paint; the Bridge never owns a second copy.
     tab: TabBand,
     /// The dev backdrop-glass load dial and the blurred-transition prototype beside it
-    /// (`/tmp/plxnative-glassload`, `/tmp/plxnative-navblur`).
+    /// (`/tmp/pitv-glassload`, `/tmp/pitv-navblur`).
     dial: Dial,
 }
 
@@ -63,12 +63,12 @@ impl GlassPlan {
         self.tab.set_face(face);
     }
 
-    /// Arm the load dial from `/tmp/plxnative-glassload`'s content.
+    /// Arm the load dial from `/tmp/pitv-glassload`'s content.
     pub fn configure_dial(&mut self, spec: &str) {
         self.dial.configure(spec);
     }
 
-    /// Arm the blurred-transition prototype from `/tmp/plxnative-navblur`'s content.
+    /// Arm the blurred-transition prototype from `/tmp/pitv-navblur`'s content.
     pub fn configure_navblur(&mut self, spec: &str) {
         self.dial.configure_navblur(spec);
     }

@@ -8,7 +8,7 @@
 //!
 //! # Roots
 //!
-//! The library's top level is a list of folders ([`roots`]): `PLXNATIVE_MEDIA_DIRS`
+//! The library's top level is a list of folders ([`roots`]): `PITV_MEDIA_DIRS`
 //! (`:`-separated, like `PATH`) when it is set, else `~/Videos`. A single root is shown as its own
 //! contents; several are shown as one folder each.
 //!
@@ -95,7 +95,7 @@ fn state() -> std::sync::MutexGuard<'static, State> {
 pub fn roots() -> &'static [PathBuf] {
     static ROOTS: OnceLock<Vec<PathBuf>> = OnceLock::new();
     ROOTS.get_or_init(|| {
-        let roots = roots_from(std::env::var_os("PLXNATIVE_MEDIA_DIRS"), std::env::var_os("HOME"));
+        let roots = roots_from(std::env::var_os("PITV_MEDIA_DIRS"), std::env::var_os("HOME"));
         plx_base::eventlog::log(&format!("local: {} library folder(s)", roots.len()));
         roots
     })

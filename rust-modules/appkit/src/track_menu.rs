@@ -773,7 +773,7 @@ pub fn new(
         }
     }
 
-    /// Focus an ABSOLUTE table row — the /tmp/plxnative-menupick trigger's contract ("row N"), the
+    /// Focus an ABSOLUTE table row — the /tmp/pitv-menupick trigger's contract ("row N"), the
     /// one dev-only entry that speaks positions (the named targets below do not). The interactive
     /// path always moves relatively; this exists because the initial focus is the ACTIVE row
     /// (derived from playback state), so a relative walk from it would land elsewhere.
@@ -791,7 +791,7 @@ pub fn new(
     }
 
 
-    /// Resolve a NAMED Subtitles-tab target to a TRACK, for the `/tmp/plxnative-menupick` trigger:
+    /// Resolve a NAMED Subtitles-tab target to a TRACK, for the `/tmp/pitv-menupick` trigger:
     /// `"track:N"` is the N-th (0-based) track in PAGE ORDER — the root's track rows first, then the
     /// Other languages page A-Z with a multi-track language expanded into its own ranked page —
     /// never Off, Timing or Style. It answers the track's index in the item's list, not a table

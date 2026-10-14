@@ -36,7 +36,7 @@ pub struct MetadataState {
 
 
 /// Plex's resume rule, in ONE place (home Continue-Watching, the detail Play button, and the
-/// plxnative-play harness all apply it): resume only past 10s and before 95% watched, else start
+/// pitv-play harness all apply it): resume only past 10s and before 95% watched, else start
 /// from the beginning. Both args are MILLISECONDS; the returned position is NANOSECONDS
 /// (what `player::begin_resume` takes).
 pub fn resume_ns(resume_ms: i64, dur_ms: i64) -> i64 {

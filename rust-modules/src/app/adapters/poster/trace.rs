@@ -1,4 +1,4 @@
-//! `imgtrace` — the per-image timeline of the poster pipeline, armed by `/tmp/plxnative-imgtrace`
+//! `imgtrace` — the per-image timeline of the poster pipeline, armed by `/tmp/pitv-imgtrace`
 //! (`dev::imgtrace_armed`). Inert unless armed: every entry point returns at its first
 //! line when the latch reads `false`, and without `devtriggers` the trigger reader behind it always
 //! answers `false`, so the latch never arms.

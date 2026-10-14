@@ -3,7 +3,7 @@
 # docs/module-layers.md).
 # The root keeps the literal `version` below (release tooling reads it), `make`/CI run their usual
 # commands from this directory against this package (a bare `cargo test`/`check`/`build` here still
-# means the app only), and the helper is built with an explicit `-p plxnative-storage`. One
+# means the app only), and the helper is built with an explicit `-p pitv-storage`. One
 # `Cargo.lock`, one `.cargo/config.toml` and the same target directories serve both.
 [workspace]
 members = [
@@ -50,15 +50,15 @@ name = "plxnative_modules"
 # `ci/test_no_host_staticlib.py` holds that line.
 crate-type = ["rlib"]
 
-# The private storage helper (`plxnative-storage`) is NOT a bin of this package: it is the
+# The private storage helper (`pitv-storage`) is NOT a bin of this package: it is the
 # workspace member `storage/`. A bin here makes cargo build this whole library for it, which the
 # helper never links. See `[workspace]` above and `ci/test_storage_package_isolated.py`.
 
 # The macOS/desktop UI simulator. Not built by `make`, not shipped, and inert unless its feature is
-# on — see the `hostsim` feature below and `src/bin/sim.rs`.
+# on — see the `hostsim` feature below and `src/bin/pitv.rs`.
 [[bin]]
-name = "plxnative-sim"
-path = "src/bin/sim.rs"
+name = "pitv"
+path = "src/bin/pitv.rs"
 
 [features]
 # On by default, so every ordinary `make`, every `make test` and every on-device harness run
@@ -70,7 +70,7 @@ default = ["devtools", "devtriggers", "threadcheck"]
 # is the only test this project has, so a release build must not differ from the tested one in
 # any way that could change behaviour, only in what it paints.
 devtools = ["plx_gfx/devtools"]
-# The `/tmp/plxnative-*` trigger surface, the remote FIFO and the live capture listener — see
+# The `/tmp/pitv-*` trigger surface, the remote FIFO and the live capture listener — see
 # src/dev.rs. This one DOES change behaviour, which is exactly why it is a second feature rather
 # than more things under `devtools`: that name promises draw-only, and the promise is worth
 # keeping. Both are default-on and both are dropped by the same `--no-default-features`, so the
