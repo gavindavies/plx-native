@@ -46,6 +46,9 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
             ContentReq::LocalOpen(arg) => {
                 bridge::nav_push_with_return(&mut app.pages, AppArg::Local(arg), ret);
             }
+            ContentReq::SelectTab(n) => {
+                app.pages.nav.tabs.select(n, ret);
+            }
             ContentReq::LocalDetail(arg) => {
                 bridge::nav_push_with_return(&mut app.pages, AppArg::LocalDetail(arg), ret);
             }

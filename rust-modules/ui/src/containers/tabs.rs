@@ -84,7 +84,10 @@ impl<H: Host> TabContainer<H> {
         GroupSpec {
             id: STRIP,
             kind: GroupKind::Row { wrap: false },
-            seat: Seat::Nearest,
+            // The pill the PAGE remembered for it — a tab page keeps that pointed at its own pill
+            // (`plx_screens::tabs::TabSeat`), so UP from the content reaches the selected tab, as
+            // tvOS does; with nothing remembered the engine falls back to the nearest pill.
+            seat: Seat::Remembered,
             reachable: AxisMask::VERTICAL,
             // The strip's horizontal endpoints are terminal, independent of where a page's
             // other groups happen to be placed. Only UP/DOWN may cross to page content.

@@ -52,6 +52,7 @@ use plx_ui::widgets::{self, Art, PosterMark, StatusKind, StatusOverlay};
 use plx_ui::{Env, Painter, Rect};
 
 use super::registry::{AppFx, ContentLike, ContentReq, LocalArg};
+use super::titles::{facts, file_facts, mark_of};
 
 const RETRY_ELEM: u32 = 1;
 const FIRST_CARD_ELEM: u32 = 0x1000;
@@ -68,8 +69,13 @@ enum Sec {
 const GRID_GROUP: GroupId = GroupId(0);
 const HEADER_GROUP: GroupId = GroupId(1);
 const STATUS_GROUP: GroupId = GroupId(2);
-/// Shelf `n`'s group is `SHELF_GROUP0 + n`: ids are the page's, stable per shelf position.
+/// Shelf `n`'s group: the first shelf is group 0, like the grid — the group a freshly opened page
+/// seats (`FocusTarget::FirstInGroup`), so a tab pressed in the bar lands in its first row, as
+/// tvOS does — and shelf `n > 0` is `SHELF_GROUP0 + n`. Ids are the page's, stable per position.
 const SHELF_GROUP0: u32 = 10;
+fn shelf_group(n: usize) -> GroupId {
+    if n == 0 { GRID_GROUP } else { GroupId(SHELF_GROUP0 + n as u32) }
+}
 
 const CONTENT_TOP: f32 = MARGIN_X;
 const HEADER_TOP: f32 = CONTENT_TOP;
@@ -77,6 +83,8 @@ const HEADER_TOP: f32 = CONTENT_TOP;
 const META_DY: f32 = 65.0;
 /// The first row's poster top: the header block and one XL gap.
 const GRID_TOP: f32 = 236.0;
+/// …and on a tab page, which names itself with its pill: the tab bar's foot and the same air.
+const TAB_GRID_TOP: f32 = widgets::TOP_BAR_BOTTOM + 60.0;
 const STATUS_FRAME: Rect = Rect { x: MARGIN_X, y: 300.0, w: SCR_W - 2.0 * MARGIN_X, h: 475.0 };
 /// The poster box local artwork is decoded into (`widgets::POSTER_RES`, the catalog's own).
 const ART_RES: (std::os::raw::c_int, std::os::raw::c_int) = widgets::POSTER_RES;
@@ -101,8 +109,6 @@ const SHELF_FOOT: f32 = 30.0;
 /// SHELF_FOOT - cards::LABEL_BAND_COLLAPSED`) and above the pinned heading, which a popped poster
 /// lifts by up to `SHELF`'s heading lift.
 const SHELF_CUT: f32 = SHELF_TOP - 36.0;
-/// How many genres the facts line names.
-const GENRES_SHOWN: usize = 3;
 
 /// The listing a page shows: the folder's own, or the library's top level.
 fn listing_of(path: &str) -> Listing {
@@ -160,38 +166,6 @@ fn caption(entry: &Entry) -> String {
             Some(m) if m.year.is_some() || m.runtime_min.is_some() => facts(m.year, m.runtime_min, &[]),
             _ => file_facts(entry),
         },
-    }
-}
-
-/// `MKV · 1.4 GB`: what a video with no description is.
-pub fn file_facts(entry: &Entry) -> String {
-    let ext = entry.path.extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default();
-    let size = plx_ui::fmt::bytes(i64::try_from(entry.size).unwrap_or(i64::MAX), (1, 0, 0));
-    if ext.is_empty() { size } else { format!("{ext} · {size}") }
-}
-
-/// `2019 · 8 min · Animation, Fantasy`: the facts a description gives, each only when known.
-pub fn facts(year: Option<u16>, runtime_min: Option<u32>, genres: &[String]) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(y) = year {
-        parts.push(y.to_string());
-    }
-    if let Some(m) = runtime_min {
-        parts.push(plx_ui::fmt::dur_long(i64::from(m) * 60_000));
-    }
-    if !genres.is_empty() {
-        parts.push(genres.iter().take(GENRES_SHOWN).cloned().collect::<Vec<_>>().join(", "));
-    }
-    parts.join(" · ")
-}
-
-/// The card's watch state, as the item menu reads it: finished wins over a kept place (a finished
-/// film being watched again is still finished until the viewer says otherwise).
-pub fn mark_of(record: Option<Progress>) -> PosterMark {
-    match record {
-        Some(m) if m.watched => PosterMark::Watched,
-        Some(m) if m.offset_ms > 0 => PosterMark::InProgress,
-        _ => PosterMark::None,
     }
 }
 
@@ -316,6 +290,9 @@ enum Layout {
 
 struct Page {
     entry: EntryId,
+    /// The tab bar stands over this page (`tabs::is_tab_page`): its pill names it, so a grid page
+    /// draws no title of its own and starts under the bar.
+    tab: bool,
     /// The folder shown; empty for the library's top level.
     path: String,
     /// The folder's name, the last shelf's heading.
@@ -481,13 +458,14 @@ impl<H: ContentLike> StackPage<H> for Page {
     fn sections(&self, cx: &Cx<'_, H>, out: &mut Vec<SectionSpec<Sec>>) {
         match self.layout {
             Layout::Grid => {
-                out.push(SectionSpec::new(Sec::Head, Kind::Custom { height: GRID_TOP, focusable: false }, HEADER_GROUP).ranked(1));
-                out.push(SectionSpec::new(Sec::Items, Kind::Grid { spec: GridSpec::new(GRID_TOP, CONTENT_TOP) }, GRID_GROUP));
+                let top = if self.tab { TAB_GRID_TOP } else { GRID_TOP };
+                out.push(SectionSpec::new(Sec::Head, Kind::Custom { height: top, focusable: false }, HEADER_GROUP).ranked(1));
+                out.push(SectionSpec::new(Sec::Items, Kind::Grid { spec: GridSpec::new(top, CONTENT_TOP) }, GRID_GROUP));
             }
             Layout::Shelves => {
                 out.push(SectionSpec::new(Sec::Head, Kind::Custom { height: SHELF_TOP, focusable: false }, HEADER_GROUP).ranked(1));
                 for (n, l) in self.lists.iter().enumerate() {
-                    let id = GroupId(SHELF_GROUP0 + n as u32);
+                    let id = shelf_group(n);
                     out.push(SectionSpec::new(Sec::Shelf(n as u16), Kind::Shelf { style: l.style, heading: SHELF_HEADING }, id));
                 }
             }
@@ -546,7 +524,7 @@ impl<H: ContentLike> StackPage<H> for Page {
     fn custom_draw(&self, k: Sec, f: &mut DrawFrame<'_, '_, H>, _r: Rect, scroll: f32) {
         let p = f.painter.alpha(f.page_alpha);
         match k {
-            Sec::Head if self.layout == Layout::Grid => self.draw_header(p, scroll),
+            Sec::Head if self.layout == Layout::Grid && !self.tab => self.draw_header(p, scroll),
             Sec::Status => if !self.ready() {
                 let on = f.focus.current.is_some_and(|key| key.entry == self.entry && key.elem == RETRY_ELEM);
                 self.status_overlay(f.cx.tick.ms).focused(on).draw_measured(&Env::inert(), p, f.measure);
@@ -568,6 +546,7 @@ pub struct LocalScreen {
     seated: bool,
     stack: Stack<Sec>,
     ground: ArtGround,
+    tab_seat: super::tabs::TabSeat,
 }
 
 plx_ui::focusable_via_view!(LocalScreen, H: [ContentLike], view);
@@ -602,6 +581,7 @@ impl LocalScreen {
         };
         let mut page = Page {
             entry,
+            tab: super::tabs::is_tab_page(&super::registry::AppArg::Local(arg.clone())),
             path: arg.path.clone(),
             name: title.clone(),
             entries: Arc::new(Vec::new()),
@@ -619,7 +599,7 @@ impl LocalScreen {
         };
         let _ = page.sync();
         let stack = Stack::new(entry).home_when_unfocused(true).reveal_on_move(true);
-        Self { page, drawn: None, instance, seated: false, stack, ground: ArtGround::new(Treatment::Blurred) }
+        Self { page, drawn: None, instance, seated: false, stack, ground: ArtGround::new(Treatment::Blurred), tab_seat: Default::default() }
     }
 
     fn view<H: ContentLike>(&self) -> impl Focusable<H> + '_ {
@@ -693,6 +673,10 @@ impl<H: ContentLike> Machine<H> for LocalScreen {
                 }
             }
         }
+        if self.page.tab {
+            let arg = super::registry::AppArg::Local(LocalArg { path: self.page.path.clone() });
+            self.tab_seat.on(&arg, self.page.entry, self.instance, ev, cx, fx);
+        }
         let card = match self.stack.on(&self.page, ev, cx, fx) {
             Some(StackEvent::Card(_, card)) => Some(card),
             _ => None,
@@ -708,12 +692,22 @@ impl<H: ContentLike> Machine<H> for LocalScreen {
                 self.pin(cx);
                 Handled::No
             }
+            ScreenEvent::Activate(elem) if *elem >= plx_ui::dispatch::STRIP_BASE => {
+                let n = (*elem - plx_ui::dispatch::STRIP_BASE) as usize;
+                fx.push(plx_machine::machine::Fx::App(AppFx::Content(ContentReq::SelectTab(n))));
+                Handled::Yes
+            }
             ScreenEvent::Activate(elem) if *elem == RETRY_ELEM => {
                 request_scan(&self.page.path);
                 Handled::Yes
             }
             ScreenEvent::PressCommit(_) => {
-                if let Some(CardEvent::Activate(elem)) = card {
+                // a tab pill is a control: its commit names nothing, the engine's focus is the pill
+                let pill = cx.focus.current.filter(|k| k.entry == self.page.entry && k.elem >= plx_ui::dispatch::STRIP_BASE);
+                if let Some(k) = pill {
+                    let n = (k.elem - plx_ui::dispatch::STRIP_BASE) as usize;
+                    fx.push(plx_machine::machine::Fx::App(AppFx::Content(ContentReq::SelectTab(n))));
+                } else if let Some(CardEvent::Activate(elem)) = card {
                     self.activate(elem, fx);
                 }
                 Handled::Yes
@@ -750,6 +744,16 @@ impl<H: ContentLike> Screen<H> for LocalScreen {
     fn state(&self) -> &dyn LogicalState { self }
     fn crumb(&self, _cx: &Cx<'_, H>) -> Option<std::borrow::Cow<'_, str>> { None }
     fn prepare(&mut self, _budget: &mut plx_ui::frame::Budget, _cx: &Cx<'_, H>) {}
+    /// DOWN from the tab bar lands on the first row of cards, and UP from that row reaches the bar
+    /// (a shelf's own group stops at its top edge).
+    fn links(&self, out: &mut Vec<plx_ui::screen::Link>) {
+        use plx_ui::screen::{Dir, Link};
+        let (strip, first) = (plx_ui::containers::tabs::STRIP, GRID_GROUP); // the grid, or `shelf_group(0)`
+        out.push(Link { from: strip, dir: Dir::Down, to: first });
+        if self.page.tab {
+            out.push(Link { from: first, dir: Dir::Up, to: strip });
+        }
+    }
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>) {
         self.drawn = Some(self.page.changes);
         let p = f.painter.alpha(f.page_alpha);

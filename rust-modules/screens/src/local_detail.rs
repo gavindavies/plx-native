@@ -45,7 +45,7 @@ use plx_ui::widgets::{self, Art, Button, CircleButton, CtlPop};
 use plx_ui::{Painter, Rect};
 
 use super::item_menu::Action;
-use super::local::{facts, file_facts};
+use super::titles::{facts, file_facts};
 use super::registry::{AppFx, ContentLike, ContentReq, ItemMenuReq, LocalArg};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

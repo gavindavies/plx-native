@@ -280,6 +280,6 @@ pub(crate) unsafe fn boot(
     };
     // ROOT THE TREE AT THE LIBRARY. A `Root` on an empty stack mints the first entry, which is
     // what makes this a hard CUT — there is no outgoing screen to dip.
-    super::bridge::nav_root(&mut app.pages, AppArg::Local(plx_screens::registry::LocalArg { path: String::new() }));
+    super::bridge::nav_root(&mut app.pages, AppArg::Home);
     Ok(app)
 }

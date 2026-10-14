@@ -115,6 +115,7 @@ mod local_watch; // follows a local file's playback and keeps its place // the L
 pub(crate) mod input;
 pub(crate) mod bridge;
 pub(crate) mod content;
+pub(crate) mod tabs; // the top tab bar: its pills and strip published each frame, and its paint
 pub(crate) mod run;
 use self::boot::*;
 use self::events::*;
@@ -282,10 +283,10 @@ impl App {
     /// kept in step with the tree by `bridge::sync_page` on every frame. All four are deleted:
     /// this is a one-line read of the entry the `NavStack` holds.
     ///
-    /// The library root fallback covers exactly one moment — the frames before the first page is
+    /// The Home fallback covers exactly one moment — the frames before the first page is
     /// minted, which is boot.
     pub(crate) fn route(&self) -> AppArg {
-        self.pages.top_arg().cloned().unwrap_or(AppArg::Local(plx_screens::registry::LocalArg { path: String::new() }))
+        self.pages.top_arg().cloned().unwrap_or(AppArg::Home)
     }
 }
 

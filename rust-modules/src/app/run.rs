@@ -89,6 +89,8 @@ pub(crate) unsafe fn run(app: &mut App) {
         // first frame after its media thread returns (`player::engine::AbandonedLoad`).
         plx_media::player::engine::reap_abandoned_load(&mut app.adapters.player);
         app.bridge.publish_playback(&app.player.session, was_player);
+        // The tab bar's pills and strip, for the page the container is about to step.
+        app.bridge.publish_tabs(&mut app.pages, fr.dt);
         // The container runs its frame: the pending navigation's commit (at `PageDip`'s floor),
         // then the owned screens' inputs, ticks, timers and effects. `app/bridge.rs` is the seam.
         let (_word, tree_report) = super::bridge::frame_with_tap(

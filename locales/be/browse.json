@@ -499,5 +499,6 @@
   "browse.clock.key_changed": "Ключ вашага сервера змяніўся. Злучыце тэлевізар з інтэрнэтам адзін раз, каб праграма магла праверыць яго зноў.",
   "browse.local.resume_at": "Працягнуць з {time}",
   "browse.local.resume_time": "Працягнуць {time}",
-  "browse.local.more_in": "Яшчэ ў «{name}»"
+  "browse.local.more_in": "Яшчэ ў «{name}»",
+  "browse.local.more_info": "Падрабязней"
 }

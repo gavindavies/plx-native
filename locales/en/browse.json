@@ -2121,5 +2121,9 @@
       "name": "str"
     },
     "description": "Heading of the title page's row of other titles from the same collection or folder. {name} is the collection's or folder's name."
+  },
+  "browse.local.more_info": {
+    "value": "More Info",
+    "description": "Home hero's second button: opens the featured title's own page."
   }
 }

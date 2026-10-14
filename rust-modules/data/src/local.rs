@@ -80,6 +80,9 @@ pub struct Entry {
     /// A video with a subtitle file beside it ([`sidecars`]' naming), read from the names the
     /// scan already listed.
     pub sidecar_subs: bool,
+    /// When the title arrived: its file's (a folder's: the folder's) modification time, seconds
+    /// since the epoch, 0 when unknown. What "Recently Added" orders by.
+    pub added: u64,
 }
 
 impl Entry {
@@ -95,7 +98,7 @@ impl Entry {
 
     /// An entry with nothing known about it beyond its name, kind, poster and size.
     pub fn new(title: String, path: PathBuf, kind: EntryKind, art: Option<String>, size: u64) -> Self {
-        Entry { title, path, kind, art, size, meta: None, backdrop: None, logo: None, show: false, sidecar_subs: false }
+        Entry { title, path, kind, art, size, meta: None, backdrop: None, logo: None, show: false, sidecar_subs: false, added: 0 }
     }
 }
 
@@ -324,6 +327,8 @@ fn described(mut entry: Entry, dir: &Path, names: &[String], stem: &str, lone: b
     entry.backdrop = own(local_meta::backdrop_in(dir, names, stem)).map(|p| art_token(&p));
     entry.logo = own(local_meta::logo_in(dir, names, stem)).map(|p| art_token(&p));
     entry.sidecar_subs = !stem.is_empty() && names.iter().any(|n| sidecar_of(stem, n).is_some());
+    entry.added = std::fs::metadata(&entry.path).and_then(|m| m.modified()).ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
     entry
 }
 

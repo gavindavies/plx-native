@@ -6464,12 +6464,18 @@ pub struct TabLabels<'a> {
 fn tab_metrics_from(labels: &[String], measure: impl Fn(&std::ffi::CStr) -> f32) -> (Vec<CString>, Vec<f32>) {
     let words: Vec<CString> = labels.iter().map(|label| CString::new(label.as_str()).unwrap_or_default()).collect();
     let widths = words.iter().enumerate().map(|(i, word)| {
-        if i + 1 == words.len() { TAB_ICON_PILL_W }
+        if is_search_pill(&words, i) { TAB_ICON_PILL_W }
         else { measure(word) + 2.0 * TAB_PILL_PAD }
     }).collect();
     (words, widths)
 }
 
+/// **Pill `i` is the Search mark**: the LAST pill, published with an EMPTY label. A vocabulary
+/// that ends in a word has no Search pill at all (the Linux build has no Search screen yet, and a
+/// mark that opens nothing is a dead control).
+fn is_search_pill(labels: &[CString], i: usize) -> bool {
+    i + 1 == labels.len() && labels[i].as_bytes().is_empty()
+}
 /// Measure a published vocabulary once when it changes. The same metric rule feeds paint and
 /// input geometry; the capability keeps host fixtures independent of a loaded SDL font.
 pub fn tab_widths(labels: &[String], measure: &dyn plx_machine::machine::Measure) -> Vec<f32> {
@@ -6904,7 +6910,7 @@ impl StripRender {
                 // booleans, or a mid-travel label could darken toward ACCENT_INK with nothing bright
                 // under it (`cap_cover` is the one rule both sides read).
                 let (fm, sm) = self.top_strip.mixes((px, widths[i]));
-                if i + 1 == n {
+                if is_search_pill(labels, i) {
                     // The Search pill is a MARK, and it takes its ink from exactly the same
                     // `mixed_ink` the labels do — so it darkens toward ACCENT_INK under the focus
                     // capsule in step with its neighbours instead of being a separate colour story.
