@@ -1,4 +1,4 @@
 #!/bin/sh
-# HOST=1 builds the same pinned stack for the desktop simulator.
+# Build the bundled libass facade (pkg/libass-plx-host.so.0) for this machine.
 set -eu
 exec python3 "$(dirname "$0")/build-libass.py" "$@"
