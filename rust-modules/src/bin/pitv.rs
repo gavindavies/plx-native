@@ -10,7 +10,7 @@
 //!   PITV_RUNTIME_DIR    this instance's trigger/FIFO/log root
 //!   PITV_APP_DIR        where appfont*.ttf and the icons live (repo `pkg/`)
 
-use plxnative_modules::port::plex_run;
+
 use std::os::raw::c_int;
 
 fn main() {
@@ -23,12 +23,12 @@ fn main() {
         plxnative_modules::set_launch_file(std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
     }
 
-    let root = plxnative_modules::sim_runtime_dir();
+    let root = plxnative_modules::runtime_dir();
     if let Err(e) = std::fs::create_dir_all(&root) {
         eprintln!("pitv: cannot create runtime dir {}: {e}", root.display());
         std::process::exit(1);
     }
-    let events = plxnative_modules::sim_events_log();
+    let events = plxnative_modules::events_log();
     let banner = "linux: PiTV (GStreamer playback, local library). Frame rates here \
                   describe this machine's GPU.\n";
     if let Err(e) = std::fs::write(&events, banner) {
@@ -37,7 +37,7 @@ fn main() {
     }
     eprintln!("pitv: runtime={} log={}", root.display(), events.display());
 
-    let rc = plex_run(std::ptr::null(), 0);
+    let rc = plxnative_modules::run();
     exit_without_atexit_teardown(rc)
 }
 

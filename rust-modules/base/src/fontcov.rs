@@ -37,7 +37,7 @@
 //! ## What it reads
 //!
 //! Only the sfnt table directory and the `cmap` table, by seek — never the whole file. That
-//! matters: `pkg/appfont-cjk.ttf` is 21 MB and its cmap is 233 KB. Unicode subtable formats 4, 6,
+//! matters: a pan-CJK system face is ~20 MB and its cmap is ~233 KB. Unicode subtable formats 4, 6,
 //! 12 and 13 are decoded and **unioned**; a mapping to glyph 0 is not coverage and is excluded,
 //! which is the difference between "the cmap has an entry" and "the font can draw it".
 
@@ -386,12 +386,10 @@ pub fn shipped(name: &str) -> &'static Result<Coverage, String> {
     use std::sync::OnceLock;
     static REG: OnceLock<Result<Coverage, String>> = OnceLock::new();
     static BOLD: OnceLock<Result<Coverage, String>> = OnceLock::new();
-    static CJK: OnceLock<Result<Coverage, String>> = OnceLock::new();
     let slot = match name {
         "appfont.ttf" => &REG,
         "appfont-bold.ttf" => &BOLD,
-        "appfont-cjk.ttf" => &CJK,
-        other => panic!("no shipped-font slot for {other:?} — add one beside the other three"),
+        other => panic!("no shipped-font slot for {other:?} — add one beside the other two"),
     };
     slot.get_or_init(|| {
         // The fonts are repository payload, not crate data — `pkg/` sits beside `rust-modules/`.
@@ -589,34 +587,9 @@ mod tests {
         ("registered", '\u{00AE}'),
     ];
 
-    // LINK 2 — `appfont-cjk.ttf` (Noto Sans CJK KR, cut by tools/cut-noto-cjk.py). Checklist #6
-    // and #48 are unreachable without these: a Korean, Japanese or Chinese title is 100 % tofu
-    // in link 1.
-    const LINK2_BLOCKS: &[(&str, u32, u32)] = &[
-        ("Hangul syllables", 0xAC00, 0xD7A3),
-        ("Hangul Jamo", 0x1100, 0x11FF),
-        ("Hangul Compatibility Jamo (letters)", 0x3131, 0x318E),
-        ("Hiragana", 0x3041, 0x3096),
-        ("Katakana", 0x30A1, 0x30FA),
-        ("CJK symbols and punctuation", 0x3000, 0x303F),
-    ];
-
-    /// Han is not asserted as a whole block: Unicode leaves a handful of positions unassigned in
-    /// every CJK range, and a floor is the honest shape of "this font draws Chinese". The numbers
-    /// are the measured coverage of the pinned cut, so a subsetted or truncated replacement fails.
-    const LINK2_FLOORS: &[(&str, u32, u32, u32)] = &[
-        ("CJK unified ideographs", 0x4E00, 0x9FFF, 20_900),
-        ("CJK unified ideographs ext-A", 0x3400, 0x4DBF, 6_500),
-        ("halfwidth and fullwidth forms", 0xFF00, 0xFFEF, 200),
-    ];
-
     /// Real titles, in the scripts the chain claims. A block assertion cannot catch a font whose
     /// cmap is fine and whose *combination* is not, and these read as evidence in a PR body.
     const SAMPLES: &[(&str, &str)] = &[
-        ("Korean", "오징어 게임 · 기생충 · 부산행"),
-        ("Japanese", "君の名は。 千と千尋の神隠し ドラえもん"),
-        ("Chinese (simplified)", "流浪地球 · 让子弹飞"),
-        ("Chinese (traditional)", "臥虎藏龍 · 東京物語"),
         ("Russian", "Ирония судьбы, или С лёгким паром!"),
         ("Greek", "Ο Θίασος"),
         ("Latin with diacritics", "Amélie · Das Boot · Coração"),
@@ -684,48 +657,10 @@ mod tests {
         }
     }
 
+    /// Real titles in the scripts the shipped face claims, as one assertion.
     #[test]
-    fn bundled_fallback_covers_the_declared_cjk_set() {
-        let c = cov("appfont-cjk.ttf");
-        let mut gaps = Vec::new();
-        for &(name, lo, hi) in LINK2_BLOCKS {
-            let m = missing(&c, lo, hi);
-            if !m.is_empty() {
-                gaps.push(format!(
-                    "{name} (U+{lo:04X}..U+{hi:04X}) is missing {m:04X?}"
-                ));
-            }
-        }
-        for &(name, lo, hi, floor) in LINK2_FLOORS {
-            let n = count(&c, lo, hi);
-            if n < floor {
-                gaps.push(format!("{name}: {n} codepoints, expected at least {floor}"));
-            }
-        }
-        report("appfont-cjk.ttf", gaps);
-    }
-
-    /// Pins the cut itself. `tools/cut-noto-cjk.py` pins its INPUT by sha256; this pins its
-    /// OUTPUT, so a re-cut that silently subsets (the `Subset/NotoSansKR-VF.ttf` mistake the
-    /// script's docstring warns about drops ~5000 Han ideographs) fails here rather than on a
-    /// reviewer's television.
-    #[test]
-    fn bundled_fallback_is_the_pinned_cut() {
-        let c = cov("appfont-cjk.ttf");
-        assert_eq!(
-            c.len(), 44_810,
-            "pkg/appfont-cjk.ttf covers {} codepoints, not the 44810 of Noto Sans CJK KR \
-             (noto-cjk @ Sans2.004, Sans/Variable/TTF/NotoSansCJKkr-VF.ttf, instanced at wght 400). \
-             If the pin moved on purpose, move this number and tools/cut-noto-cjk.py's together.",
-            c.len()
-        );
-    }
-
-    /// The whole point: the chain, not any one link. This is the assertion that would have
-    /// failed on 2026-08-22 and passed on 2026-08-23.
-    #[test]
-    fn the_shipped_chain_can_draw_every_sample_string() {
-        let links = [cov("appfont.ttf"), cov("appfont-cjk.ttf")];
+    fn the_shipped_face_can_draw_every_sample_string() {
+        let links = [cov("appfont.ttf")];
         for &(script, s) in SAMPLES {
             let bad: Vec<char> = s
                 .chars()
@@ -755,7 +690,7 @@ mod tests {
     /// Pass for RTL content on the strength of this unit.**
     #[test]
     fn rtl_is_out_of_scope_and_stays_that_way() {
-        for name in ["appfont.ttf", "appfont-cjk.ttf"] {
+        for name in ["appfont.ttf", "appfont-bold.ttf"] {
             let c = cov(name);
             for (script, lo, hi) in [("Hebrew", 0x05D0u32, 0x05EAu32), ("Arabic", 0x0620, 0x064A)] {
                 let n = count(&c, lo, hi);

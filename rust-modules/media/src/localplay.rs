@@ -121,7 +121,7 @@ pub fn install(ps: &mut crate::playback::PlaybackSession, path: &Path, probe: &c
     let title = plx_data::local::entry_for(path).map_or_else(|| title_of(path), |e| e.display_title().to_owned());
     crate::playback::set_hud_title(ps, &title, &folder);
     // No account to say which subtitles are the viewer's: the interface's language leads the menu.
-    crate::playback::set_sub_pref_lang(ps, plx_platform::i18n::current().language().tag());
+    crate::playback::set_sub_pref_lang(ps, plx_platform::i18n::LANGUAGE);
     crate::playback::set_url(ps, &crate::localfile::file_url(path));
     crate::player::log(&format!(
         "localplay: {} v={} {}x{} fps={:.3} a={} (tracks: {})",

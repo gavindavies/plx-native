@@ -479,35 +479,6 @@ mod tests {
     }
 
     #[test]
-    fn belarusian_delete_question_and_complete_scope_wrap_at_the_existing_text_sizes() {
-        let _guard = plx_base::testlock::serial();
-        let measure = DisclosureMeasure;
-        let locale = plx_platform::i18n::LocaleContext::resolve(plx_platform::i18n::Preference::Be, None, None, None, None);
-        let question = plx_platform::i18n::msg::settings_consent_delete_question_in(&locale);
-        let body = plx_platform::i18n::msg::settings_consent_delete_scope_in(&locale);
-        assert!(body.contains("серверы Plex") && body.contains("Sentry") && body.contains("PostHog"));
-        let question_view = DecisionAlert::question_view(question).with_measure(&measure);
-        let body_view = DecisionAlert::body_view(body).with_measure(&measure);
-        assert!(!question_view.truncates(BODY_W));
-        assert!(!body_view.truncates(BODY_W), "the old four-line limit hid the deletion exclusions");
-        assert!(question_view.measure_h(BODY_W) > measure.line_h(theme::size::TITLE));
-        assert!(body_view.measure_h(BODY_W) > 4.0 * measure.line_h(theme::size::BODY));
-        let mut alert = DecisionAlert::new();
-        alert.open_with_body(plx_platform::i18n::msg::settings_consent_delete_question_c_in(&locale), body);
-        let l = alert.measured(&measure);
-        assert_eq!(alert.choice(), Choice::Cancel);
-        assert_eq!(l.question.w, 564.0);
-        assert_eq!(l.question.x - l.panel.x, 48.0);
-        assert_eq!(l.body.h, body_view.measure_h(BODY_W));
-        assert_eq!(l.scroll_max, 0.0, "the real translation fits without hiding any scope");
-        let (cancel, destructive) = alert.frames(&measure);
-        assert_eq!((cancel.x, cancel.y, cancel.w, cancel.h), (l.cancel.x, l.cancel.y, l.cancel.w, l.cancel.h));
-        assert_eq!(cancel.w, destructive.w);
-        assert!(l.body.y + l.body.h < cancel.y);
-        assert!(l.panel.y >= SAFE.y && l.panel.y + l.panel.h <= SAFE.y + SAFE.h);
-    }
-
-    #[test]
     fn oversized_disclosure_scrolls_to_its_end_while_both_answers_stay_inside_the_safe_area() {
         let _guard = plx_base::testlock::serial();
         let measure = DisclosureMeasure;

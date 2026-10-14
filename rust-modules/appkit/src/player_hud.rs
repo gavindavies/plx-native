@@ -2427,12 +2427,10 @@ mod tests {
     fn every_failure_row_fits_the_screen_in_every_language() {
         use plx_base::fontcov::advances::ShippedMeasure;
         use plx_ui::fit::HEADROOM;
-        use plx_platform::i18n::{language_on_this_thread_for_test, Preference};
         use plx_media::player::FailureAction as A;
         let rows: [&[A]; 2] = [&[A::TryAgain, A::Back], &[A::Back]];
         let mut out = Vec::new();
-        for language in [Preference::En, Preference::Es, Preference::Be] {
-            let _guard = language_on_this_thread_for_test(language);
+        for language in ["en"] {
             for row in rows {
                 let labels: Vec<&'static std::ffi::CStr> = row.iter().map(|a| failure_action_label(*a)).collect();
                 let o = StatusOverlay::new(Rect::FULL, c"", StatusKind::Failed).page(plx_ui::icons::Icon::Alert).reason(c"x").row(&labels);
@@ -2441,7 +2439,7 @@ mod tests {
                 let hi = frames.iter().flatten().map(|f| f.x + f.w).fold(0.0, f32::max);
                 let limit = SCR_W - 2.0 * plx_ui::consts::MARGIN_X;
                 if (hi - lo) > limit * HEADROOM || lo < plx_ui::consts::MARGIN_X {
-                    out.push(format!("{}: {row:?} spans {:.0}px of {limit:.0}", language.tag(), hi - lo));
+                    out.push(format!("{}: {row:?} spans {:.0}px of {limit:.0}", language, hi - lo));
                 }
             }
         }
@@ -2456,10 +2454,9 @@ mod tests {
         use plx_base::fontcov::advances::ShippedMeasure;
         use plx_ui::fit::HEADROOM;
         use plx_ui::text_view::TextView;
-        use plx_platform::i18n::{language_on_this_thread_for_test, msg, Preference};
+        use plx_platform::i18n::msg;
         let mut out = Vec::new();
-        for language in [Preference::En, Preference::Es, Preference::Be] {
-            let _guard = language_on_this_thread_for_test(language);
+        for language in ["en"] {
             let help = msg::widgets_reason_jail_help();
             let fits = !TextView::new(help, theme::size::CAPTION, theme::TEXT_TERTIARY)
                 .h(plx_ui::label::HAlign::Center)
@@ -2467,7 +2464,7 @@ mod tests {
                 .with_measure(&ShippedMeasure)
                 .truncates(StatusOverlay::REASON_W * HEADROOM);
             if !fits {
-                out.push(format!("{}: {help}", language.tag()));
+                out.push(format!("{}: {help}", language));
             }
         }
         assert!(out.is_empty(), "jail help cut short:\n  {}", out.join("\n  "));
@@ -2478,17 +2475,16 @@ mod tests {
     fn every_forced_verdict_fits_the_reason_slot_in_every_language() {
         use plx_base::fontcov::advances::ShippedMeasure;
         use plx_ui::fit::HEADROOM;
-        use plx_platform::i18n::{language_on_this_thread_for_test, msg, Preference};
+        use plx_platform::i18n::msg;
         let mut out = Vec::new();
-        for language in [Preference::En, Preference::Es, Preference::Be] {
-            let _guard = language_on_this_thread_for_test(language);
+        for language in ["en"] {
             for s in [msg::widgets_verdict_forced_no_original(), msg::widgets_verdict_forced_container(),
                 msg::widgets_verdict_forced_video(), msg::widgets_verdict_forced_audio(),
                 msg::widgets_verdict_forced_unauthorized(), msg::widgets_verdict_forced_open(),
                 msg::widgets_verdict_forced_audio_conversion(), msg::widgets_reason_forced_playback_help()] {
                 let c = std::ffi::CString::new(s).unwrap();
                 if StatusOverlay::failed_reason_truncates(&c, &ShippedMeasure, HEADROOM) {
-                    out.push(format!("{}: {s}", language.tag()));
+                    out.push(format!("{}: {s}", language));
                 }
             }
         }

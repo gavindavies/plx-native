@@ -87,7 +87,6 @@ impl Drop for Serial {
         // Workers the test started (a flight, a season or detail fetch) finish before the lock is
         // released: one that outlived it would write the next holder's globals.
         crate::task::drain_workers_for_test();
-        crate::storage_worker::drain_for_test();
         OWNER.store(NOBODY, Ordering::SeqCst);
     }
 }

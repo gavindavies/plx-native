@@ -26,11 +26,9 @@
 //! `(string bytes, size, bold)` — run splitting is a pure function of the string, so the key still
 //! determines the texture — and the `ink_t`/`ink_b` cap-band machinery still measures one texture.
 //!
-//! **The chain, in order:** Inter (`appfont.ttf`) → the **bundled** `appfont-cjk.ttf` → the
-//! television's own `/usr/share/fonts/DroidSansFallback.ttf`. The bundled face is the guarantee,
-//! because a submission is graded on whatever firmware the reviewer happens to have; the system
-//! face behind it is free insurance, measured present on webOS 4.10.0 (2026-08-23: 11172/11172
-//! Hangul, 20902 Han, Kana, and — see below — no Hebrew and no Arabic).
+//! **The chain, in order:** Inter (`appfont.ttf`) → the first system fallback face this machine
+//! has (`SYS_FALLBACKS`: Noto Sans CJK, Droid Sans Fallback). The app bundles no fallback face,
+//! so a title in a script Inter does not cover renders only if the system has one.
 //!
 //! **Baseline, not top.** Two faces have two line boxes, so compositing by the surface top would
 //! shift Latin down whenever a CJK glyph shared the line. Every run is placed so its baseline
@@ -53,8 +51,7 @@
 //! a size align with every other, and making it depend on the script would break that for the mixed
 //! lines this feature exists to draw.
 //!
-//! **The fallback face is NOT emboldened for bold runs.** It ships at one weight (a second is
-//! ~21 MB), and SDL_ttf's synthetic bold is `FT_Outline_Embolden` at ppem/10 — 2.2 px at
+//! **The fallback face is NOT emboldened for bold runs.** It is used at one weight, and SDL_ttf's synthetic bold is `FT_Outline_Embolden` at ppem/10 — 2.2 px at
 //! `size::MICRO`. Rendered against this face that fills 電視劇, 曇天 and 鬱 into solid blocks at
 //! **every** size in the ladder, 22 through 40. A weight mismatch beside bold Latin is a
 //! typographic compromise; an illegible ideograph is a defect, so bold runs use the regular
@@ -783,34 +780,24 @@ enum Link {
     /// Inter — `appfont.ttf` / `appfont-bold.ttf`. The app's typeface, and the ONLY link with a
     /// bold companion. 2853 codepoints.
     Base = 0,
-    /// The bundled `appfont-cjk.ttf` (Noto Sans CJK KR, `tools/cut-noto-cjk.py`). 44810
-    /// codepoints: all of Hangul, Kana, Han and CJK punctuation. Shipped rather than borrowed
-    /// because a submission is graded on whichever firmware the reviewer has.
-    Cjk = 1,
-    /// The television's own `DroidSansFallback.ttf`. Free insurance behind the bundled face —
-    /// measured on webOS 4.10.0 as covering the same Hangul/Han/Kana ground — and it costs
-    /// nothing when it is absent, as it is on the desktop simulator and the macOS app.
-    ///
-    /// **That measurement is ONE television and cannot be generalised.** `tools/fwcompat.py`
-    /// grades symbols, not filesystems, so it has nothing to say about a font PATH on the other 13
-    /// releases; we have no images for them. This is precisely why link 2 is bundled rather than
-    /// borrowed — this link is a bonus that may or may not exist, and the code treats it as such.
-    Sys = 2,
+    /// The system's pan-CJK fallback face, the first of [`SYS_FALLBACKS`] that exists. It costs
+    /// nothing when absent: the chain is then simply shorter.
+    Sys = 1,
 }
-const CHAIN: [Link; 3] = [Link::Base, Link::Cjk, Link::Sys];
+const CHAIN: [Link; 2] = [Link::Base, Link::Sys];
 
-/// The bundled fallback face, cut by `tools/cut-noto-cjk.py` and staged beside the binary.
-const CJK_FONT: &str = "appfont-cjk.ttf";
-/// The television's pan-CJK fallback. Distinct from [`DROIDSANS`], which is the *Latin* face and a
-/// defect path: reaching this one is normal and expected on a Korean library.
-const DROIDSANS_FALLBACK: &str = "/usr/share/fonts/DroidSansFallback.ttf";
+/// System fallback faces, in preference order (Debian/Raspberry Pi OS package paths).
+const SYS_FALLBACKS: [&str; 3] = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+    "/usr/share/fonts/truetype/droid/DroidSansFallback.ttf",
+];
 
-static mut FONTS_CJK: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
 static mut FONTS_SYS: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
 /// Per-link coverage, read from the file's cmap on FIRST NEED and never again. `None` after
 /// `COV_TRIED` means the file is absent or unreadable, i.e. the link is empty.
-static mut COV: [Option<plx_base::fontcov::Coverage>; 3] = [None, None, None];
-static mut COV_TRIED: [bool; 3] = [false; 3];
+static mut COV: [Option<plx_base::fontcov::Coverage>; 2] = [None, None];
+static mut COV_TRIED: [bool; 2] = [false; 2];
 
 /// The ONE place a link's file is named — both the coverage read and the `TTF_OpenFont` go
 /// through it, so the two can never disagree about which file a link is.
@@ -820,8 +807,11 @@ fn link_file(link: Link) -> std::path::PathBuf {
         // `bold_face_covers_exactly_what_the_regular_one_does` asserts the two are identical in
         // `make check` — the gate is not decoration here, it is what makes one read enough.
         Link::Base => plx_base::paths::in_app_dir("appfont.ttf"),
-        Link::Cjk => plx_base::paths::in_app_dir(CJK_FONT),
-        Link::Sys => std::path::PathBuf::from(DROIDSANS_FALLBACK),
+        Link::Sys => SYS_FALLBACKS
+            .iter()
+            .map(std::path::PathBuf::from)
+            .find(|p| p.exists())
+            .unwrap_or_else(|| std::path::PathBuf::from(SYS_FALLBACKS[0])),
     }
 }
 
@@ -848,8 +838,8 @@ unsafe fn link_covers(link: Link, cp: u32) -> bool {
                 ));
                 cov[i] = Some(c);
             }
-            // Not a failure for Cjk/Sys — a television without DroidSansFallback, or a host
-            // simulator with no bundled face, simply has a shorter chain. Logged once either way,
+            // Not a failure for Sys — a machine without a fallback face simply has a shorter
+            // chain. Logged once either way,
             // WITH the path, because "why is this still tofu" is otherwise unanswerable from a log
             // and the answer is usually that the file is not where the install put it.
             Err(e) => log(&format!(
@@ -880,10 +870,7 @@ unsafe fn link_font(link: Link, sz: c_int, bold: c_int) -> *mut TtfFont {
         return font_at(sz, bold);
     }
     let sz = sz.clamp(8, FONT_SLOTS as c_int - 1) as usize;
-    let arr = match link {
-        Link::Cjk => &mut *addr_of_mut!(FONTS_CJK),
-        _ => &mut *addr_of_mut!(FONTS_SYS),
-    };
+    let arr = &mut *addr_of_mut!(FONTS_SYS);
     if arr[sz].is_null() {
         let file = link_file(link);
         let Ok(c) = CString::new(file.into_os_string().into_encoded_bytes()) else {
@@ -912,7 +899,7 @@ struct Runs {
 /// the untouched single-render path.
 ///
 /// The ASCII shortcut is the reason an English library pays nothing at all for this feature: it
-/// returns before any coverage is loaded, so `appfont-cjk.ttf`'s cmap is never even opened.
+/// returns before any coverage is loaded, so the fallback's cmap is never even opened.
 unsafe fn split_runs(s: &str) -> Option<Runs> {
     split_runs_with(s, |link, cp| link_covers(link, cp))
 }
@@ -2099,21 +2086,13 @@ mod tests {
     use super::*;
     use plx_base::fontcov;
 
-    /// The real shipped cmaps, parsed once for the whole test binary (see `fontcov::shipped`).
-    /// `Link::Sys` is `None` on purpose: the television's DroidSansFallback does not exist on a
-    /// build host, so this is also the "the chain is SHORT" configuration under test.
-    fn chain() -> [Option<&'static fontcov::Coverage>; 3] {
-        [
-            fontcov::shipped("appfont.ttf").as_ref().ok(),
-            fontcov::shipped("appfont-cjk.ttf").as_ref().ok(),
-            None,
-        ]
-    }
-
+    /// The real shipped cmap for the base face; the system fallback is modelled as covering
+    /// Hangul, Kana, Han and the CJK punctuation/fullwidth blocks (what Noto Sans CJK covers).
     fn split(s: &str) -> Option<Runs> {
-        let cov = chain();
-        split_runs_with(s, |link, cp| {
-            cov[link as usize].is_some_and(|c| c.contains(cp))
+        let base = fontcov::shipped("appfont.ttf").as_ref().ok();
+        split_runs_with(s, |link, cp| match link {
+            Link::Base => base.is_some_and(|c| c.contains(cp)),
+            Link::Sys => matches!(cp, 0x3000..=0x9FFF | 0xAC00..=0xD7AF | 0xFF00..=0xFFEF),
         })
     }
 
@@ -2170,13 +2149,13 @@ mod tests {
     }
 
     #[test]
-    fn a_korean_title_splits_onto_the_bundled_face() {
+    fn a_korean_title_splits_onto_the_fallback_face() {
         assert_eq!(
             runs_of("오징어 게임 (2021)"),
             vec![
-                (Link::Cjk, "오징어"),
+                (Link::Sys, "오징어"),
                 (Link::Base, " "),
-                (Link::Cjk, "게임"),
+                (Link::Sys, "게임"),
                 (Link::Base, " (2021)")
             ],
         );
@@ -2186,13 +2165,13 @@ mod tests {
     /// Both must land on the same single fallback face rather than fragmenting further.
     #[test]
     fn japanese_and_chinese_land_on_one_face() {
-        assert_eq!(runs_of("君の名は。"), vec![(Link::Cjk, "君の名は。")]);
-        assert_eq!(runs_of("ドラえもん"), vec![(Link::Cjk, "ドラえもん")]);
-        assert_eq!(runs_of("臥虎藏龍"), vec![(Link::Cjk, "臥虎藏龍")]);
+        assert_eq!(runs_of("君の名は。"), vec![(Link::Sys, "君の名は。")]);
+        assert_eq!(runs_of("ドラえもん"), vec![(Link::Sys, "ドラえもん")]);
+        assert_eq!(runs_of("臥虎藏龍"), vec![(Link::Sys, "臥虎藏龍")]);
         assert_eq!(
             runs_of("流浪地球 The Wandering Earth"),
             vec![
-                (Link::Cjk, "流浪地球"),
+                (Link::Sys, "流浪地球"),
                 (Link::Base, " The Wandering Earth")
             ],
         );
@@ -2206,11 +2185,11 @@ mod tests {
     fn latin_after_a_cjk_run_returns_to_the_app_typeface() {
         assert_eq!(
             runs_of("東京物語 1953"),
-            vec![(Link::Cjk, "東京物語"), (Link::Base, " 1953")]
+            vec![(Link::Sys, "東京物語"), (Link::Base, " 1953")]
         );
         assert_eq!(
             runs_of("A한B"),
-            vec![(Link::Base, "A"), (Link::Cjk, "한"), (Link::Base, "B")]
+            vec![(Link::Base, "A"), (Link::Sys, "한"), (Link::Base, "B")]
         );
     }
 
@@ -2221,7 +2200,7 @@ mod tests {
     fn an_uncoverable_codepoint_is_a_box_not_a_gap() {
         assert_eq!(
             runs_of("한글 \u{05D0}\u{05D1}"),
-            vec![(Link::Cjk, "한글"), (Link::Base, " \u{05D0}\u{05D1}")]
+            vec![(Link::Sys, "한글"), (Link::Base, " \u{05D0}\u{05D1}")]
         );
         assert_partitions("한글 \u{05D0}\u{05D1}");
     }

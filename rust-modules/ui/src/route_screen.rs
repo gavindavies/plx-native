@@ -1089,18 +1089,14 @@ mod tests {
         }
         let measure = TitleMeasure;
         let min_content = RouteLayout::screen().content.w;
-        for preference in [plx_platform::i18n::Preference::En, plx_platform::i18n::Preference::Es, plx_platform::i18n::Preference::Be] {
-            let locale = plx_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
-            let title = plx_platform::i18n::msg::browse_person_filmography_in(&locale);
+        {
+            let title = plx_platform::i18n::msg::browse_person_filmography();
             let layout = RouteLayout::screen_for_title(480.0, min_content, title, &measure);
             let full_width = measure.width_str(title, theme::size::HERO, true);
             assert!(layout.narrative.w >= full_width, "route label must fit in full: {title}");
             assert!(layout.content.w >= min_content);
             assert!(inside_safe(layout.content));
             assert!(inside_safe(layout.narrative));
-            if preference == plx_platform::i18n::Preference::Be {
-                assert!(layout.narrative.w > 480.0, "exercise the clipped screenshot's narrow column");
-            }
         }
         // Expansion beyond available width must wrap, never steal the content column.
         let title = "ФільмаграфіяФільмаграфія";
@@ -1151,10 +1147,9 @@ mod tests {
         }
         let measure = QuestionMeasure;
         let layout = RouteLayout::screen();
-        for preference in [plx_platform::i18n::Preference::En, plx_platform::i18n::Preference::Es, plx_platform::i18n::Preference::Be] {
-            let locale = plx_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
-            for question in [plx_platform::i18n::msg::settings_consent_crash_title_in(&locale),
-                plx_platform::i18n::msg::settings_consent_product_title_in(&locale)] {
+        {
+            for question in [plx_platform::i18n::msg::settings_consent_crash_title(),
+                plx_platform::i18n::msg::settings_consent_product_title()] {
                 let title = RouteLayout::narrative_title(question).with_measure(&measure);
                 assert!(!title.truncates(layout.narrative.w), "question was elided: {question}");
                 let height = title.measure_h(layout.narrative.w);

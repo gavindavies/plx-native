@@ -143,7 +143,7 @@ fn expression(s: &str, args: &BTreeMap<String, String>) -> Result<String, String
             Part::Arg(k) => {
                 pattern.push_str("{}");
                 values.push(if args.get(&k).map(String::as_str) == Some("i64") {
-                    format!("cx.number({k})")
+                    format!("super::current().number({k})")
                 } else {
                     k
                 });
@@ -154,37 +154,6 @@ fn expression(s: &str, args: &BTreeMap<String, String>) -> Result<String, String
         "format!({pattern:?}{})",
         values.iter().map(|v| format!(", {v}")).collect::<String>()
     ))
-}
-fn pseudo(s: &str) -> String {
-    let mut out = String::from("[!! ");
-    for p in parts(s).expect("validated template") {
-        match p {
-            Part::Arg(a) => {
-                out.push('{');
-                out.push_str(&a);
-                out.push('}');
-            }
-            Part::Text(t) => {
-                for c in t.chars() {
-                    out.push_str(match c {
-                        'a' => "áá",
-                        'e' => "ëë",
-                        'i' => "ï",
-                        'o' => "öö",
-                        'u' => "üü",
-                        '{' => "{{",
-                        '}' => "}}",
-                        _ => {
-                            out.push(c);
-                            continue;
-                        }
-                    });
-                }
-            }
-        }
-    }
-    out.push_str(" !!]");
-    out
 }
 fn read_locale(root: &Path, locale: &str) -> Result<BTreeMap<String, Value>, String> {
     let mut all = BTreeMap::new();
@@ -203,23 +172,27 @@ fn read_locale(root: &Path, locale: &str) -> Result<BTreeMap<String, Value>, Str
     }
     Ok(all)
 }
-pub fn compile(catalogs: &[BTreeMap<String, Value>; 3]) -> Result<String, String> {
-    let keys: BTreeSet<_> = catalogs[0].keys().collect();
-    for (i, c) in catalogs.iter().enumerate() {
-        if c.keys().collect::<BTreeSet<_>>() != keys {
-            return Err(format!("catalog {i} keys differ from English"));
-        }
-    }
-    let mut out =
-        String::from("// Generated from locales: do not edit.\nuse super::LocaleContext;\n");
+fn literal(s: &str) -> Result<String, String> {
+    Ok(parts(s)?
+        .into_iter()
+        .map(|p| match p {
+            Part::Text(t) => t,
+            _ => unreachable!(),
+        })
+        .collect())
+}
+/// The English catalog as Rust: `name(args) -> &'static str | String` per key, and `name_c()` for
+/// every argument-free one.
+pub fn compile(catalog: &BTreeMap<String, Value>) -> Result<String, String> {
+    let mut out = String::from("// Generated from locales/en: do not edit.\n");
     let mut symbols = BTreeSet::new();
     let mut corpus = Vec::new();
-    for (key, source) in &catalogs[0] {
+    for (key, source) in catalog {
         if !key.contains('.') || !key.split('.').all(ident) {
             return Err(format!("invalid scoped key {key}"));
         }
         let name = key.replace('.', "_");
-        for suffix in ["", "_in", "_c", "_c_in"] {
+        for suffix in ["", "_c"] {
             if !symbols.insert(format!("{name}{suffix}")) {
                 return Err(format!("colliding accessor {name}"));
             }
@@ -244,7 +217,7 @@ pub fn compile(catalogs: &[BTreeMap<String, Value>; 3]) -> Result<String, String
             .unwrap_or_default();
         for (k, v) in &args {
             if !ident(k)
-                || ["cx", "self", "type", "match", "ref"].contains(&k.as_str())
+                || ["self", "type", "match", "ref"].contains(&k.as_str())
                 || !["str", "i64"].contains(&v.as_str())
             {
                 return Err(format!("invalid argument {k}: {v}"));
@@ -255,140 +228,68 @@ pub fn compile(catalogs: &[BTreeMap<String, Value>; 3]) -> Result<String, String
             .and_then(Value::as_str)
             .is_none_or(|s| s.trim().is_empty())
         {
-            return Err(format!("{key}: missing translator context"));
+            return Err(format!("{key}: missing description"));
         }
-        let values = [
-            forms(
-                source
-                    .get("value")
-                    .ok_or_else(|| format!("{key}: missing value"))?,
-            )?,
-            forms(&catalogs[1][key])?,
-            forms(&catalogs[2][key])?,
-        ];
-        let plural = !values[0].contains_key("");
+        let values = forms(
+            source
+                .get("value")
+                .ok_or_else(|| format!("{key}: missing value"))?,
+        )?;
+        let plural = !values.contains_key("");
         if plural && args.get("count").map(String::as_str) != Some("i64") {
             return Err(format!("{key}: plurals require count:i64"));
         }
+        if plural && !values.contains_key("one") {
+            return Err(format!("{key}: missing one"));
+        }
         let argkeys: BTreeSet<_> = args.keys().cloned().collect();
-        for (i, fs) in values.iter().enumerate() {
-            if plural == fs.contains_key("") {
-                return Err(format!("{key}: message kind differs"));
-            }
-            if plural {
-                for required in [
-                    vec!["one", "other"],
-                    vec!["one", "many", "other"],
-                    vec!["one", "few", "many", "other"],
-                ][i]
+        for s in values.values() {
+            let used: BTreeSet<_> = parts(s)?
+                .into_iter()
+                .filter_map(|p| match p {
+                    Part::Arg(k) => Some(k),
+                    _ => None,
+                })
+                .collect();
+            if used.iter().any(|k| !argkeys.contains(k))
+                || argkeys
                     .iter()
-                {
-                    if !fs.contains_key(*required) {
-                        return Err(format!("{key}: locale {i} missing {required}"));
-                    }
-                }
+                    .any(|k| !used.contains(k) && !(plural && k == "count"))
+            {
+                return Err(format!(
+                    "{key}: placeholder mismatch expected {argkeys:?}, found {used:?}"
+                ));
             }
-            for s in fs.values() {
-                let used: BTreeSet<_> = parts(s)?
-                    .into_iter()
-                    .filter_map(|p| match p {
-                        Part::Arg(k) => Some(k),
-                        _ => None,
-                    })
-                    .collect();
-                if used.iter().any(|k| !argkeys.contains(k))
-                    || argkeys
-                        .iter()
-                        .any(|k| !used.contains(k) && !(plural && k == "count"))
-                {
-                    return Err(format!(
-                        "{key}: placeholder mismatch expected {argkeys:?}, found {used:?}"
-                    ));
-                }
-                corpus.push(s.clone());
-            }
+            corpus.push(s.clone());
         }
         let params = args
             .iter()
-            .map(|(k, v)| format!(", {k}: {}", if v == "str" { "&str" } else { "i64" }))
-            .collect::<String>();
-        let forwards = args.keys().map(|k| format!(", {k}")).collect::<String>();
-        let result = if args.is_empty() {
-            "&'static str"
-        } else {
-            "String"
-        };
-        out.push_str(&format!(
-            "pub fn {name}({}) -> {result} {{ {name}_in(super::current(){forwards}) }}\n",
-            params.trim_start_matches(", ")
-        ));
-        out.push_str(&format!("pub fn {name}_in(cx: &LocaleContext{params}) -> {result} {{ match cx.language() {{\n"));
-        for (i, lang) in ["En", "Es", "Be", "Pseudo"].iter().enumerate() {
-            let vals = if i == 3 {
-                values[0]
-                    .iter()
-                    .map(|(k, v)| (k.clone(), pseudo(v)))
-                    .collect()
+            .map(|(k, v)| format!("{k}: {}", if v == "str" { "&str" } else { "i64" }))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let result = if args.is_empty() { "&'static str" } else { "String" };
+        let render = |s: &str| -> Result<String, String> {
+            if args.is_empty() {
+                Ok(format!("{:?}", literal(s)?))
             } else {
-                values[i].clone()
-            };
-            out.push_str(&format!("super::Language::{lang} => "));
-            if plural {
-                out.push_str("match cx.plural(count) {\n");
+                expression(s, &args)
             }
-            let mut ordered: Vec<_> = vals.into_iter().collect();
-            ordered.sort_by_key(|(cat, _)| cat == "other");
-            for (cat, s) in ordered {
-                if plural {
-                    out.push_str(&format!(
-                        "{} => ",
-                        if cat == "other" {
-                            "_".into()
-                        } else {
-                            format!(
-                                "icu_plurals::PluralCategory::{}",
-                                format!("{}{}", cat[..1].to_uppercase(), &cat[1..])
-                            )
-                        }
-                    ));
-                }
-                if args.is_empty() {
-                    let literal = parts(&s)?
-                        .into_iter()
-                        .map(|p| match p {
-                            Part::Text(t) => t,
-                            _ => unreachable!(),
-                        })
-                        .collect::<String>();
-                    out.push_str(&format!("{literal:?}"));
-                } else {
-                    out.push_str(&expression(&s, &args)?);
-                }
-                out.push_str(",\n");
-            }
-            if plural {
-                out.push_str("},\n");
-            }
-        }
-        out.push_str("} }\n");
+        };
+        let body = if plural {
+            format!(
+                "if super::plural_one(count) {{ {} }} else {{ {} }}",
+                render(&values["one"])?,
+                render(&values["other"])?
+            )
+        } else {
+            render(&values[""])?
+        };
+        out.push_str(&format!("pub fn {name}({params}) -> {result} {{ {body} }}\n"));
         if args.is_empty() {
-            out.push_str(&format!("pub fn {name}_c() -> &'static std::ffi::CStr {{ {name}_c_in(super::current()) }}\npub fn {name}_c_in(cx: &LocaleContext) -> &'static std::ffi::CStr {{ match cx.language() {{\n"));
-            for (i, lang) in ["En", "Es", "Be", "Pseudo"].iter().enumerate() {
-                let v = if i == 3 {
-                    pseudo(&values[0][""])
-                } else {
-                    values[i][""].clone()
-                };
-                let v = parts(&v)?
-                    .into_iter()
-                    .map(|p| match p {
-                        Part::Text(s) => s,
-                        _ => unreachable!(),
-                    })
-                    .collect::<String>();
-                out.push_str(&format!("super::Language::{lang} => c{v:?},\n"));
-            }
-            out.push_str("} }\n");
+            out.push_str(&format!(
+                "pub fn {name}_c() -> &'static std::ffi::CStr {{ c{:?} }}\n",
+                literal(&values[""])?
+            ));
         }
     }
     out.push_str("#[cfg(test)] pub const CORPUS: &[&str] = &[\n");
@@ -399,25 +300,17 @@ pub fn compile(catalogs: &[BTreeMap<String, Value>; 3]) -> Result<String, String
     Ok(out)
 }
 pub fn build(root: &Path, out: &Path) -> Result<(), String> {
-    let catalogs = [
-        read_locale(root, "en")?,
-        read_locale(root, "es")?,
-        read_locale(root, "be")?,
-    ];
-    std::fs::write(out.join("messages.rs"), compile(&catalogs)?).map_err(|e| e.to_string())
+    let catalog = read_locale(root, "en")?;
+    std::fs::write(out.join("messages.rs"), compile(&catalog)?).map_err(|e| e.to_string())
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn catalogs() -> [BTreeMap<String, Value>; 3] {
-        [
-            BTreeMap::from([(
-                "test.label".into(),
-                serde_json::json!({"value":"Hello {name}","args":{"name":"str"},"description":"Greeting"}),
-            )]),
-            BTreeMap::from([("test.label".into(), serde_json::json!("Hola {name}"))]),
-            BTreeMap::from([("test.label".into(), serde_json::json!("Вітаем, {name}"))]),
-        ]
+    fn catalog() -> BTreeMap<String, Value> {
+        BTreeMap::from([(
+            "test.label".into(),
+            serde_json::json!({"value":"Hello {name}","args":{"name":"str"},"description":"Greeting"}),
+        )])
     }
     #[test]
     fn duplicate_keys_are_errors_at_every_depth() {
@@ -425,16 +318,16 @@ mod tests {
     }
     #[test]
     fn catalog_contract_is_enforced() {
-        let good = catalogs();
-        assert!(compile(&good).unwrap().contains("test_label_in"));
+        let good = catalog();
+        assert!(compile(&good).unwrap().contains("pub fn test_label(name: &str)"));
         let mut bad = good.clone();
-        bad[1].clear();
+        bad.insert("test.label".into(), serde_json::json!({"value":"wrong {other}","args":{"name":"str"},"description":"x"}));
         assert!(compile(&bad).is_err());
         let mut bad = good.clone();
-        bad[2].insert("test.label".into(), serde_json::json!("wrong {other}"));
+        bad.insert("test.label".into(), serde_json::json!({"value":"NUL\u{0}{name}","args":{"name":"str"},"description":"x"}));
         assert!(compile(&bad).is_err());
         let mut bad = good;
-        bad[1].insert("test.label".into(), serde_json::json!("NUL\u{0}{name}"));
+        bad.insert("test.label".into(), serde_json::json!({"value":"Hello {name}","args":{"name":"str"}}));
         assert!(compile(&bad).is_err());
     }
     #[test]
@@ -444,8 +337,8 @@ mod tests {
             serde_json::json!(42),
             serde_json::json!(null),
         ] {
-            let mut cs = catalogs();
-            cs[0].get_mut("test.label").unwrap()["args"] = args;
+            let mut cs = catalog();
+            cs.get_mut("test.label").unwrap()["args"] = args;
             assert!(compile(&cs).unwrap_err().contains("args must be an object"));
         }
     }
@@ -460,24 +353,11 @@ mod tests {
         }
     }
     #[test]
-    fn plural_categories_are_complete() {
-        let mut cs = catalogs();
-        cs[0].insert("test.label".into(),serde_json::json!({"value":{"one":"{count} item","other":"{count} items"},"args":{"count":"i64"},"description":"Count"}));
-        cs[1].insert(
-            "test.label".into(),
-            serde_json::json!({"one":"{count}","many":"{count}","other":"{count}"}),
-        );
-        cs[2].insert(
-            "test.label".into(),
-            serde_json::json!({"one":"{count}","few":"{count}","many":"{count}","other":"{count}"}),
-        );
+    fn plurals_need_one_and_other() {
+        let mut cs = catalog();
+        cs.insert("test.label".into(),serde_json::json!({"value":{"one":"{count} item","other":"{count} items"},"args":{"count":"i64"},"description":"Count"}));
         assert!(compile(&cs).is_ok());
-        cs[2]
-            .get_mut("test.label")
-            .unwrap()
-            .as_object_mut()
-            .unwrap()
-            .remove("few");
+        cs.insert("test.label".into(),serde_json::json!({"value":{"other":"{count} items"},"args":{"count":"i64"},"description":"Count"}));
         assert!(compile(&cs).is_err());
     }
 }

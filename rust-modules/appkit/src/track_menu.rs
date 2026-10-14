@@ -1906,13 +1906,12 @@ mod tests {
         assert!(!row.checked, "no active track behind it");
     }
 
-    /// **Every Subtitles-panel row fits the panel in every shipped language** — the grouped
+    /// **Every Subtitles-panel row fits the panel** — the grouped
     /// layout's section words, the kind fallbacks, the "Track N" ordinal and a region name beside
     /// each badge, against [`MENU_MAX_W`](plx_ui::table::MENU_MAX_W), measured with the device's whole-pixel advances. (A source is
     /// server text and may elide; the fixture's sources are short so only app text is judged.)
     #[test]
-    fn every_subtitles_row_fits_the_panel_in_every_language() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+    fn every_subtitles_row_fits_the_panel() {
         let mut subs = vec![
             stream(1, 0, "Russian", "rus", "forced, DVD R5"),
             stream(2, 1, "Russian", "rus", "Netflix"),
@@ -1928,69 +1927,19 @@ mod tests {
         let offered: Vec<usize> = (0..subs.len()).collect();
         let names = TrackNames::new();
         let mut out = Vec::new();
-        for language in SHIPPED {
-            let _guard = language_on_this_thread_for_test(language);
+        {
+            let tag = "en";
             let (sections, _) =
                 sub_layout(&subs, &offered, &names, &["rus"], 1, true, -60_000);
             let mut table = TableView::new();
             table.set_sections(sections, 0, false);
-            out.extend(table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, language.tag()));
-            out.extend(table.app_fit_failures(plx_ui::table::MENU_MAX_W, language.tag()));
-            out.extend(table.app_fit_failures_hugged(language.tag()));
+            out.extend(table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, tag));
+            out.extend(table.app_fit_failures(plx_ui::table::MENU_MAX_W, tag));
+            out.extend(table.app_fit_failures_hugged(tag));
         }
         plx_ui::table::assert_no_fit_failures(&out);
     }
 
-    /// **The pseudo-locale sweep of the grouped Subtitles panel**: every header, accessory, label,
-    /// detail, value and badge it builds is catalog text (the pseudo-locale's `[!!` marker or its
-    /// accented vowels), the fixture's own server values, or letter-free.
-    #[test]
-    fn every_app_owned_subtitles_string_comes_from_the_catalog() {
-        let _pseudo = plx_platform::i18n::pseudo_on_this_thread_for_test();
-        // a title's own "Commentary" stays its source (the mock strips no commentary word), so it
-        // is server text here like the rest
-        let server = ["Russian", "Spanish", "Portuguese", "Netflix", "DVD R5", "Commentary"];
-        let mut subs = vec![
-            stream(1, 0, "Russian", "rus", "Netflix"),
-            stream(2, 1, "Russian", "rus", ""),
-            stream(3, 2, "Russian", "rus", ""),
-            stream(4, 3, "Russian", "rus", "forced"),
-            stream(5, 4, "Russian", "rus", "SDH"),
-            stream(6, 5, "Russian", "rus", "Commentary"),
-            stream(7, 6, "Spanish", "spa", ""),
-            stream(8, 7, "Portuguese", "por", "DVD R5"),
-            stream(9, 8, "", "", ""),
-        ];
-        subs[6].language_tag = "es-419".into();
-        subs[7].external = true;
-        let offered: Vec<usize> = (0..subs.len()).collect();
-        let (sections, _) =
-            sub_layout(&subs, &offered, &TrackNames::new(), &["rus"], 1, true, 300);
-        let mut runs: Vec<String> = Vec::new();
-        for sec in &sections {
-            runs.push(sec.header.clone());
-            runs.push(sec.accessory.clone());
-            for row in &sec.rows {
-                runs.push(row.label.clone());
-                runs.push(row.detail.clone());
-                runs.extend(row.value.clone());
-                runs.extend(row.badges.iter().map(|b| b.text().to_string()));
-            }
-        }
-        let pseudo = |run: &str| run.contains("[!!") || run.contains(['á', 'ë', 'ï', 'ö', 'ü']);
-        let stray: Vec<&String> = runs
-            .iter()
-            .filter(|run| !pseudo(run))
-            .filter(|run| {
-                let mut rest = run.replace('\u{b7}', " ");
-                for value in server {
-                    rest = rest.replace(value, "");
-                }
-                rest.chars().any(char::is_alphabetic)
-            })
-            .collect();
-        assert!(stray.is_empty(), "text drawn without the catalog: {stray:?}");
-    }
 
     // ---- sub_layout: Timing absent under transcode, dim while Off -----------------------------
 
@@ -2478,13 +2427,12 @@ mod focus_tests {
 mod localized_offset_tests {
     #[test]
     fn subtitle_timing_uses_locale_decimal_and_unit_without_changing_offset_sign() {
-        use plx_platform::i18n::{LocaleContext, Preference};
-        for (preference, region, negative, positive) in [
-            (Preference::En, "en-US", "-0.1 s", "+1.3 s"),
-            (Preference::Es, "es-ES", "-0,1 s", "+1,3 s"),
-            (Preference::Be, "be-BY", "-0,1 с", "+1,3 с"),
+        use plx_platform::i18n::LocaleContext;
+        for (region, negative, positive) in [
+            ("en-US", "-0.1 s", "+1.3 s"),
+            ("de-DE", "-0,1 s", "+1,3 s"),
         ] {
-            let locale = LocaleContext::resolve(preference, None, Some(region), None, None);
+            let locale = LocaleContext::resolve(Some(region), None);
             assert_eq!(crate::timing_capsule::offset_seconds_in(-100, true, &locale), negative);
             assert_eq!(crate::timing_capsule::offset_seconds_in(1300, true, &locale), positive);
         }
@@ -3231,16 +3179,14 @@ mod language_page_tests {
     /// judged by the same gates as the rest of the menu.
     #[test]
     fn the_language_pages_fit_the_panel_in_every_language() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, Preference};
         let mut out = Vec::new();
-        for language in [Preference::En, Preference::Es, Preference::Be] {
+        for language in ["en"] {
             let _g = plx_base::testlock::serial();
-            let _guard = language_on_this_thread_for_test(language);
             let (mut menu, ps, store) = open(subs_with_vobsub());
             let judge = |menu: &TrackMenuState, out: &mut Vec<_>| {
-                out.extend(menu.form.table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, language.tag()));
-                out.extend(menu.form.table.app_fit_failures(plx_ui::table::MENU_MAX_W, language.tag()));
-                out.extend(menu.form.table.app_fit_failures_hugged(language.tag()));
+                out.extend(menu.form.table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, language));
+                out.extend(menu.form.table.app_fit_failures(plx_ui::table::MENU_MAX_W, language));
+                out.extend(menu.form.table.app_fit_failures_hugged(language));
             };
             judge(&menu, &mut out);
             for active in [-1, 2] {

@@ -36,7 +36,7 @@
 //! byte budget answers the feed with `'B'`, and the pump retries the same access unit later.
 
 use plx_base::task::MainThread;
-use plx_platform::tv::sink::VideoSink;
+use super::sink::VideoSink;
 use std::ffi::{c_uint, CStr};
 use std::os::raw::{c_char, c_int, c_long};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering::Relaxed};
@@ -874,7 +874,7 @@ impl VideoSink for GstSink {
         sf_quarantine()
     }
     fn window_mode(&self) -> c_int {
-        plx_platform::tv::sink::VP_EXPORTED
+        super::sink::VP_EXPORTED
     }
     fn window_id(&self) -> &'static CStr {
         c"gst-window"

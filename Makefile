@@ -20,9 +20,9 @@ FEATURES    ?= $(if $(DEV),--features devtools$(comma)devtriggers,)
 comma       := ,
 
 FFMPEG_PREFIX = vendor/ffmpeg-prefix-host
-FFMPEG_LIBS   = libavutil-plx.so.61 libavcodec-plx.so.63 libavformat-plx.so.63 libswscale-plx.so.10
+FFMPEG_LIBS   = libavutil-plx.so.61 libavcodec-plx.so.63 libavformat-plx.so.63
 LIBASS_LIB    = pkg/libass-plx-host.so.0
-ASSETS        = pkg/appfont.ttf pkg/appfont-bold.ttf pkg/appfont-cjk.ttf pkg/OFL.txt \
+ASSETS        = pkg/appfont.ttf pkg/appfont-bold.ttf pkg/OFL.txt \
                 pkg/splash.png pkg/icon.png THIRD-PARTY-NOTICES.md LICENSING.md NOTICE.md
 
 .PHONY: all linux check run clean print-%

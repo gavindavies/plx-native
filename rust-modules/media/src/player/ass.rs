@@ -720,7 +720,7 @@ impl Native {
         if !loaded {
             return Err(Fault::Unavailable);
         }
-        let fallback = asset_dir().join("appfont-cjk.ttf");
+        let fallback = asset_dir().join("appfont.ttf");
         let fallback = CString::new(fallback.to_string_lossy().as_bytes())
             .map_err(|_| Fault::FontsUnavailable)?;
         let ptr = unsafe { plx_ass_create(fallback.as_ptr()) };
@@ -728,7 +728,7 @@ impl Native {
             return Err(Fault::InitFailed);
         }
         let mut native = Self(ptr);
-        for name in ["appfont.ttf", "appfont-bold.ttf", "appfont-cjk.ttf"] {
+        for name in ["appfont.ttf", "appfont-bold.ttf"] {
             let bytes = std::fs::read(asset_dir().join(name))
                 .map_err(|_| Fault::FontsUnavailable)?;
             if bytes.len() > MAX_FONT_BYTES {

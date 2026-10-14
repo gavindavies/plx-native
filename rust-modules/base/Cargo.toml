@@ -28,7 +28,6 @@ test-support = []
 libc = "0.2"
 
 [dev-dependencies]
-rcgen = "0.14.10"
 
 [lints]
 workspace = true

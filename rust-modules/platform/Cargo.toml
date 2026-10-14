@@ -3,7 +3,7 @@ name = "plx_platform"
 version = "0.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "PlxNative platform layer: what this television is and keeps (webOS identity, the storage helper client, the key stores, the codec table, the artwork cache, the localization catalog, the Cloud Lab session file)."
+description = "PiTV platform layer: the localization catalog and the artwork cache."
 repository = "https://github.com/GLinnik21/plx-native"
 publish = false
 build = "build.rs"
@@ -18,24 +18,20 @@ crate-type = ["rlib"]
 default = []
 # Forwarded from the application crate, which is the only one that sets them. Each is named here
 # only because some code in this crate has a `cfg` on it.
-devtriggers = ["plx_base/devtriggers", "plx_machine/devtriggers"]
+devtriggers = ["plx_base/devtriggers"]
 # The `cfg(test)` seams other crates' tests use (see lib.rs) plus the test-mode behaviour that
 # `cfg(test)` alone cannot give a dependent. Enabled from the dependents' `[dev-dependencies]`;
 # never in a shipped build. It enables the lower layers' own `test-support` because the seams here
 # call into them (`testlock`, the idle gate's per-thread damage counter).
-test-support = ["plx_base/test-support", "plx_machine/test-support"]
+test-support = ["plx_base/test-support"]
 
 [dependencies]
 plx_base = { path = "../base" }
-plx_machine = { path = "../machine" }
-libc = "0.2"
-serde_json = { version = "1", default-features = false, features = ["alloc", "std"] }
-serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 icu_locale = "=2.1.1"
-icu_plurals = "=2.1.1"
 icu_decimal = "=2.1.1"
 icu_datetime = { version = "=2.1.1", default-features = false, features = ["compiled_data"] }
 icu_calendar = "=2.1.1"
+# `sync`: the formatters live in a process-wide `OnceLock`, so their data must be `Sync`.
 icu_provider = { version = "2.1", features = ["sync"] }
 
 [build-dependencies]
@@ -44,7 +40,8 @@ serde = "1"
 
 [dev-dependencies]
 plx_base = { path = "../base", features = ["test-support"] }
-plx_machine = { path = "../machine", features = ["test-support"] }
+serde_json = "1"
+serde = "1"
 
 [lints]
 workspace = true

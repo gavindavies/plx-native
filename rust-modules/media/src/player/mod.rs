@@ -27,6 +27,7 @@ pub mod gst_sink; // the Linux build's player: the fed AUs decoded by the system
 mod pump;
 mod shared;
 pub mod sidecar;
+pub mod sink; // the verbs the engine speaks to the decoder
 pub mod threads;
 pub mod video_geometry;
 pub mod vp9_hdr; // HDR10 for a VP9 stream: the container's PQ tag, written into the sourceInfo envelope ACB is sent
@@ -48,11 +49,11 @@ use shared::{
 /// hostsim test binary reads the host sink directly, so it needs no port. Everything in `player/`
 /// reaches the seam as `sink().<verb>(mt, ..)`, and nothing branches on which platform it is.
 #[cfg(not(any(test, feature = "test-support")))]
-fn sink() -> &'static dyn plx_platform::tv::sink::VideoSink {
-    plx_platform::tv::sink::installed()
+fn sink() -> &'static dyn sink::VideoSink {
+    &gst_sink::GstSink
 }
 #[cfg(any(test, feature = "test-support"))]
-fn sink() -> &'static dyn plx_platform::tv::sink::VideoSink {
+fn sink() -> &'static dyn sink::VideoSink {
     &ffi_host::HostSink
 }
 
@@ -748,7 +749,7 @@ pub use engine::aq_caps;
 /// value, deliberately, so the plant grading the controller is not the controller agreeing with
 /// itself.
 pub use engine::feed_leads_ms;
-pub use plx_platform::tv::sink::{VP_ACB, VP_EXPORTED, VP_NONE};
+pub use sink::{VP_ACB, VP_EXPORTED, VP_NONE};
 /// The simulator's clock-sink stop; the television's pipeline has no such control.
 pub use ffi_host::stop_clock_at as stop_sim_clock_at;
 
@@ -1346,27 +1347,6 @@ pub extern "C" fn sf_on_event(epoch: c_uint, ty: c_int, num: i64, s: *const c_ch
         SHARED.with_native_session(epoch, class, num, || sf_on_event_inner(ty, num, s));
     }));
 }
-/// The two libpf frame counters a callback type can name, once the webOS 4 vs 5+ numbering
-/// shift is taken out.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SinkCounter {
-    Dropped,
-    Displayed,
-}
-
-/// PURE: which sink counter a raw callback type is, on a firmware of this major. Decompiled from
-/// libpf on webOS 4.10 (`CustomPipeline::updateDroppedFrame` → 0x2e = 46,
-/// `updateDisplayedFrame` → 0x2f = 47); every type above 0x1c is two higher on webOS 5+
-/// (Kodi's `if (webOSVersion < 5 && type > ENDOFSTREAM) type += 2`), so 48/49 there. An unknown
-/// major (0, os_info unreadable) is read as the numbering this project has actually measured.
-fn sink_counter_kind(ty: c_int, major: u32) -> Option<SinkCounter> {
-    let normalised = if major == 0 || major < 5 { ty + 2 } else { ty };
-    match normalised {
-        48 => Some(SinkCounter::Dropped),
-        49 => Some(SinkCounter::Displayed),
-        _ => None,
-    }
-}
 
 fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
     if ty != 0 {
@@ -1397,17 +1377,6 @@ fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
                 .collect()
         };
         log(&format!("smp_cb type={ty} num={num} str={preview}"));
-        // The video sink's own frame counters, forwarded by libpf every 200 ms (see the payload
-        // note in engine.rs: `streamQualityInfo` / `streamQualityInfoNonFlushable`). Logged under
-        // a firmware-independent name because these two sit ABOVE the 0x1c point where the
-        // callback numbering shifts by two between webOS 4 and 5+ (`docs/webos5-port.md` §5):
-        // 46/47 on this set are 48/49 on a webOS 5+ set. The harness reads THIS line, never
-        // the raw type.
-        match sink_counter_kind(ty, plx_platform::tv::device::info().major) {
-            Some(SinkCounter::Displayed) => log(&format!("sink: displayed={num} (type={ty})")),
-            Some(SinkCounter::Dropped) => log(&format!("sink: dropped={num} (type={ty})")),
-            None => {}
-        }
         // **A refusal before the first picture is a VERDICT, not a statistic.** Until 2026-09-03
         // the latch above was all this arm did, and `docs/webos10-lab-report.md` §3.5 records the
         // result on a set that refused the Load asynchronously (`Load()` returned ok=1, then
@@ -1718,19 +1687,6 @@ mod tests {
         assert_eq!(SHARED.dg_cb_err_num.load(std::sync::atomic::Ordering::Acquire), 0);
         SHARED.retire_native_session(epoch);
         SHARED.reset_session();
-    }
-
-    #[test]
-    fn the_sink_counters_are_read_through_the_numbering_shift() {
-        use SinkCounter::{Displayed, Dropped};
-        assert_eq!(sink_counter_kind(46, 4), Some(Dropped));
-        assert_eq!(sink_counter_kind(47, 4), Some(Displayed));
-        assert_eq!(sink_counter_kind(47, 0), Some(Displayed), "unknown major reads as measured");
-        assert_eq!(sink_counter_kind(48, 5), Some(Dropped));
-        assert_eq!(sink_counter_kind(49, 10), Some(Displayed));
-        assert_eq!(sink_counter_kind(47, 10), None, "47 is something else on webOS 5+");
-        assert_eq!(sink_counter_kind(49, 4), None);
-        assert_eq!(sink_counter_kind(18, 4), None);
     }
 
     #[test]

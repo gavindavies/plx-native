@@ -302,11 +302,7 @@ fn pre_boot_diagnostics() {
         if plx_base::devtrig::ENABLED { "dev" } else { "release" },
     ));
     log(&plx_base::paths::app_dir_line());
-    plx_platform::tv::probe_device();
-    crate::dev::arm_wayland_debug();
-    plx_platform::devcaps::probe();
     crate::dev::arm_gst_logging();
-    plx_platform::tv::start_capability_probe();
 }
 
 /// The run+teardown sequence `run_application` hands the mounted `App` to.
@@ -317,15 +313,15 @@ unsafe fn run_and_shutdown(app: &mut App) -> c_int {
     0
 }
 
-fn enter_application(pms_host: *const c_char, pms_port: c_int) -> Result<App,c_int> {
+fn enter_application() -> Result<App, c_int> {
     pre_boot_diagnostics();
     let main_thread = unsafe { plx_base::task::MainThread::assume() };
-    unsafe { boot(pms_host, pms_port, main_thread) }
+    unsafe { boot(main_thread) }
 }
 
 /// The ten-line public skeleton: preflight/construction, then the ordinary loop and teardown.
-pub(crate) fn run_application(pms_host: *const c_char, pms_port: c_int) -> c_int {
-    let mut app = match enter_application(pms_host,pms_port) { Ok(app) => app, Err(code) => return code };
+pub(crate) fn run_application() -> c_int {
+    let mut app = match enter_application() { Ok(app) => app, Err(code) => return code };
     unsafe { run_and_shutdown(&mut app) }
 }
 

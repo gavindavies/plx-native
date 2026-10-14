@@ -61,7 +61,7 @@
 //! they touch, and the tests reach them as `crate::player::ffi_host::<hook>`.
 
 use plx_base::task::MainThread;
-use plx_platform::tv::sink::VideoSink;
+use super::sink::VideoSink;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_long, c_uint};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering::Relaxed};
@@ -696,9 +696,9 @@ unsafe fn sf_quarantine() {
 /// rather than faked. Faking ACB would mean modelling a bind order this file cannot verify.
 unsafe fn vp_mode() -> c_int {
     if enabled() {
-        plx_platform::tv::sink::VP_EXPORTED
+        super::sink::VP_EXPORTED
     } else {
-        plx_platform::tv::sink::VP_NONE
+        super::sink::VP_NONE
     }
 }
 unsafe fn vp_create_window() -> *const c_char {

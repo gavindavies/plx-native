@@ -1016,9 +1016,6 @@ pub struct FixtureRig {
     uploader: StubUploader,
     pub log: Vec<String>,
     pub net_requests: Vec<Addr>,
-    pub ls2_pumps: u32,
-    pub opaque_route_calls: Vec<bool>,
-    pub clears: u32,
     scrim_name: std::ffi::CString,
     scrim_initial: std::ffi::CString,
     scrim_labels: Vec<String>,
@@ -1043,9 +1040,6 @@ impl FixtureRig {
             uploader: StubUploader { next: 0 },
             log: Vec::new(),
             net_requests: Vec::new(),
-            ls2_pumps: 0,
-            opaque_route_calls: Vec::new(),
-            clears: 0,
             scrim_name: std::ffi::CString::default(),
             scrim_initial: std::ffi::CString::default(),
             scrim_labels: Vec::new(),
@@ -1155,18 +1149,6 @@ impl Rig<FixtureHost> for FixtureRig {
         self.cache.take_unresident().for_each(drop);
     }
 
-    fn ls2_pump(&mut self) {
-        self.ls2_pumps += 1;
-    }
-
-    fn opaque_route(&mut self, bound: bool) {
-        self.opaque_route_calls.push(bound);
-    }
-
-    fn clear_opaque_region(&mut self) {
-        self.clears += 1;
-    }
-
     fn now_us(&self) -> u64 {
         self.us
     }
@@ -1257,9 +1239,6 @@ fn the_spike_composes_boot_a_key_a_landing_and_a_poster_over_four_frames() {
     let r1 = d.frame(&mut rig, tick(0), vec![], vec![], &mut NoTap);
     assert!(r1.presented);
     assert_eq!(r1.mounted.len(), 1, "Home mounted at NAV COMMIT");
-    assert_eq!(rig.ls2_pumps, 1);
-    assert_eq!(rig.opaque_route_calls, vec![false], "opaque_route runs every frame");
-    assert_eq!(rig.clears, 1, "clear_opaque_region at draw entry");
     assert_eq!(rig.net_requests.len(), 1, "a request emitted from Mount is addressable");
     assert!(rig.log.iter().any(|l| l.contains("mounted Home")));
     let home = d.nav.top_page().and_then(|e| e.inst.as_ref()).unwrap().id;
@@ -2098,25 +2077,14 @@ fn a_video_plane_screen_replaces_its_host_and_takes_no_snapshot() {
 
     // ---- the plane is NOT bound yet: an ordinary page, an ordinary frame ----
     assert!(!d.video_plane_frame(), "declaring VideoPlane is not the same as being bound");
-    assert_eq!(
-        *rig.opaque_route_calls.last().unwrap(),
-        false,
-        "…and the compositor is told exactly that, every frame",
-    );
 
     // ---- the plane binds: the ONE input, from the machine's edge ----
     d.present.note(plx_machine::present::PresentEvent::VideoPlane(true));
     assert!(d.video_plane_frame(), "declared AND bound");
 
     let drew_before_the_plane = below_drawn(&d);
-    let before = rig.opaque_route_calls.len();
     let r = d.frame(&mut rig, tick(32), vec![], vec![], &mut NoTap);
     assert!(r.presented, "a bound plane presents every frame, unconditionally");
-    assert_eq!(
-        &rig.opaque_route_calls[before..],
-        &[true],
-        "step 9 hands the rig the plane's bit, every frame, presented or not",
-    );
 
     // …the top page drew, and the level below it did NOT.
     let below_drew = below_drawn(&d);

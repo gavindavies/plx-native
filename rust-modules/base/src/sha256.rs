@@ -1,19 +1,5 @@
-//! SHA-256, HMAC-SHA-256 and PBKDF2-HMAC-SHA-256, written out here because the crate has no
-//! hashing dependency and the one consumer needs a **password verifier, not a hash**.
-//!
-//! The consumer is `plex::session::PinVerifier`: the four-digit Plex Home PIN a
-//! protected profile is behind has to be checked with plex.tv unreachable, and plex.tv is the only
-//! party that knows the PIN. What this stores instead is PBKDF2 of the PIN under a random salt,
-//! so the file holds something a PIN can be checked AGAINST and never the PIN itself — a household
-//! PIN is the kind of number people reuse for their phone. Nothing here is a secrecy claim beyond
-//! that: the space of four-digit PINs is ten thousand entries, so anybody who can read the
-//! session file can grind through it, and the same file already holds the account token that
-//! walks past every PIN online. The salt and the iteration count buy the reuse case, not the
-//! brute-force case, and the module doc on the verifier says so too.
-//!
-//! Pure functions over byte slices, graded against the published vectors (FIPS 180-4 for the
-//! hash, RFC 4231 for HMAC, RFC 6070 for PBKDF2) so a transcription slip in the round constants
-//! is a red test and not a verifier that silently accepts nothing.
+//! SHA-256, written out here because the crate has no hashing dependency. The consumer is the
+//! artwork cache's content keys (`plx_platform::imgcache`).
 
 const K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -146,95 +132,12 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     s.finish()
 }
 
-/// HMAC-SHA-256 (RFC 2104) with the inner and outer keyed states returned, because PBKDF2 keys
-/// the same password thousands of times and the two key pads are the part worth computing once.
-#[derive(Clone)]
-struct HmacKey {
-    inner: Sha256,
-    outer: Sha256,
-}
-
-impl HmacKey {
-    fn new(key: &[u8]) -> Self {
-        let mut k = [0u8; 64];
-        if key.len() > 64 {
-            k[..32].copy_from_slice(&sha256(key));
-        } else {
-            k[..key.len()].copy_from_slice(key);
-        }
-        let mut ipad = [0u8; 64];
-        let mut opad = [0u8; 64];
-        for i in 0..64 {
-            ipad[i] = k[i] ^ 0x36;
-            opad[i] = k[i] ^ 0x5c;
-        }
-        let mut inner = Sha256::new();
-        inner.update(&ipad);
-        let mut outer = Sha256::new();
-        outer.update(&opad);
-        HmacKey { inner, outer }
-    }
-
-    fn mac(&self, msg: &[u8]) -> [u8; 32] {
-        let mut i = self.inner.clone();
-        i.update(msg);
-        let ih = i.finish();
-        let mut o = self.outer.clone();
-        o.update(&ih);
-        o.finish()
-    }
-}
-
-/// Graded by the RFC 4231 vectors; the shipping consumer only ever keys through PBKDF2.
-#[cfg(any(test, feature = "test-support"))]
-pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
-    HmacKey::new(key).mac(msg)
-}
-
-/// PBKDF2-HMAC-SHA-256 (RFC 8018 §5.2), one 32-byte block — the derived length a verifier needs.
-/// `iters` of 0 is treated as 1: an iteration count that ran nothing would make every PIN match.
-pub fn pbkdf2_hmac_sha256(password: &[u8], salt: &[u8], iters: u32) -> [u8; 32] {
-    let key = HmacKey::new(password);
-    let mut salted = Vec::with_capacity(salt.len() + 4);
-    salted.extend_from_slice(salt);
-    salted.extend_from_slice(&1u32.to_be_bytes());
-    let mut u = key.mac(&salted);
-    let mut out = u;
-    for _ in 1..iters.max(1) {
-        u = key.mac(&u);
-        for (o, b) in out.iter_mut().zip(u.iter()) {
-            *o ^= b;
-        }
-    }
-    out
-}
-
-/// Equality that spends the same time whichever byte differs first. A verifier compare is the
-/// one place in this crate where an early-out equality would say something about the secret.
-pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b) {
-        diff |= x ^ y;
-    }
-    diff == 0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn hex(b: &[u8]) -> String {
         b.iter().map(|x| format!("{x:02x}")).collect()
-    }
-
-    fn unhex(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
     }
 
     /// FIPS 180-4 / the NIST example vectors: the empty message, "abc", and the two-block
@@ -269,52 +172,4 @@ mod tests {
         );
     }
 
-    /// RFC 4231 test cases 2 (short key) and 6 (a key longer than one block, which is hashed).
-    #[test]
-    fn hmac_sha256_matches_rfc_4231() {
-        assert_eq!(
-            hex(&hmac_sha256(b"Jefe", b"what do ya want for nothing?")),
-            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
-        );
-        let key = vec![0xaau8; 131];
-        assert_eq!(
-            hex(&hmac_sha256(
-                &key,
-                b"Test Using Larger Than Block-Size Key - Hash Key First"
-            )),
-            "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
-        );
-    }
-
-    /// RFC 6070 gives the PBKDF2-HMAC-SHA1 vectors; the SHA-256 counterparts for the same inputs
-    /// are the ones published alongside (and reproduced by every mainstream implementation).
-    #[test]
-    fn pbkdf2_hmac_sha256_matches_the_published_vectors() {
-        assert_eq!(
-            hex(&pbkdf2_hmac_sha256(b"password", b"salt", 1)),
-            "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b"
-        );
-        assert_eq!(
-            hex(&pbkdf2_hmac_sha256(b"password", b"salt", 2)),
-            "ae4d0c95af6b46d32d0adff928f06dd02a303f8ef3c251dfd6e2d85a95474c43"
-        );
-        assert_eq!(
-            hex(&pbkdf2_hmac_sha256(b"password", b"salt", 4096)),
-            "c5e478d59288c841aa530db6845c4c8d962893a001ce4e11a4963873aa98134a"
-        );
-        // A zero count would XOR nothing into nothing — it is clamped to one, not honoured.
-        assert_eq!(
-            pbkdf2_hmac_sha256(b"password", b"salt", 0),
-            pbkdf2_hmac_sha256(b"password", b"salt", 1)
-        );
-        let _ = unhex;
-    }
-
-    #[test]
-    fn constant_time_equality_is_equality() {
-        assert!(ct_eq(b"abc", b"abc"));
-        assert!(!ct_eq(b"abc", b"abd"));
-        assert!(!ct_eq(b"abc", b"ab"));
-        assert!(ct_eq(b"", b""));
-    }
 }

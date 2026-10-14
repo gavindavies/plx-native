@@ -112,10 +112,6 @@ pub(crate) struct Bridge {
     playback: plx_media::playback::PlaybackSession,
     /// Was the publication above refreshed on the last frame?
     playback_live: bool,
-    /// **Is the video plane bound?** `Player::video_plane_bound`, published here by the loop on its
-    /// edges — the rig's own copy of the one bit, for the call at draw entry
-    /// (`clear_opaque_region`), which the `Rig` trait gives no argument.
-    video_plane: bool,
     /// **Erased, so the host suite can supply one that does not need a font.** The app's own
     /// measure is `text::TtfMeasure`, which reads the fonts `init_text` opened at boot.
     measure: plx_ui::rec::Measurements,
@@ -153,7 +149,6 @@ impl Bridge {
             mounter: AppMounter::default(),
             playback: plx_media::playback::PlaybackSession::IDLE,
             playback_live: false,
-            video_plane: false,
             measure: plx_ui::rec::Measurements::Live(measure),
             content_reqs: Vec::new(),
             player_reqs: Vec::new(),
@@ -330,11 +325,6 @@ impl Bridge {
         self.stores.metadata_view()
     }
 
-    /// The video plane's EDGE, from `Player::set_video_plane_bound` and from nowhere else.
-    pub(crate) fn publish_video_plane(&mut self, bound: bool) {
-        self.video_plane = bound;
-    }
-
     /// **Publish this frame's playback session** — see `AppViews::session`. Called once per
     /// iteration by the loop, BEFORE the dispatcher frame and the tree draw, so every screen in one
     /// frame reads one consistent picture of the playback. Off the player the publication is
@@ -419,17 +409,6 @@ impl Rig<AppHost> for Bridge {
     /// The render cache's upload step is the loop's (`adapters::poster::prepare`, in the window
     /// between its present decision and the draw), so this hook is empty.
     fn prepare(&mut self, _b: &mut Budget, _present: &mut Present) {}
-    fn ls2_pump(&mut self) {}
-    fn opaque_route(&mut self, video_plane_bound: bool) {
-        super::run::rig_opaque_route(video_plane_bound);
-    }
-    /// At draw entry, and conditional on the video-plane bit: clearing the opaque region on a frame
-    /// with no plane under it would silently retract the claim `opaque_route` had just made.
-    fn clear_opaque_region(&mut self) {
-        if self.video_plane {
-            super::run::rig_clear_opaque_region();
-        }
-    }
     fn now_us(&self) -> u64 {
         (self.now_us)()
     }
@@ -460,7 +439,6 @@ pub(crate) fn frame_with_tap(
     tap: &mut dyn plx_ui::dispatch::Tap<AppHost>,
 ) -> (&'static str, FrameReport) {
     let _frame_scope = plx_base::task::FrameScope::enter();
-    plx_base::storage_worker::pump_retained();
     for (id, gen) in rig.stores.take_notices() {
         d.store_changed(id.ord(), gen);
     }

@@ -723,10 +723,9 @@ mod tests {
     /// literal, so a future edit that lowers the case fails HERE, citing the rule, rather than
     /// silently drifting one screen away from every other.
     #[test]
-    fn the_more_mark_is_uppercase_in_supported_locales() {
-        for preference in [plx_platform::i18n::Preference::En, plx_platform::i18n::Preference::Es, plx_platform::i18n::Preference::Be] {
-        let locale = plx_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
-        let s = plx_platform::i18n::msg::browse_action_more_in(&locale);
+    fn the_more_mark_is_uppercase() {
+        {
+        let s = plx_platform::i18n::msg::browse_action_more();
         assert_eq!(
             s,
             s.to_uppercase(),

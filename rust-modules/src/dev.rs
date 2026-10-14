@@ -30,32 +30,6 @@ pub(crate) fn arm_gst_logging() {
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn arm_gst_logging() {}
 
-/// **Turn on libwayland-client's protocol log** — the `wldebug` trigger.
-///
-/// `WAYLAND_DEBUG` makes the client library print every request it sends and every event it
-/// dispatches, each with a microsecond wall-clock stamp, to stderr. It is the one place the
-/// compositor's side of a present is visible from inside the app. libwayland reads the variable in
-/// `wl_display_connect`, so this has to run before SDL opens its video device. The stamps are
-/// `CLOCK_REALTIME`; the line logged here carries the offset to `CLOCK_MONOTONIC`.
-#[cfg(feature = "devtriggers")]
-pub(crate) fn arm_wayland_debug() {
-    if !plx_base::devtrig::flag("wldebug") {
-        return;
-    }
-    // SAFETY (of the environment write): runs before any thread is started.
-    std::env::set_var("WAYLAND_DEBUG", "client");
-    let stamp = |clock| {
-        let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
-        // SAFETY: a plain clock read into a local.
-        unsafe { libc::clock_gettime(clock, &mut ts) };
-        ts.tv_sec as i64 * 1_000_000 + ts.tv_nsec as i64 / 1000
-    };
-    let (real, mono) = (stamp(libc::CLOCK_REALTIME), stamp(libc::CLOCK_MONOTONIC));
-    plx_base::eventlog::log(&format!("wldebug: WAYLAND_DEBUG=client realtime_us={real} mono_us={mono} offset_us={}", real - mono));
-}
-#[cfg(not(feature = "devtriggers"))]
-pub(crate) fn arm_wayland_debug() {}
-
 plx_base::devtrig::latched_flag! {
     /// The `imgtrace` trigger — trace the poster pipeline (`app::adapters::poster::trace`).
     pub(crate) fn imgtrace_armed = "imgtrace";

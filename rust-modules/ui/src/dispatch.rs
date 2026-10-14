@@ -244,12 +244,6 @@ pub trait Rig<H: Host> {
     fn log(&mut self, line: &str);
     /// The application's prepare work outside any screen (the `TexCache` upload step, §10).
     fn prepare(&mut self, b: &mut Budget, present: &mut Present);
-    /// Privileged call 1 (§3.3 step 1).
-    fn ls2_pump(&mut self);
-    /// Privileged call 2 (§3.3 step 9): every frame, presented or not.
-    fn opaque_route(&mut self, video_plane_bound: bool);
-    /// Privileged call 3 (§3.3 step 10): at draw entry.
-    fn clear_opaque_region(&mut self);
     /// The clock for `Budget` (one reading per take).
     fn now_us(&self) -> u64;
     /// BACK at the root of the root stack (§3.4): the application decides — the platform's Home
@@ -841,9 +835,6 @@ where
             || !self.parked.is_empty()
             || !self.parked_life.is_empty();
 
-        // 1. the first privileged call
-        rig.ls2_pump();
-
         // 2. ingest: external events, delivered to the input owner, AHEAD of everything queued
         //    (external_events_are_drained_before_effect_results).
         let mut head: Vec<Stamped<H>> = Vec::new();
@@ -1180,12 +1171,11 @@ where
         #[cfg(debug_assertions)]
         let hash_before_prepare = self.state_hash();
 
-        // 9. prepare (only if presenting), then opaque_route on EVERY frame. The activity table:
+        // 9. prepare (only if presenting). The activity table:
         //    the top page prepares unless its host fold is Cached or Replaced; every surface does.
         if will_present {
             plx_base::diag::spans::span("dprep", || self.prepare_pass(rig, tick));
         }
-        rig.opaque_route(self.present.video_plane());
         #[cfg(debug_assertions)]
         debug_assert_eq!(
             self.state_hash(),
@@ -1364,7 +1354,6 @@ where
         // page freeze is. Every framebuffer-sampling door is refused while it is up.
         let video_plane = self.video_plane_frame();
         let was_video_plane = plx_gfx::gfx::set_video_plane_frame(video_plane);
-        if !plx_gfx::gfx::blur_source_pass() { rig.clear_opaque_region(); }
         let parts = self.parts(tick);
         let source_pass = backdrop::source_walk() || plx_gfx::gfx::blur_source_pass();
         let eligible = pages && host_render == HostRender::Live
@@ -2951,9 +2940,6 @@ mod edge_back_tests {
         }
         fn log(&mut self, _line: &str) {}
         fn prepare(&mut self, _b: &mut Budget, _present: &mut Present) {}
-        fn ls2_pump(&mut self) {}
-        fn opaque_route(&mut self, _bound: bool) {}
-        fn clear_opaque_region(&mut self) {}
         fn now_us(&self) -> u64 {
             0
         }
