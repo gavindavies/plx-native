@@ -114,7 +114,7 @@ pub(crate) struct Bridge {
     playback_live: bool,
     /// **Erased, so the host suite can supply one that does not need a font.** The app's own
     /// measure is `text::TtfMeasure`, which reads the fonts `init_text` opened at boot.
-    measure: plx_ui::rec::Measurements,
+    measure: &'static dyn Measure,
     content_reqs: Vec<(MachineId, ContentReq, ReturnState<u32, PageMemory>)>,
     /// What the player's overlay surfaces asked of the loop this frame — drained by
     /// `playback::player_requests`, which holds the `MainThread` token they cannot.
@@ -149,7 +149,7 @@ impl Bridge {
             mounter: AppMounter::default(),
             playback: plx_media::playback::PlaybackSession::IDLE,
             playback_live: false,
-            measure: plx_ui::rec::Measurements::Live(measure),
+            measure,
             content_reqs: Vec::new(),
             player_reqs: Vec::new(),
             item_menu_reqs: Vec::new(),
@@ -162,7 +162,7 @@ impl Bridge {
 
     /// Publish the tab bar for this frame (`app::tabs`), before the dispatcher runs.
     pub(crate) fn publish_tabs(&mut self, d: &mut Dispatcher<AppHost>, dt: f32) {
-        let measure: &dyn Measure = &self.measure;
+        let measure: &dyn Measure = self.measure;
         self.tabs.publish(d, measure, dt);
     }
 
@@ -202,7 +202,7 @@ impl Bridge {
             focus: plx_machine::machine::FocusRead { current: ret.focus, ..Default::default() },
             owner: plx_machine::machine::InputOwner::Entry(entry),
         };
-        let cx = parts.cx::<AppHost>(self.views(), &self.measure);
+        let cx = parts.cx::<AppHost>(self.views(), self.measure);
         let rect = real.focused_card_rect(&cx, ret.focus, At::Drawn);
         Some(plx_screens::registry::ItemMenuArg {
             path: path.to_string_lossy().into_owned(),
@@ -232,7 +232,7 @@ impl Bridge {
             focus: plx_machine::machine::FocusRead { current: ret.focus, ..Default::default() },
             owner: plx_machine::machine::InputOwner::Entry(entry),
         };
-        let cx = parts.cx::<AppHost>(self.views(), &self.measure);
+        let cx = parts.cx::<AppHost>(self.views(), self.measure);
         let rect = real.focused_card_rect(&cx, ret.focus, At::Drawn);
         Some(plx_screens::registry::ItemMenuArg { path, kind: menu, host: entry, focus: ret.focus, anchor: anchor_bits(rect) })
     }
@@ -257,7 +257,7 @@ impl Bridge {
         // above that quad, like Popover::scrim_lifting's legacy callback scope.
         let _live = plx_ui::popover::host::live();
         let parts = opener_parts(d, entry, focus);
-        let cx = parts.cx::<AppHost>(self.views(), &self.measure);
+        let cx = parts.cx::<AppHost>(self.views(), self.measure);
         let mut frame = DrawFrame::with_navigation(&cx, plx_ui::Painter::root(), self.navigation_presentation());
         screen.redraw_focused(&mut frame, focus);
     }
@@ -375,7 +375,6 @@ impl Rig<AppHost> for Bridge {
             page_alpha: plx_ui::nav::page_alpha(),
             chrome_alpha: plx_ui::nav::chrome_alpha(),
             view_tab: u32::try_from(plx_ui::nav::view_tab(-1)).ok(),
-            blur_amount: plx_ui::nav::blur_amount(),
         }
     }
     fn surface_scope(&mut self) -> Option<plx_ui::popover::host::Live> {
@@ -388,7 +387,7 @@ impl Rig<AppHost> for Bridge {
                 metadata: self.stores.metadata_view(),
                 session: &self.playback,
             },
-            measure: &self.measure,
+            measure: self.measure,
         }
     }
     fn deliver(&mut self, to: MachineId, msg: &AppMsg, parts: &CxParts<u32>, fx: &mut Effects<'_, AppHost>) -> Handled {

@@ -46,8 +46,6 @@ plx_machine = { path = "../machine" }
 plx_platform = { path = "../platform" }
 plx_gfx = { path = "../gfx" }
 libc = "0.2"
-serde_json = { version = "1", default-features = false, features = ["alloc", "std"] }
-serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 
 [dev-dependencies]
 plx_base = { path = "../base", features = ["test-support"] }

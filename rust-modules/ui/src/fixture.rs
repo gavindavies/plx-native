@@ -279,11 +279,6 @@ impl FixtureState {
     pub const SHAPE: &'static str = "FixtureState{events:[str],keys:u32,items_seen:u32,statuses:[u16]}";
 }
 
-/// The bundle's state fingerprint: every `LogicalState` shape it carries, in a fixed order.
-pub fn fixture_state_fp() -> u64 {
-    super::rec::state_fp(&[FixtureState::SHAPE, "FixtureInit{seed:u32}", super::input::STATE_SHAPE])
-}
-
 impl LogicalState for FixtureState {
     fn write(&self, w: &mut Canon) {
         w.seq(self.events.len());
@@ -325,8 +320,6 @@ pub struct FixtureScreen {
     pub recorded_draws: u32,
     /// The [`draw_order`] tick of the latest recording draw.
     pub recorded_at: usize,
-    /// Recording draws made inside a [`crate::rec::speculative`] pass.
-    pub speculative_draws: u32,
     /// `DrawFrame::lifted` as the page pass last handed it to this page's visible or captured draw
     /// (the element the opener lift owns); `None` when none was. Render bookkeeping, not state.
     pub lifted: Option<FocusKey<u32>>,
@@ -505,7 +498,6 @@ impl Screen<FixtureHost> for FixtureScreen {
         if f.painter.is_recording() {
             self.recorded_draws += 1;
             self.recorded_at = draw_order();
-            self.speculative_draws += u32::from(crate::rec::speculating());
         } else {
             self.draw_at = draw_order();
             self.lifted = f.lifted;
@@ -638,7 +630,7 @@ impl FixtureModal {
                                     kind: ElemKind::Card,
                                 },
                                 draw_at: 0,
-                                recorded_draws: 0, recorded_at: 0, speculative_draws: 0, lifted: None,
+                                recorded_draws: 0, recorded_at: 0, lifted: None,
                             }),
                             inflight: Vec::new(),
                             staged: false,
@@ -813,7 +805,7 @@ impl Screen<FixtureHost> for FixtureModal {
         self.last_draw_alpha = f.page_alpha;
         self.last_navigation = super::screen::NavPresentation {
             page_alpha: f.page_alpha, chrome_alpha: f.chrome_alpha,
-            view_tab: f.view_tab, blur_amount: f.blur_amount,
+            view_tab: f.view_tab,
         };
         let p = f.painter;
         // One string, so a test can see whether this surface's text reached the glyph cache or
@@ -922,7 +914,7 @@ impl Mounter<FixtureHost> for FixtureMounter {
                 kind,
             },
             draw_at: 0,
-            recorded_draws: 0, recorded_at: 0, speculative_draws: 0, lifted: None,
+            recorded_draws: 0, recorded_at: 0, lifted: None,
         })
     }
 }
@@ -1007,7 +999,6 @@ pub struct FixtureRig {
     pub chrome_alpha: f32,
     pub chrome_draws: usize,
     pub view_tab: Option<u32>,
-    pub blur_amount: f32,
     pub navigation_reads: std::cell::Cell<usize>,
     mounter: FixtureMounter,
     pub store: FixtureStore,
@@ -1031,7 +1022,6 @@ impl FixtureRig {
             chrome_alpha: 1.0,
             chrome_draws: 0,
             view_tab: None,
-            blur_amount: 0.0,
             navigation_reads: std::cell::Cell::new(0),
             mounter: FixtureMounter { mounted: 0 },
             store: FixtureStore::default(),
@@ -1064,7 +1054,7 @@ impl Rig<FixtureHost> for FixtureRig {
         self.navigation_reads.set(self.navigation_reads.get() + 1);
         super::screen::NavPresentation {
             page_alpha: self.page_alpha, chrome_alpha: self.chrome_alpha,
-            view_tab: self.view_tab, blur_amount: self.blur_amount,
+            view_tab: self.view_tab,
         }
     }
     fn draw_chrome(&mut self, _arg: &FixtureArg, _parts: &CxParts<u32>,
@@ -1313,419 +1303,6 @@ fn the_spike_composes_boot_a_key_a_landing_and_a_poster_over_four_frames() {
     home_inst.screen.state().probe(&mut probe);
     assert!(probe.contains("\"uncover\", \"restore_memory\", \"enter\""), "{probe}");
     assert_ne!(home_inst.screen.state().hash(), 0);
-}
-
-// ---------------------------------------------------------------------------------------------
-// the recorder tap and the replay codec for this bundle
-// ---------------------------------------------------------------------------------------------
-
-use super::dispatch::Tap;
-use super::rec::{Header, MemSink, Recording, Writer};
-use super::replay::Codec;
-use serde_json::{json, Value};
-
-pub struct RecTap {
-    pub w: Writer,
-}
-
-fn key_name(k: Key) -> &'static str {
-    match k {
-        Key::Up => "up",
-        Key::Down => "down",
-        Key::Left => "left",
-        Key::Right => "right",
-        Key::Ok => "ok",
-        Key::Back => "back",
-        Key::Other => "other",
-    }
-}
-
-impl Tap<FixtureHost> for RecTap {
-    fn tick(&mut self, f: u64, t: Tick) {
-        self.w.tick(f, t);
-    }
-    fn input(&mut self, f: u64, ev: &InputEvent<u32>) {
-        use plx_machine::machine::TextEdit;
-        let input = match &ev.kind {
-            InputKind::Key { key, .. } => json!({"kind": "key", "key": key_name(*key), "ms": ev.at.ms}),
-            InputKind::SystemKeyboard(up) => json!({"kind": "keyboard", "up": up, "ms": ev.at.ms}),
-            InputKind::Text(edit) => {
-                let (op, text) = match edit {
-                    TextEdit::Commit(text) => ("commit", text.as_ref()),
-                    TextEdit::Backspace => ("backspace", ""), TextEdit::Clear => ("clear", ""),
-                    TextEdit::Left => ("left", ""), TextEdit::Right => ("right", ""),
-                };
-                json!({"kind": "text", "op": op, "text": text, "ms": ev.at.ms})
-            }
-            _ => return,
-        };
-        self.w.input(f, input);
-    }
-    fn result(&mut self, f: u64, addr: &Addr, msg: &FixtureMsg) {
-        let (to, payload) = match (addr.to, msg) {
-            (MachineId::Instance(i), FixtureMsg::Http { status, .. }) => {
-                (format!("inst:{}", i.0), json!({"kind": "http", "status": status}))
-            }
-            (MachineId::Instance(i), FixtureMsg::Store(o, v)) => {
-                (format!("inst:{}", i.0), json!({"kind": "store", "ord": o.0, "v": v}))
-            }
-            _ => return,
-        };
-        self.w.result(f, &to, addr.req.0, payload);
-    }
-    fn effect(&mut self, f: u64, s: &plx_machine::machine::Stamped<FixtureHost>) {
-        let e = match &s.fx {
-            Fx::Nav(_) => "nav",
-            Fx::Mount(_) => "mount",
-            Fx::Unmount(_) => "unmount",
-            Fx::Deliver(..) => "deliver",
-            Fx::Timer { .. } => "timer",
-            Fx::CancelTimer(_) => "cancel_timer",
-            Fx::Press(_) => "press",
-            Fx::Remember { .. } => "remember",
-            Fx::Log(_) => "log",
-            Fx::App(_) => "app",
-        };
-        self.w.effect(f, &format!("{:?}", s.from), e, None);
-    }
-    fn present(&mut self, f: u64, bit: bool, why: Option<Provenance>) {
-        let why = why.map(|p| format!("{p:?}"));
-        self.w.present(f, bit, why.as_deref());
-    }
-    fn state(&mut self, f: u64, hash: u64) {
-        self.w.state(f, hash);
-    }
-    fn focus(&mut self, f: u64, focus: Option<(u32, u32, Option<u32>)>) {
-        self.w.focus(f, focus);
-    }
-    fn frame_done(&mut self, _f: u64) {
-        self.w.flush_frame().expect("the memory sink never fails");
-    }
-}
-
-pub struct FixtureCodec;
-
-impl Codec<FixtureHost> for FixtureCodec {
-    fn decode_input(&self, v: &Value) -> Option<InputEvent<u32>> {
-        use plx_machine::machine::{Source, TextEdit};
-        let at = tick(v["ms"].as_u64()?.try_into().ok()?);
-        let kind = match v["kind"].as_str()? {
-            "keyboard" => Some(InputKind::SystemKeyboard(v["up"].as_bool()?)),
-            "text" => Some(InputKind::Text(match v["op"].as_str()? {
-                "commit" => TextEdit::Commit(v["text"].as_str()?.into()),
-                "backspace" => TextEdit::Backspace, "clear" => TextEdit::Clear,
-                "left" => TextEdit::Left, "right" => TextEdit::Right,
-                _ => return None,
-            })),
-            "key" => None,
-            _ => return None,
-        };
-        if let Some(kind) = kind { return Some(InputEvent { at, source: Source::Script, kind }); }
-        let k = match v["key"].as_str()? {
-            "up" => Key::Up,
-            "down" => Key::Down,
-            "left" => Key::Left,
-            "right" => Key::Right,
-            "ok" => Key::Ok,
-            "back" => Key::Back,
-            "other" => Key::Other,
-            _ => return None,
-        };
-        Some(key(k, at))
-    }
-    fn decode_result(&self, v: &Value) -> Option<(Addr, FixtureMsg)> {
-        let to = v["to"].as_str()?;
-        let inst = to.strip_prefix("inst:")?.parse::<u32>().ok()?;
-        let addr = Addr {
-            to: MachineId::Instance(plx_machine::machine::InstanceId(inst)),
-            req: RequestId(v["req"].as_u64()?.try_into().ok()?),
-        };
-        let p = &v["payload"];
-        let msg = match p["kind"].as_str()? {
-            "http" => FixtureMsg::Http {
-                status: p["status"].as_u64()?.try_into().ok()?,
-                blob: vec![],
-            },
-            "store" => FixtureMsg::Store(StoreOrd(p["ord"].as_u64()?.try_into().ok()?), p["v"].as_u64()?.try_into().ok()?),
-            _ => return None,
-        };
-        Some((addr, msg))
-    }
-}
-
-/// The scenario every recorder test drives: boot, an HTTP landing, a store notice + OK, BACK.
-fn drive(d: &mut Dispatcher<FixtureHost>, rig: &mut FixtureRig, tap: &mut dyn Tap<FixtureHost>) {
-    d.request(MachineId::Nav, NavOp::Root(FixtureArg::Home));
-    d.frame(rig, tick(0), vec![], vec![], tap);
-    let home = d.nav.top_page().and_then(|e| e.inst.as_ref()).unwrap().id;
-    d.track_inflight(home, RequestId(1));
-    d.track_inflight(home, RequestId(0));
-    let addr = |req: u32| Addr {
-        to: MachineId::Instance(home),
-        req: RequestId(req),
-    };
-    d.frame(
-        rig,
-        tick(16),
-        vec![],
-        vec![(addr(1), FixtureMsg::Http { status: 200, blob: vec![] })],
-        tap,
-    );
-    d.frame(
-        rig,
-        tick(32),
-        vec![key(Key::Ok, tick(32))],
-        vec![(addr(0), FixtureMsg::Store(StoreOrd(0), 1))],
-        tap,
-    );
-    d.frame(rig, tick(48), vec![], vec![], tap);
-    let r = d.frame(rig, tick(64), vec![key(Key::Back, tick(64))], vec![], tap);
-    d.prune(&r.unmounted);
-}
-
-fn record() -> Recording {
-    let sink = MemSink::default();
-    let segs = sink.segments.clone();
-    let header = Header::new(fixture_state_fp(), &FixtureInit { seed: 1 });
-    let w = Writer::open(Box::new(sink), &header, 0).unwrap();
-    let mut tap = RecTap { w };
-    let mut d: Dispatcher<FixtureHost> = Dispatcher::new();
-    let mut rig = FixtureRig::new();
-    drive(&mut d, &mut rig, &mut tap);
-    tap.w.finish().unwrap();
-    let manifest = serde_json::to_string(&json!({
-        "schema": super::rec::SCHEMA, "state_fp": fixture_state_fp(),
-        "init": {"probe": "seed=1", "hash": FixtureInit { seed: 1 }.hash()}
-    }))
-    .unwrap();
-    let s = segs.borrow();
-    let refs: Vec<&[u8]> = s.iter().map(|v| v.as_slice()).collect();
-    Recording::parse(&manifest, &refs, fixture_state_fp()).unwrap()
-}
-
-/// Replay `rec` the way the product driver will: the replay re-registers the inflight requests
-/// the scenario minted (the app's registry does that from `Fx::App` in phase 2's registry).
-fn replay(rec: &Recording, codec: &dyn Codec<FixtureHost>) -> super::replay::Report {
-    replay_mode(rec, codec, super::replay::Mode::Targets)
-}
-
-fn replay_mode(rec: &Recording, codec: &dyn Codec<FixtureHost>, mode: super::replay::Mode) -> super::replay::Report {
-    let mut d: Dispatcher<FixtureHost> = Dispatcher::new();
-    let mut rig = FixtureRig::new();
-    d.request(MachineId::Nav, NavOp::Root(FixtureArg::Home));
-    // the first frame mounts Home; the replay driver runs it, then the test registers the two
-    // requests the recorded scenario tracked before feeding the rest
-    let first = &rec.frames[..1];
-    let rest = &rec.frames[1..];
-    let head = Recording {
-        header: rec.header.clone(),
-        frames: first.to_vec(),
-        metrics: Default::default(),
-        stopped_at: None,
-    };
-    let r0 = super::replay::run(&head, codec, &mut d, &mut rig, &|| None, mode);
-    assert!(r0.is_clean(), "fixture bootstrap: {:?}", r0.safe_lines());
-    let home = d.nav.top_page().and_then(|e| e.inst.as_ref()).unwrap().id;
-    d.track_inflight(home, RequestId(1));
-    d.track_inflight(home, RequestId(0));
-    let tail = Recording {
-        header: rec.header.clone(),
-        frames: rest.to_vec(),
-        metrics: Default::default(),
-        stopped_at: None,
-    };
-    let mut r = super::replay::run(&tail, codec, &mut d, &mut rig, &|| None, mode);
-    r.frames += r0.frames;
-    r.graded += r0.graded;
-    r.divergences.splice(0..0, r0.divergences);
-    r.present_diffs.splice(0..0, r0.present_diffs);
-    r.focus_diffs.splice(0..0, r0.focus_diffs);
-    r
-}
-
-#[test]
-fn a_sim_recording_replays_to_the_same_state_hash_stream() {
-    // "sim" in the spec's sense: the recording is taken by the tap, not typed by hand; the product
-    // fixture recorded on the simulator is the same path with the product codec.
-    let rec = record();
-    assert!(rec.state_stream().len() >= 4, "every event frame carries an st record");
-    let report = replay(&rec, &FixtureCodec);
-    assert!(report.is_clean(), "{:?}", report.safe_lines());
-    assert_eq!(report.graded as usize, rec.state_stream().len());
-
-    // A codec that changes a valid HTTP landing is a different application: pointwise divergences from
-    // the frame it first mattered, and replay CONTINUES.
-    struct Changed;
-    impl Codec<FixtureHost> for Changed {
-        fn decode_input(&self, v: &Value) -> Option<InputEvent<u32>> {
-            FixtureCodec.decode_input(v)
-        }
-        fn decode_result(&self, v: &Value) -> Option<(Addr, FixtureMsg)> {
-            let (addr, mut msg) = FixtureCodec.decode_result(v)?;
-            if let FixtureMsg::Http { status, .. } = &mut msg { *status = 404; }
-            Some((addr, msg))
-        }
-    }
-    for mode in [super::replay::Mode::Targets, super::replay::Mode::Resolve] {
-        let clean = replay_mode(&rec, &FixtureCodec, mode);
-        assert!(clean.is_clean(), "{:?}", clean.safe_lines());
-        let report = replay_mode(&rec, &Changed, mode);
-        assert!(!report.is_clean());
-        assert!(report.decode_failure.is_none());
-        assert_eq!(report.divergences[0].frame, 2, "the landing frame is the first to diverge");
-        assert!(report.frames == rec.frames.len() as u64, "replay continued past the divergence");
-        assert!(report.safe_lines()[0].starts_with("diverge f=2 expected=0x"));
-    }
-}
-
-#[test]
-fn replay_decode_refusal_is_atomic_in_both_modes() {
-    use super::replay::{run, Mode};
-    for mode in [Mode::Targets, Mode::Resolve] {
-        for stream in ["input", "result"] {
-            let mut rec = record();
-            rec.frames.truncate(1);
-            let mut d = Dispatcher::<FixtureHost>::new();
-            let mut rig = FixtureRig::new();
-            d.request(MachineId::Nav, NavOp::Root(FixtureArg::Home));
-            assert!(run(&rec, &FixtureCodec, &mut d, &mut rig, &|| None, mode).is_clean());
-            let home = d.nav.top_page().unwrap().inst.as_ref().unwrap().id;
-            d.track_inflight(home, RequestId(1));
-            let before = d.state_hash();
-            rec.frames = vec![super::rec::Frame {
-                f: 73, tick: Some(tick(16)),
-                inputs: vec![json!({"kind":"key", "key":"ok", "ms":16})],
-                results: vec![json!({"to":format!("inst:{}", home.0), "req":1,
-                    "payload":{"kind":"http", "status":200}})],
-                ..Default::default()
-            }];
-            let fr = &mut rec.frames[0];
-            if stream == "input" { fr.inputs.push(json!({"kind":"unknown"})); }
-            else { fr.results.push(json!({"payload":{"kind":"unknown"}})); }
-            let report = run(&rec, &FixtureCodec, &mut d, &mut rig, &|| None, mode);
-            assert!(!report.is_clean(), "{mode:?} {stream}: malformed data was skipped");
-            assert_eq!(report.frames, 0);
-            assert_eq!(report.graded, 0);
-            assert_eq!(report.decode_failure, Some(super::replay::DecodeFailure {
-                frame: 73,
-                stream: if stream == "input" { super::replay::DecodeStream::Input } else { super::replay::DecodeStream::Result },
-                index: 1,
-            }));
-            assert_eq!(d.state_hash(), before, "refused frame mutated dispatcher");
-            assert!(rig.store.view.items.is_empty(), "refused frame ran store effect");
-            assert_eq!(report.safe_lines(), vec![format!("decode-refused f=73 stream={stream} index=1")]);
-        }
-    }
-}
-
-#[test]
-fn replay_codec_refuses_unknown_missing_and_overflow_values() {
-    for input in [
-        json!({"kind":"key", "key":"unknown", "ms":0}),
-        json!({"kind":"key", "key":"ok", "ms":4294967296u64}),
-        json!({"kind":"key", "ms":0}), json!({"kind":"unknown", "ms":0}),
-        json!({"kind":"keyboard", "up":1, "ms":0}),
-        json!({"kind":"text", "op":"commit", "ms":0}),
-    ] { assert!(FixtureCodec.decode_input(&input).is_none(), "{input}"); }
-    let base = json!({"to":"inst:1", "req":1, "payload":{"kind":"http", "status":200}});
-    for (field, bad) in [("req", json!(4294967296u64)), ("req", json!(-1)),
-        ("req", Value::Null), ("to", json!("inst:4294967296")),
-        ("to", json!("unknown:1")), ("to", Value::Null)] {
-        let mut v = base.clone(); v[field] = bad;
-        assert!(FixtureCodec.decode_result(&v).is_none(), "{v}");
-    }
-    for payload in [json!({"kind":"http", "status":65536}),
-        json!({"kind":"http", "status":-1}), json!({"kind":"http"}),
-        json!({"kind":"unknown"}), json!({"kind":"store", "ord":4294967296u64, "v":0}),
-        json!({"kind":"store", "ord":0, "v":4294967296u64}),
-        json!({"kind":"store", "ord":0})] {
-        let mut v = base.clone(); v["payload"] = payload;
-        assert!(FixtureCodec.decode_result(&v).is_none(), "{v}");
-    }
-    assert!(FixtureCodec.decode_input(&json!({"kind":"key", "key":"other", "ms":0})).is_some());
-}
-
-#[test]
-fn replay_none_refusal_keeps_completed_frames_and_stops_the_suffix() {
-    use super::replay::{run, DecodeFailure, DecodeStream, Mode};
-    struct Refusing;
-    impl Codec<FixtureHost> for Refusing {
-        fn decode_input(&self, v: &Value) -> Option<InputEvent<u32>> { FixtureCodec.decode_input(v) }
-        fn decode_result(&self, _: &Value) -> Option<(Addr, FixtureMsg)> { None }
-    }
-    for mode in [Mode::Targets, Mode::Resolve] {
-        let mut rec = record();
-        let mut expected = Dispatcher::<FixtureHost>::new();
-        let mut expected_rig = FixtureRig::new();
-        expected.request(MachineId::Nav, NavOp::Root(FixtureArg::Home));
-        expected.frame(&mut expected_rig, tick(0), vec![], vec![], &mut NoTap);
-        rec.frames[1].f = 73;
-        let mut d = Dispatcher::<FixtureHost>::new();
-        let mut rig = FixtureRig::new();
-        d.request(MachineId::Nav, NavOp::Root(FixtureArg::Home));
-        let report = run(&rec, &Refusing, &mut d, &mut rig, &|| None, mode);
-        assert_eq!(report.decode_failure, Some(DecodeFailure { frame: 73, stream: DecodeStream::Result, index: 0 }));
-        assert_eq!(report.frames, 1);
-        assert_eq!(report.graded, 1);
-        assert_eq!(d.state_hash(), expected.state_hash());
-        assert!(rig.store.view.items.is_empty());
-    }
-}
-
-#[test]
-fn replay_safe_lines_use_decoded_event_labels() {
-    struct Accepting;
-    impl Codec<FixtureHost> for Accepting {
-        fn decode_input(&self, _: &Value) -> Option<InputEvent<u32>> { Some(key(Key::Other, tick(0))) }
-        fn decode_result(&self, v: &Value) -> Option<(Addr, FixtureMsg)> { FixtureCodec.decode_result(v) }
-    }
-    for mode in [super::replay::Mode::Targets, super::replay::Mode::Resolve] {
-        let mut rec = record();
-        rec.frames.truncate(1);
-        rec.frames[0].inputs = vec![json!({"kind":"synthetic-payload\nnot-an-event-label"})];
-        let mut d = Dispatcher::<FixtureHost>::new();
-        let mut rig = FixtureRig::new();
-        let report = super::replay::run(&rec, &Accepting, &mut d, &mut rig, &|| None, mode);
-        assert!(!report.divergences.is_empty());
-        let lines = report.safe_lines().join("\n");
-        assert!(!lines.contains("synthetic-payload"), "{lines}");
-        assert!(lines.contains("inputs=[key]"), "{lines}");
-    }
-}
-
-#[test]
-fn replay_well_formed_stale_addresses_follow_normal_drop_semantics() {
-    for mode in [super::replay::Mode::Targets, super::replay::Mode::Resolve] {
-        let mut rec = record();
-        let expected = replay_mode(&rec, &FixtureCodec, mode);
-        rec.frames[1].results.push(json!({"to":"inst:4294967295", "req":4294967295u64,
-            "payload":{"kind":"http", "status":65535}}));
-        let mut stale_request = rec.frames[1].results[0].clone();
-        stale_request["req"] = json!(4294967295u64);
-        rec.frames[1].results.push(stale_request);
-        let report = replay_mode(&rec, &FixtureCodec, mode);
-        assert!(report.is_clean(), "{:?}", report.safe_lines());
-        assert_eq!(report.frames, expected.frames);
-    }
-}
-
-#[test]
-fn the_present_bit_is_recorded_and_replayed() {
-    let rec = record();
-    let bits: Vec<Option<bool>> = rec.frames.iter().map(|f| f.present).collect();
-    assert_eq!(bits[0], Some(true), "boot presents");
-    assert_eq!(bits[1], Some(false), "a landing that damaged nothing does not");
-    assert_eq!(bits[2], Some(true), "the key did");
-    assert_eq!(rec.frames[2].present_why.as_deref(), Some("Input"));
-    let report = replay(&rec, &FixtureCodec);
-    assert!(report.present_diffs.is_empty());
-}
-
-#[test]
-fn the_fixture_bundles_state_shape_is_pinned() {
-    // Re-pin only with a named reason: a shape change invalidates every fixture of this bundle.
-    // The fixture bundle now versions the input machine and queued whole-input payloads too.
-    assert_eq!(fixture_state_fp(), 0x23c4_4e83_a90a_8644);
 }
 
 pub fn booted() -> (Dispatcher<FixtureHost>, FixtureRig, plx_machine::machine::InstanceId) {

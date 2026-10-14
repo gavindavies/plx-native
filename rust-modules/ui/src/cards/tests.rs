@@ -2976,19 +2976,3 @@ fn grid_header_press_dips_no_unindexed_member() {
     a_header_press_dips_no_unindexed_member::<Grid>();
 }
 
-/// The focus read-out of a shelf that holds a slid window names the card by its place in the
-/// whole listing (`cdg`), not by its slot in the window (`cdi`): the two were the same number
-/// on every shelf once, and a reach graded on it could never pass the window length.
-#[cfg(feature = "devtriggers")]
-#[test]
-fn a_shelfs_probe_reports_the_listing_position_apart_from_the_window_slot() {
-    crate::card_probe::arm_for_test();
-    let mut src = Cards::new((100..112).collect(), true);
-    for (first, want) in [(0, 11), (12, 23)] {
-        src.first = first;
-        crate::card_probe::clear();
-        super::shelf::note_focused(Painter::root(), Rect::new(10.0, 20.0, 200.0, 300.0), 11, &src);
-        let seen = crate::card_probe::peek().expect("the focused card was noted");
-        assert_eq!((seen.index, seen.len, seen.global), (11, 12, want), "window starting at {first}");
-    }
-}

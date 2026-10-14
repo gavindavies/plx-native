@@ -169,12 +169,10 @@ impl PanelMotion {
     }
 
     /// Queue `table`'s uncached strings: the recording walk `ui::dispatch` runs for a page's warm
-    /// pass, speculative to the recorder, with no raw clear reaching the framebuffer.
+    /// pass, with no raw clear reaching the framebuffer.
     fn record_text(natural: Rect, table: &TableView, measure: &dyn Measure) {
         plx_gfx::gfx::without_frame_clear(|| {
-            crate::rec::speculative(|| {
-                crate::record_walk(|| table.draw(Painter::recording(), natural, measure))
-            })
+            crate::record_walk(|| table.draw(Painter::recording(), natural, measure))
         });
     }
 

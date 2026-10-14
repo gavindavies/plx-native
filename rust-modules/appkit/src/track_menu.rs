@@ -1357,10 +1357,8 @@ pub fn new(
         {
             return;
         }
-        // The whole recording part is speculative to the recorder (spec §5): the form's layout
-        // asks the measure about a page no frame draws, and a replay must answer 0.0 for a key
-        // its recording lacks instead of refusing on it.
-        let owner = plx_ui::rec::speculative(|| {
+        // The form's layout asks the measure about a page no frame draws.
+        let owner = {
             let form = if self.tab == 0 {
                 self.sub_root_form(meta).0
             } else {
@@ -1371,7 +1369,7 @@ pub fn new(
             other.set(form, None);
             let natural = table_natural(&other.table, measure);
             PanelMotion::prewarm_background_text(natural, &other.table, measure)
-        });
+        };
         self.background_owner = Some(owner);
     }
 

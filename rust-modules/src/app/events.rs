@@ -505,13 +505,6 @@ pub(crate) fn dispatch_remote_token(tok: &str) -> bool {
             }
             None => false,
         }
-    } else if let Some(spec) = tok.strip_prefix("pat:") {
-        // `pat:flat:40` — swap the synthetic ground live for a one-session graded sweep.
-        let ok = plx_ui::testpat::set(spec);
-        if !ok {
-            plx_base::eventlog::log(&format!("remote: unrecognised pattern {spec:?}"));
-        }
-        ok
     } else if let Some((sym, wcode)) = remote_token_key(tok) {
         remote_synth_key(sym, wcode);
         true

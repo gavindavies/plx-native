@@ -166,17 +166,17 @@ pub fn panel_ground(
 ) {
     let boost = theme::GLASS_RIM_LIGHT[3] - theme::GLASS_RIM[3];
     let weight = panel_tint_sweep().unwrap_or(theme::underlay::PANEL_TINT);
-    let drew = crate::profile::phase("panel.field", || {
+    let drew = {
         field.is_some_and(|f| f.draw_panel(p, r, radius, weight))
-    });
+    };
     let (top, bot) = if drew {
         panel_frost()
     } else {
         (theme::PANEL_TOP, theme::PANEL_BOT)
     };
-    crate::profile::phase("panel.frost", || {
+    {
         p.rect_rimmed(r, radius, top, bot, theme::GLASS_RIM, boost);
-    });
+    };
 }
 
 #[cfg(feature = "devtriggers")]
@@ -657,13 +657,6 @@ pub fn resolve_card_art(p: Painter, rect: Rect, art: &Art<'_>) -> (u32, f32, f32
     let _admission = art.motion_identity()
         .map(|id| crate::card_motion::Scope::card(id, p.to_screen(rect).0));
     let image = card_art_request(art).map_or((0, 0.0, 0.0), |(srv, path, w, h)| resolve_tex_wh_on(srv, path, w, h, 0));
-    #[cfg(feature = "devtriggers")]
-    {
-        crate::card_motion_metrics::draw(image.0 != 0);
-        if let Some((srv, path, w, h)) = card_art_request(art) {
-            crate::card_probe::art(srv, path, w, h, image.0 != 0);
-        }
-    }
     image
 }
 

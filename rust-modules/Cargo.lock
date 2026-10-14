@@ -829,8 +829,6 @@ dependencies = [
  "plx_gfx",
  "plx_machine",
  "plx_platform",
- "serde",
- "serde_json",
 ]
 
 [[package]]

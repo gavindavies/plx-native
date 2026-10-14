@@ -761,11 +761,6 @@ mod tests {
             assert_eq!(lines.lines, live.lines);
             assert_eq!(lines.truncated, live.truncated);
             assert!(Rc::ptr_eq(&lines, &measured.wrap(180.0)), "reuse belongs to this view");
-            let missing = crate::rec::TableMeasure::new(Default::default());
-            let _ = build().with_measure(&missing).wrap(180.0);
-            assert!(missing.take_miss().is_some(), "neither live nor another owner's memo may mask a missing table");
-            let _ = measured.with_measure(&missing).wrap(180.0);
-            assert!(missing.take_miss().is_some(), "changing capability must invalidate this view's memo too");
         }
         plx_gfx::text::take_measure_fault();
     }

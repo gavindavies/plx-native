@@ -17,7 +17,6 @@ pub mod backdrop;
 mod geom;
 /// Draw-phase instrumentation (`phase`, the GPU timer / HWCNT / CPU profilers) and the LOAD DIAL's
 /// published state.
-pub mod profile;
 /// The design tokens the renderer draws with: the app ground and scrim ink, the card shading
 /// constants its image shader mirrors, and the type-size ladder.
 pub mod tokens;
@@ -4222,8 +4221,7 @@ fn blur_lazy_init() -> bool {
 /// flips it took to get there, and the parity, the region and the valid flag fall out here.
 ///
 /// `passes_from_grab` counts the flipping passes since the chain's bottom-up ORIGIN — the window
-/// copy or the scene render, whichever this path used. `live_w`/`live_h` are the live area of the
-/// final target, for the profiler's read-out only.
+/// copy or the scene render, whichever this path used.
 ///
 /// The region is republished because [`blur_region_px_align`] aligns and clamps: the rect the draw
 /// maps out of has to be the ALIGNED one, or a panel's sampling window is off by up to three
@@ -4236,8 +4234,6 @@ fn blur_publish(
     rh: c_int,
     out: c_uint,
     passes_from_grab: usize,
-    live_w: c_int,
-    live_h: c_int,
 ) {
     unsafe {
         let Some(c) = (*std::ptr::addr_of_mut!(BLURST)).as_mut() else {
@@ -4251,9 +4247,6 @@ fn blur_publish(
             rw as f32 / sx,
             rh as f32 / sy,
         ];
-        profile::note_blur_config(
-            live, rx, ry, rw, rh, c.gw, c.gh, c.mw, c.mh, live_w, live_h,
-        );
         c.reg = live;
         c.rw = rw;
         c.rh = rh;
@@ -4314,7 +4307,6 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
         // Split into exact phases for the asynchronous timer-query and serialized HWCNT diagnostic
         // modes. The candidates are a framebuffer copy/resolve and five render-target passes.
         // The phase wrapper is an inline passthrough in a release build.
-        use crate::gfx::profile::phase;
         // The region, in drawable px and 4-aligned, landing at the BOTTOM-LEFT of every target. Each
         // pass then draws a full quad into a viewport of the region's own size and samples the
         // matching corner of its source, so the whole chain is the same shape it always was, one
@@ -4324,7 +4316,7 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
         let win = |uw: c_int, uh: c_int, tw: c_int, th: c_int| {
             (uw as f32 / tw as f32, uh as f32 / th as f32)
         };
-        let e = phase("blur.copy", || {
+        let e = {
             glBindTexture(GL_TEXTURE_2D, c.grab);
             // `glCopyTexSubImage2D` reads the framebuffer bottom-left-origin while the region is
             // measured from the canvas TOP, so the row has to be flipped into window space here.
@@ -4341,7 +4333,7 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
                 rh,
             );
             glGetError()
-        });
+        };
         if e != GL_NO_ERROR {
             // The same failure `capture` guards: a window config without alpha bits makes the copy
             // a silent no-op, which would read as "the blur is black" rather than as a fault.
@@ -4385,16 +4377,8 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
             (c.mid_fbo, c.grab, r2w, r2h, win(rw, rh, c.gw, c.gh)),
             (c.a_fbo, c.mid, r4w, r4h, win(r2w, r2h, c.mw, c.mh)),
         ];
-        // ONE PHASE PER PASS, deliberately: this split is what MEASURED the cost model above, and
-        // it is left in place because it is the only way to re-measure it. `phase` takes a
-        // `&'static str`, so the names are written out rather than indexed.
-        for (i, &(fbo, src, w, h, uv)) in reductions.iter().enumerate() {
-            let name = if i == 0 {
-                "blur.reduce1"
-            } else {
-                "blur.reduce2"
-            };
-            phase(name, || {
+        for &(fbo, src, w, h, uv) in reductions.iter() {
+            {
                 glBindFramebuffer(GL_FRAMEBUFFER, fbo);
                 glViewport(0, 0, w, h);
                 glClear(GL_COLOR_BUFFER_BIT);
@@ -4422,15 +4406,14 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
                     0.0,
                     None,
                 );
-            });
+            };
         }
         // The taps run where the reductions ended — quarter res, which is the scale the direct path
         // renders its source at. See [`BLUR_REDUCTIONS`] for why that equality is not optional.
         let (tw, th) = (r4w, r4h);
         let tap_uv = win(tw, th, c.sw, c.sh);
         for (i, tap) in taps.iter().enumerate() {
-            let name = if i == 0 { "blur.tap1" } else { "blur.tap2" };
-            phase(name, || {
+            {
                 glViewport(0, 0, tw, th);
                 // even pass -> a into b, odd -> b into a; with an even tap count the finished
                 // snapshot lands back in `a`, which is what `draw_blur_backdrop` samples.
@@ -4452,13 +4435,13 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
                 glUniform2f(BL_TEXEL, tap / c.sw as f32, tap / c.sh as f32);
                 glBindTexture(GL_TEXTURE_2D, src);
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-            });
+            };
         }
 
         // Back UP one level through the same filter — the half of a dual-filter blur that stops the
         // result reading as enlarged pixels. See `BLUR_UP_TAP`. `mid` is free by now: it was the
         // first reduction's target and nothing has read it since the second reduction.
-        phase("blur.up", || {
+        {
             // UNCONDITIONAL, and it must never ask `c.out != c.a` to decide: `out` is written by
             // whichever path ran LAST, and `blur_snapshot_direct` leaves it at `mid`, so that
             // question silently added a FOURTH pass here on every frame after a direct one — a 1:1
@@ -4476,7 +4459,7 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
             // modal chains finish in `a`. The assertion at entry keeps that property structural.
             glBindTexture(GL_TEXTURE_2D, c.a);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        });
+        };
 
         glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
         let (vx, vy, vw, vh) = plx_base::surface::viewport();
@@ -4489,10 +4472,7 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
             rw,
             rh,
             c.mid,
-            BLUR_REDUCTIONS + taps.len() + 1,
-            c.sw,
-            c.sh,
-        );
+            BLUR_REDUCTIONS + taps.len() + 1);
     }
 }
 
@@ -5474,8 +5454,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
 
         let vx = -rx / step;
         let vy = -(c.gh - ry - rh) / step;
-        use crate::gfx::profile::phase;
-        phase("blur.scene", || {
+        {
             // Armed before anything else, and disarmed by `DirectPass::drop` however this exits.
             BLUR_IN_PASS = true;
             let _restore = DirectPass;
@@ -5508,7 +5487,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
             // specialize RGB blending restore it before returning, so enabling is sufficient.
             glEnable(GL_BLEND);
             draw_scene();
-        });
+        };
 
         glDisable(GL_BLEND);
         let win = |uw: c_int, uh: c_int, tex_w: c_int, tex_h: c_int| {
@@ -5521,8 +5500,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
         // this a scale sweep changes two variables at once and measures neither.
         let tap_k = 4.0 * plx_base::surface::render_scale() as f32 / scale as f32;
         for (i, taps) in blur_taps().iter().enumerate() {
-            let name = if i == 0 { "blur.tap1" } else { "blur.tap2" };
-            phase(name, || {
+            {
                 glViewport(0, 0, tw, th);
                 let (fbo, src) = if i % 2 == 0 {
                     (c.b_fbo, c.a)
@@ -5538,7 +5516,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
                 glUniform2f(BL_TEXEL, off / c.sw as f32, off / c.sh as f32);
                 glBindTexture(GL_TEXTURE_2D, src);
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-            });
+            };
         }
 
         // Up to half resolution, exactly as the capture path does, so `out` is `mid` and the glass
@@ -5546,7 +5524,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
         // larger magnification than 2x, which is precisely the quality question the scale sweep is
         // for; the filter itself is unchanged.
         let (r2w, r2h) = ((rw / 2).max(1), (rh / 2).max(1));
-        phase("blur.up", || {
+        {
             glBindFramebuffer(GL_FRAMEBUFFER, c.mid_fbo);
             glViewport(0, 0, r2w, r2h);
             glClear(GL_COLOR_BUFFER_BIT);
@@ -5560,7 +5538,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
             );
             glBindTexture(GL_TEXTURE_2D, c.a);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        });
+        };
 
         glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
         let (vx, vy, vw, vh) = plx_base::surface::viewport();
@@ -5575,7 +5553,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
             return false;
         }
 
-        blur_publish(rx, ry, rw, rh, c.mid, blur_direct_passes(), tw, th);
+        blur_publish(rx, ry, rw, rh, c.mid, blur_direct_passes());
         true
     }
 }
@@ -5801,7 +5779,7 @@ pub fn draw_blur_backdrop(
             // exactly like the backdrop being flipped and is not that at all.
             glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D, c.grab);
-            profile::phase("glass.sharp", || {
+            {
                 glCopyTexSubImage2D(
                     GL_TEXTURE_2D,
                     0,
@@ -5812,7 +5790,7 @@ pub fn draw_blur_backdrop(
                     dw,
                     dh,
                 );
-            });
+            };
             glActiveTexture(GL_TEXTURE0);
         }
         let suv = blur_uv_rect(x, y, w, h, sreg, sspan, true);
@@ -5861,9 +5839,9 @@ pub fn draw_blur_backdrop(
         glUniform1f(GL_RADIUS, radius);
         glUniform2f(GL_CH, w * 0.5, h * 0.5);
         glUniform4f(GL_RECT, x, y, w, h);
-        profile::phase("glass.composite", || {
+        {
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        });
+        };
         true
     }
 }

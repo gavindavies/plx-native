@@ -40,13 +40,6 @@ pub enum PageEdge {
     After,
 }
 
-/// The focus read-out for card `i` of `src`, drawn at `rect`: its slot in the held window and its
-/// place in the whole listing the window is part of (`pitv-focusx`).
-#[cfg(feature = "devtriggers")]
-pub(super) fn note_focused<H: Host, S: CardSource<H>>(pr: Painter, rect: Rect, i: usize, src: &S) {
-    let at = pr.to_screen(rect).0;
-    crate::card_probe::focused(at.x, at.y, at.w, i, src.len(), src.global(i));
-}
 
 pub struct Shelf {
     entry: EntryId,
@@ -781,13 +774,7 @@ impl Shelf {
         if focused {
             let label = src.label(i).revealed(self.row.band_reveal())
                 .settling(self.row.settle_lag(src.len(), i, self.style) * src.sweep());
-            #[cfg(feature = "devtriggers")]
-            crate::card_probe::begin_card();
             card_row::draw_focused(pr.tilted(pose[0], pose[1]), src.art(i), rect, s, self.style, src.progress(i), &label, f.measure);
-            #[cfg(feature = "devtriggers")]
-            if !pr.is_recording() {
-                note_focused(pr, rect, i, src);
-            }
         } else {
             card_row::draw_tile(pr, src.art(i), rect, s, self.style, src.progress(i));
         }

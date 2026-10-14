@@ -210,7 +210,6 @@ pub(crate) unsafe fn boot(
     plx_media::player::acb_init(&mt);
     plx_media::ff::boot();
     let glass = plx_ui::frame::glass::GlassPlan::new();
-    plx_ui::testpat::boot();
     plx_media::player::seed_dev_track_names();
     // dev: /tmp/pitv-framedrop — the FRAME-DROP DETECTOR. Each frame is timed (pump / draw /
     // swap, no glFinish) and any frame whose total exceeds a threshold (ms; the file's content

@@ -751,12 +751,11 @@ pub struct NavPresentation {
     pub page_alpha: f32,
     pub chrome_alpha: f32,
     pub view_tab: Option<u32>,
-    pub blur_amount: f32,
 }
 
 impl Default for NavPresentation {
     fn default() -> Self {
-        Self { page_alpha: 1.0, chrome_alpha: 1.0, view_tab: None, blur_amount: 0.0 }
+        Self { page_alpha: 1.0, chrome_alpha: 1.0, view_tab: None }
     }
 }
 
@@ -769,7 +768,6 @@ pub struct DrawFrame<'a, 'views, H: Host> {
     pub page_alpha: f32,
     pub chrome_alpha: f32,
     pub view_tab: Option<u32>,
-    pub blur_amount: f32,
     /// The ROUTE-level nav dip's page alpha this frame was built with (spec §14 phase 8) — what
     /// `ui::nav::page_alpha()` answered at the one per-frame read the application made, carried
     /// alongside `page_alpha` rather than folded only into it. A container (a `RouteSurface`'s
@@ -841,7 +839,6 @@ impl<'a, 'views, H: Host> DrawFrame<'a, 'views, H> {
             page_alpha: nav.page_alpha,
             chrome_alpha: nav.chrome_alpha,
             view_tab: nav.view_tab,
-            blur_amount: nav.blur_amount,
             nav_page_alpha: nav.page_alpha,
             press: cx.press,
             underlay: None,
@@ -863,7 +860,6 @@ impl<'a, 'views, H: Host> DrawFrame<'a, 'views, H> {
             page_alpha: self.page_alpha,
             chrome_alpha: self.chrome_alpha,
             view_tab: self.view_tab,
-            blur_amount: self.blur_amount,
         }
     }
 
@@ -1165,7 +1161,6 @@ mod draw_frame_tests {
             page_alpha: 0.42,
             chrome_alpha: 1.0,
             view_tab: None,
-            blur_amount: 0.0,
         };
         let mut f = DrawFrame::with_navigation(&cx, Painter::root(), navigation);
         assert_eq!(f.nav_page_alpha, 0.42);

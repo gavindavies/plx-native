@@ -59,9 +59,6 @@ impl NavPresentation {
 
 thread_local! {
     static NAV: Cell<NavPresentation> = const { Cell::new(NavPresentation::rest()) };
-    /// Dev only: swap the dip for a blurred dissolve. Latched at boot from the trigger. Kept as
-    /// its own cell because it is armed once per process and read by an unrelated caller.
-    static BLUR_DISSOLVE: Cell<bool> = const { Cell::new(false) };
 }
 
 /// **Publish this frame's transition**, from the container that owns it. One writer
@@ -76,33 +73,8 @@ pub fn publish(page: f32, chrome: f32, tab: Option<usize>) {
 }
 
 /// The cascade alpha for PAGE CONTENT — everything a screen draws that does not survive the swap.
-///
-/// **Except under the `/tmp/pitv-navblur` prototype**, where it is a flat 1: that experiment
-/// replaces the grey trough with a full-bleed blur cross-faded OVER the page (see
-/// [`crate::glassload`]), and a page that also dipped would be showing both transitions at
-/// once. Everything else about the transition is unchanged, so [`blur_amount`] is exactly the ramp
-/// the dip would have ridden, read the other way up.
 pub fn page_alpha() -> f32 {
-    if BLUR_DISSOLVE.with(Cell::get) {
-        return 1.0;
-    }
     NAV.with(Cell::get).page
-}
-
-/// Arm the blurred-dissolve prototype. Boot-time only; nothing reads it more than once a frame.
-pub fn set_blur_dissolve(on: bool) {
-    BLUR_DISSOLVE.with(|b| b.set(on));
-}
-
-/// How strongly the transition's blur slab should cover the page, 0 at rest and 1 at the floor —
-/// the fade the dip would have ridden, inverted. Always 0 unless the prototype is armed, so the
-/// caller needs no second test.
-pub fn blur_amount() -> f32 {
-    if BLUR_DISSOLVE.with(Cell::get) {
-        1.0 - NAV.with(Cell::get).page
-    } else {
-        0.0
-    }
 }
 
 /// The cascade alpha for CONTINUOUS CHROME — the shared top band (tab row + profile chip), which is
@@ -137,28 +109,19 @@ mod tests {
     fn a_reader_that_runs_before_the_first_frame_sees_the_rest_values() {
         let _g = plx_base::testlock::serial();
         publish(1.0, 1.0, None);
-        set_blur_dissolve(false);
         assert_eq!(page_alpha(), 1.0);
         assert_eq!(chrome_alpha(), 1.0);
         assert_eq!(view_tab(3), 3, "no pending destination — the caller's own answer stands");
-        assert_eq!(blur_amount(), 0.0, "the prototype is not armed");
     }
 
-    /// The two things the publication decides for itself: the pending pill overrides the caller's
-    /// own selection, and the blur prototype reads the page ramp the other way up while flattening
-    /// the dip it replaces.
+    /// The pending pill overrides the caller's own selection.
     #[test]
-    fn the_pending_pill_overrides_and_the_blur_prototype_reads_the_ramp_inverted() {
+    fn the_pending_pill_overrides() {
         let _g = plx_base::testlock::serial();
         publish(0.25, 1.0, Some(2));
         assert_eq!(view_tab(0), 2, "the capsule travels to the queued destination");
         assert_eq!(page_alpha(), 0.25);
         assert_eq!(chrome_alpha(), 1.0, "continuous chrome does not dip with the page");
-        assert_eq!(blur_amount(), 0.0);
-        set_blur_dissolve(true);
-        assert_eq!(page_alpha(), 1.0, "the page does not ALSO dip under the slab");
-        assert_eq!(blur_amount(), 0.75);
-        set_blur_dissolve(false);
         publish(1.0, 1.0, None);
     }
 }

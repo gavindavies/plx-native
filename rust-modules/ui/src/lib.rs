@@ -25,16 +25,10 @@ pub(crate) mod card_row;
 pub mod cards; // shared card sections (plan: shared-card-sections): Shelf, Grid, CardSource, and the card conformance suite
 pub mod marquee; // the focused run's looping glide: a tile's title and caption (card_row), cast name and role, menu rows (table)
 pub mod card_motion;
-#[cfg(feature = "devtriggers")]
-pub mod card_motion_metrics;
-#[cfg(feature = "devtriggers")]
-pub mod card_probe; // `pitv-focusx`: the focused card's drawn rect/index/art of every Shelf and Grid
 pub mod value_chip; // shared label/value/owner capsule used by menu-opening controls
 pub mod containers; // RESTRUCTURE (spec §6.2): Navigation = TabContainer → NavStack → ModalStack, the transitions, the host fold
 pub mod collection_tile; // the neutral tile a thumb-less collection draws on every surface
 pub mod consts;
-pub mod decision_alert;
-pub mod decision_prompt;
 pub mod detail_layout;
 pub mod dispatch; // RESTRUCTURE spike (spec §3.3): the one frame algorithm, generic over `machine::Host`
 pub mod adapters; // RESTRUCTURE (spec §2.2): the one door out of the machine world, and its test stub
@@ -48,7 +42,6 @@ pub mod focus; // RESTRUCTURE (spec §7.3): the focus ENGINE — one owner of fo
 pub mod fmt; // shared duration/clock display formatters
 pub mod dwell; // raw dwell accumulator; notes Motion, never a Ramp
 pub mod frame; // RESTRUCTURE spike (spec §8.1): `Budget`, admission control for prepare work
-pub mod glassload; // dev-only backdrop-glass LOAD DIAL + the blurred-route-transition prototype
 pub mod hold_hint; // the standing "Hold [OK] for options" capsule: dwell/life schedule, hold-progress cap, fade + rise
 pub mod hit; // RESTRUCTURE (spec §7.6): the double-buffered hit map and the pointer gates
 pub mod placeholder; // placeholder accounting: a per-frame count at every placeholder DRAW + the #FF00FE pixel sentinel (feature `placeholder-sentinel`)
@@ -79,16 +72,12 @@ pub mod pill; // THE CAPSULE OUTLINE — three blended arcs per corner, solved; 
 pub(crate) mod poster_grid; // uniform six-column portrait geometry for collection-like pages
 pub mod popover; // shared modal open/appear choreography (track menu / info / chapters / account)
 pub mod press; // tvOS-style click: OK-down dips the focused card, OK-up springs it back + activates
-pub use plx_gfx::gfx::profile; // the draw-phase profiler lives in `gfx` now (module-layers step L5)
 pub mod route_screen;
-pub mod rec; // RESTRUCTURE (spec §5.3): the recorder — format, bounded writer, loader, TableMeasure
-pub mod replay; // RESTRUCTURE (spec §5.5): `--targets` replay of a recording over the dispatcher
 pub mod screen; // RESTRUCTURE spike (spec §6.1, §7.1): Screen, Focusable, Composed/Part, DrawFrame
 pub mod table;
 pub mod table_screen; // Header / TableScreen / DocumentScreen — the route family's screens as components (phase 5a)
 pub mod tex; // RESTRUCTURE spike (spec §10): TexCache — the render-resource half of image caching
 pub mod testapp; // RESTRUCTURE (spec §15.1): a screen under test with no SDL — dispatcher + fixture rig + virtual clock
-pub mod testpat; // dev-only SYNTHETIC GROUNDS — the page's picture replaced by a chosen pattern
 pub mod text_view;
 pub mod text_buffer;
 pub mod text_lift; // the animated focus treatment (lift + plate + shadow) for a block of prose that is a focus stop but not a card

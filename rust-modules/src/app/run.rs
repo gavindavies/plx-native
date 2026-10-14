@@ -338,10 +338,6 @@ unsafe fn present_and_swap(
             app.buffer_flip_count = (app.buffer_flip_count + 1) % 60;
         }
         app.instr.mark(plx_base::diag::heartbeat::Phase::Swap); // swap
-        // Inside the gate: `frame_end` is the end of a DRAWN frame. Counting frames the
-        // idle gate skipped would pace the profiler's once-per-N-frames log off frames
-        // that ran no phases at all.
-        plx_ui::profile::frame_end();
         plx_gfx::overdraw::frame_end();
         // Same reason, same gate: the blur's region accounting is per DRAWN frame. It rolls
         // "what every glass surface asked for this frame" into the region the next frame's
@@ -359,8 +355,6 @@ unsafe fn present_and_swap(
         // The poster-gate scenes' frame counter, at the same post-swap seam as the present count
         // above. It was called from inside `note_present`; `plx_machine::idle` is the machine layer and
         // no longer names `ui`'s metrics.
-        #[cfg(feature = "devtriggers")]
-        plx_ui::card_motion_metrics::presented(fr.now);
         if let Some(budget) = wslg_frame_budget {
             budget.finish();
         }
@@ -1046,13 +1040,6 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
             // any GL command of this frame: `EGL_KHR_partial_update` only permits a damage
             // region to be declared before rendering begins. See `egl.rs`.
             plx_gfx::egl::frame_damage();
-            // dev: the backdrop-glass LOAD DIAL and the blurred-transition prototype
-            // (`/tmp/pitv-glassload`, `/tmp/pitv-navblur`). Both are no-ops when
-            // their trigger is absent. HERE and not below the gate, because the dial's cadence
-            // is counted in PRESENTS — a loop iteration the gate skipped drew no glass — and
-            // because a step rollover invalidates the snapshot, which must precede every glass
-            // surface drawn by the synthetic dial.
-            app.glass.prepare_dial(fr.now);
             // The authored canvas, scaled UNIFORMLY into the drawable and centred. The shaders
             // divide every coordinate by `u_screen` (which stays 1920x1080), so this one call
             // is the entire logical->physical mapping — nothing else in the renderer knows the
@@ -1073,10 +1060,7 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
             // the last screen that could have left a clip armed. See `ui::guard` for what this does
             // NOT cover (worker-thread panics, aborts, half-mutated state). Everything inside is a
             // read of loop state, so the closure only borrows; nothing is moved out of the loop.
-            // An empty selected phase provides the profiler floor for this build; it
-            // deliberately issues no GL commands between its two boundaries.
-            plx_ui::profile::phase("profile.empty", || {});
-            plx_ui::profile::phase("frame.ui", || {
+            {
                 plx_ui::guard(|| {
                     if fr.player {
                         glClearColor(0.0, 0.0, 0.0, 0.0);
@@ -1184,20 +1168,13 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                         }
                         // An opaque route ground replaces the page entirely.
                         if plan != super::bridge::PagePlan::SurfacesOnly {
-                            plx_ui::profile::phase("main.ui", || page(Z::ALL));
+                            (page(Z::ALL));
                         }
                         // Owned pages already dispatched their surfaces in the visible walk.
                         if plan != super::bridge::PagePlan::Owned {
                             app.pages.draw_with_glass_below(&mut app.bridge, &mut app.glass, false, Z::ALL);
                         }
-                        // dev: the blurred route transition, then the load dial's glass surfaces.
-                        // LAST on the non-player path, so the snapshot either takes is of the
-                        // COMPLETE page — which is the honest source for a surface that sits on
-                        // top of everything, and the one thing the tab track (drawn inside the
-                        // page) cannot have.
                         drop(_visible_walk);
-                        app.glass.draw_nav_blur();
-                        app.glass.draw_dial();
                         // The on-screen counter, off the player route (chrome over video). It draws
                         // the last completed `fps=` window — frames actually swapped, not loop
                         // iterations. It necessarily HOLDS its last painted value on a settled
@@ -1231,7 +1208,7 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                     #[cfg(feature = "threadcheck")]
                     plx_ui::runtime_warning::draw(false);
                 });
-            });
+            };
     (vx, vy, vw, vh)
 }
 
@@ -1248,8 +1225,6 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
         app.last_route_reported = fr.rn;
     }
     // `pitv-focusx`: the card read-out belongs to the frame just sampled.
-    #[cfg(feature = "devtriggers")]
-    plx_ui::card_probe::clear();
         // `coldopen screen=<name> ms=<n> prepared=<bool>` — one line per screen MOUNT, on every
         // build, no trigger (spec §8.4). The dispatcher owns both ends of the measurement (the
         // mount at nav commit, the first prepared+drawn frame); this drains what it closed.
@@ -1285,9 +1260,8 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
             let spans = plx_base::diag::spans::take();
             for line in app.instr.frame_drop_lines(&|| {
                 format!(
-                    "route={rn} dip={} load={} {spans}",
+                    "route={rn} dip={} {spans}",
                     app.pages.dip_word(),
-                    plx_ui::glassload::step_index(),
                 )
             }) {
                 log(&line);
@@ -1382,21 +1356,6 @@ pub(crate) unsafe fn heartbeat(app: &mut App, fr: &mut Frame) {
             {
                 app.fps_shown = pres.min(i32::MAX as u32) as i32;
             }
-            // dev: which LOAD-DIAL step these frames belong to, the blur refreshes
-            // actually TAKEN in that second. Absent unless the dial is armed, and placed
-            // after `fps=` / before
-            // `worstframe=` so both harness regexes are untouched. `snap=` is the one
-            // thing a cadence claim cannot be trusted without: it is the rate that RAN,
-            // not the rate that was requested.
-            let ld = if plx_ui::glassload::armed() {
-                format!(
-                    " load={} snap={}",
-                    plx_ui::glassload::step_index(),
-                    plx_gfx::gfx::take_blur_snapshots()
-                )
-            } else {
-                String::new()
-            };
             // `worstframe=` stays LAST of the graded fields (both harness regexes anchor on it);
             // `worstprep=` follows it, ungated by present. Both are empty unarmed. After them
             // ride the frame plan's four (spec §8.4), which print in every build because none of
@@ -1424,7 +1383,7 @@ pub(crate) unsafe fn heartbeat(app: &mut App, fr: &mut Frame) {
                 None,
             );
             log(&format!(
-                "loop={} route={rn}{ov}{pos}{vp} fps={pres}{ld}{tail}{SIM_TAG}",
+                "loop={} route={rn}{ov}{pos}{vp} fps={pres}{tail}{SIM_TAG}",
                 app.loop_shown
             ));
         }

@@ -1440,10 +1440,9 @@ where
                     f.page_alpha = 0.0;
                     // Raw screen clears bypass Painter::recording; they must not erase
                     // the outgoing page while its destination only records text. The walk
-                    // measures ahead of any frame that draws the page, so it is speculative to
-                    // the recorder (`rec::speculative`).
+                    // measures ahead of any frame that draws the page.
                     plx_base::diag::spans::span("warm", || plx_gfx::gfx::without_frame_clear(|| {
-                        super::rec::speculative(|| super::record_walk(|| inst.screen.draw(&mut f)))
+                        super::record_walk(|| inst.screen.draw(&mut f))
                     }));
                 }
             }
@@ -1618,7 +1617,7 @@ where
                     drain_surface_text |= !s.motion.capture_frame();
                     capture_surface |= s.motion.capture_frame();
                     backdrop::draw_span("surf", || plx_gfx::gfx::without_frame_clear(|| {
-                        super::rec::speculative(|| super::record_walk(|| inst.screen.draw(&mut f)))
+                        super::record_walk(|| inst.screen.draw(&mut f))
                     }));
                 } else {
                     backdrop::draw_span("surf", || inst.screen.draw(&mut f));

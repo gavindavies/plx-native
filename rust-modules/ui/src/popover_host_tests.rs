@@ -92,22 +92,6 @@ fn cache_off_and_no_later_scope_explain_the_old_green_paths() {
     }
 }
 
-#[test]
-fn reconciling_card_content_invalidates_its_cached_ground_only_when_changed() {
-    use crate::decision_alert::{Answers, DecisionAlert};
-    let _serial = plx_base::testlock::serial();
-    let _reset = Reset::new(false);
-    let mut alert = DecisionAlert::new();
-    alert.open_card(c"Details", vec!["support".into()], Answers::One);
-    embedded_alert_frame(true, true);
-    assert!(matches!(held(), Held::Ground(_)));
-    assert!(!alert.reconcile_card(c"Details", vec!["support".into()], Answers::One));
-    assert!(matches!(held(), Held::Ground(_)), "unchanged content keeps its snapshot");
-    assert!(alert.reconcile_card(c"Details", vec!["receipt".into(), "support".into()], Answers::Two));
-    assert!(held() == Held::Nothing, "the taller card cannot reuse the old panel outline");
-    assert_eq!(embedded_alert_frame(true, true), ["page", "scrim", "glass", "title/body/buttons"]);
-}
-
 // Moved here from `gfx.rs`'s tests (module-layers step L5): it drives the popover host's
 // `begin_frame`, which the `gfx` layer may not name, to prove `gfx::dither_for_field` has no motion
 // term to be reached through.
