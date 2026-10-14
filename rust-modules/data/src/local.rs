@@ -27,11 +27,19 @@
 //! video there (the usual one-film-per-folder layout). The card asks for a picture by an opaque
 //! token ([`Entry::art`]) that [`art_path`] turns back into the file — the poster pipeline keys
 //! its slots by short strings, and a path can be any length.
+//!
+//! # What a title says about itself
+//!
+//! Beside its poster a title may carry a Kodi-style `.nfo`, a backdrop (`fanart.jpg`) and a title
+//! logo (`clearlogo.png`); `local_meta` reads them, and the scan attaches them to the entry
+//! ([`Entry::meta`], [`Entry::backdrop`], [`Entry::logo`]) so a page never touches the disk.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
+use crate::local_meta::{self, Meta, MetaKind};
 
 /// The raw server id local artwork is requested under. No server is ever registered on the build
 /// that has a local library, and the registry hands out ids from 0, so this one never names one.
@@ -61,6 +69,34 @@ pub struct Entry {
     pub art: Option<String>,
     /// Bytes, for a video; 0 for a folder.
     pub size: u64,
+    /// The title's `.nfo` (`tvshow.nfo` for a show's folder), when it has one that parses.
+    pub meta: Option<Arc<Meta>>,
+    /// The artwork tokens of the title's backdrop and logo ([`art_path`] resolves them).
+    pub backdrop: Option<String>,
+    pub logo: Option<String>,
+    /// A folder that is a show: it has a `tvshow.nfo`, or a `Season …` / `Specials` folder inside.
+    /// Every other folder is a plain one — a collection of titles, or anything else.
+    pub show: bool,
+    /// A video with a subtitle file beside it ([`sidecars`]' naming), read from the names the
+    /// scan already listed.
+    pub sidecar_subs: bool,
+}
+
+impl Entry {
+    /// What the card and the pages call it: the `.nfo`'s title, else the file or folder name.
+    pub fn display_title(&self) -> &str {
+        self.meta.as_deref().map(|m| m.title.as_str()).filter(|t| !t.is_empty()).unwrap_or(&self.title)
+    }
+
+    /// The collection the title belongs to (its `.nfo`'s `<set>`), or `""`.
+    pub fn collection(&self) -> &str {
+        self.meta.as_deref().map_or("", |m| m.collection.as_str())
+    }
+
+    /// An entry with nothing known about it beyond its name, kind, poster and size.
+    pub fn new(title: String, path: PathBuf, kind: EntryKind, art: Option<String>, size: u64) -> Self {
+        Entry { title, path, kind, art, size, meta: None, backdrop: None, logo: None, show: false, sidecar_subs: false }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -120,12 +156,14 @@ pub fn top_level() -> Option<Arc<Vec<Entry>>> {
     }
     let entries = roots
         .iter()
-        .map(|root| Entry {
-            title: root.file_name().map_or_else(|| root.display().to_string(), |n| n.to_string_lossy().into_owned()),
-            path: root.clone(),
-            kind: EntryKind::Folder,
-            art: folder_art(root).map(|p| art_token(&p)),
-            size: 0,
+        .map(|root| {
+            Entry::new(
+                root.file_name().map_or_else(|| root.display().to_string(), |n| n.to_string_lossy().into_owned()),
+                root.clone(),
+                EntryKind::Folder,
+                folder_art(root).map(|p| art_token(&p)),
+                0,
+            )
         })
         .collect();
     Some(Arc::new(entries))
@@ -249,11 +287,44 @@ fn folder_entry(path: PathBuf, name: &str) -> Entry {
     match film {
         Some((video, size)) => {
             let stem = Path::new(video.as_str()).file_stem().map_or_else(|| video.clone(), |s| s.to_string_lossy().into_owned());
-            let art = folder_art.or_else(|| pick_art(&path, &names, &[format!("{stem}-poster"), stem]));
-            Entry { title: name.to_owned(), path: path.join(video), kind: EntryKind::Video, art: art.map(|p| art_token(&p)), size }
+            let art = folder_art.or_else(|| pick_art(&path, &names, &[format!("{stem}-poster"), stem.clone()]));
+            let entry = Entry::new(name.to_owned(), path.join(video), EntryKind::Video, art.map(|p| art_token(&p)), size);
+            described(entry, &path, &names, &stem, true)
         }
-        None => Entry { title: name.to_owned(), path, kind: EntryKind::Folder, art: folder_art.map(|p| art_token(&p)), size: 0 },
+        None => {
+            let mut entry = Entry::new(name.to_owned(), path.clone(), EntryKind::Folder, folder_art.map(|p| art_token(&p)), 0);
+            entry.show = names.iter().any(|n| is_season_folder(n) && path.join(n).is_dir());
+            let entry = described(entry, &path, &names, "", false);
+            Entry { show: entry.show || entry.meta.as_deref().is_some_and(|m| m.kind == MetaKind::Show), ..entry }
+        }
     }
+}
+
+/// `Season 1`, `Season 01`, `S01`, `Specials`: the folders a show is split into.
+pub fn is_season_folder(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if lower == "specials" {
+        return true;
+    }
+    let rest = lower.strip_prefix("season").map(str::trim_start).or_else(|| lower.strip_prefix('s'));
+    rest.is_some_and(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// `entry` with what the files beside it say about it: the `.nfo`, backdrop and logo of the video
+/// named `stem` in `dir` (a `lone` video may use the folder's own `movie.nfo` and artwork), or of
+/// the folder `dir` itself when `stem` is empty. Blocking (reads one small file at most).
+fn described(mut entry: Entry, dir: &Path, names: &[String], stem: &str, lone: bool) -> Entry {
+    let candidates = if stem.is_empty() { vec!["tvshow.nfo".to_owned()] } else { local_meta::nfo_candidates(stem, lone) };
+    entry.meta = local_meta::read(dir, names, &candidates).map(Arc::new);
+    // A video that shares its folder with others wears only its OWN backdrop and logo; the folder's
+    // belong to the folder (the poster rule, `pick_art`).
+    let own = |found: Option<PathBuf>| {
+        found.filter(|p| lone || stem.is_empty() || p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&format!("{stem}-"))))
+    };
+    entry.backdrop = own(local_meta::backdrop_in(dir, names, stem)).map(|p| art_token(&p));
+    entry.logo = own(local_meta::logo_in(dir, names, stem)).map(|p| art_token(&p));
+    entry.sidecar_subs = !stem.is_empty() && names.iter().any(|n| sidecar_of(stem, n).is_some());
+    entry
 }
 
 /// Read one folder: its subfolders and videos, sorted folders first then by natural order, with
@@ -285,13 +356,14 @@ pub fn scan(dir: &Path) -> std::io::Result<Vec<Entry>> {
             let art = pick_art(dir, &names, &[format!("{stem}-poster"), stem.clone()])
                 .or_else(|| lone_video_art.clone())
                 .map(|p| art_token(&p));
-            entries.push(Entry { title: stem, path, kind: EntryKind::Video, art, size: meta.len() });
+            let entry = Entry::new(stem.clone(), path, EntryKind::Video, art, meta.len());
+            entries.push(described(entry, dir, &names, &stem, videos.len() == 1));
         }
     }
     entries.sort_by(|a, b| {
         (a.kind != EntryKind::Folder)
             .cmp(&(b.kind != EntryKind::Folder))
-            .then_with(|| natural_cmp(&a.title, &b.title))
+            .then_with(|| natural_cmp(a.display_title(), b.display_title()))
     });
     Ok(entries)
 }
@@ -484,6 +556,57 @@ mod tests {
         assert_eq!(art_path(mixed[0].art.as_deref().unwrap()).unwrap(), root.join("Mixed/one-poster.png"));
         assert_eq!(mixed[1].art, None);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_title_carries_its_nfo_backdrop_and_logo() {
+        let root = tree("meta");
+        let film = root.join("Charge (2022)");
+        touch(&film.join("Charge (2022).mkv"));
+        touch(&film.join("poster.jpg"));
+        touch(&film.join("fanart.jpg"));
+        touch(&film.join("clearlogo.png"));
+        std::fs::write(film.join("movie.nfo"), "<movie><title>Charge</title><year>2022</year><set>Blender Open Movies</set></movie>").unwrap();
+        touch(&root.join("Caminandes/Season 01/Caminandes - S01E01.mkv"));
+        touch(&root.join("Caminandes/Season 01/Caminandes - S01E02.mkv"));
+        touch(&root.join("Caminandes/fanart.jpg"));
+        touch(&root.join("Silent Classics/Nosferatu (1922)/Nosferatu (1922).mkv"));
+        touch(&root.join("Mixed/one.mkv"));
+        touch(&root.join("Mixed/two.mkv"));
+        touch(&root.join("Mixed/fanart.jpg"));
+        touch(&root.join("Mixed/two-fanart.jpg"));
+        std::fs::write(root.join("Mixed/one.nfo"), "<movie><title>One</title></movie>").unwrap();
+        let top = scan(&root).unwrap();
+        let charge = top.iter().find(|e| e.title == "Charge (2022)").unwrap();
+        assert_eq!(charge.kind, EntryKind::Video);
+        assert_eq!(charge.display_title(), "Charge", "the .nfo's title names it");
+        assert_eq!(charge.collection(), "Blender Open Movies");
+        assert!(!charge.sidecar_subs);
+        assert_eq!(art_path(charge.backdrop.as_deref().unwrap()).unwrap(), film.join("fanart.jpg"));
+        assert_eq!(art_path(charge.logo.as_deref().unwrap()).unwrap(), film.join("clearlogo.png"));
+        let show = top.iter().find(|e| e.title == "Caminandes").unwrap();
+        assert!(show.show, "a folder of seasons is a show");
+        assert!(show.backdrop.is_some(), "and wears its own backdrop");
+        let silent = top.iter().find(|e| e.title == "Silent Classics").unwrap();
+        assert!(!silent.show && silent.meta.is_none(), "a folder of films is a plain folder");
+        touch(&root.join("Mixed/one.en.srt"));
+        let mixed = scan(&root.join("Mixed")).unwrap();
+        assert_eq!(mixed[0].display_title(), "One");
+        assert!(mixed[0].sidecar_subs && !mixed[1].sidecar_subs, "a subtitle file is its own video's");
+        assert_eq!(mixed[0].backdrop, None, "a video sharing its folder does not take the folder's backdrop");
+        assert_eq!(art_path(mixed[1].backdrop.as_deref().unwrap()).unwrap(), root.join("Mixed/two-fanart.jpg"));
+        assert_eq!(mixed[1].meta, None);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn season_folders_are_recognised_by_name() {
+        for yes in ["Season 1", "Season 01", "season01", "S02", "Specials"] {
+            assert!(is_season_folder(yes), "{yes}");
+        }
+        for no in ["Seasonal", "Season", "Sintel", "S", "Extras"] {
+            assert!(!is_season_folder(no), "{no}");
+        }
     }
 
     #[test]

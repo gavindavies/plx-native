@@ -117,7 +117,7 @@ pub trait CardSource<H: Host> {
     fn art(&self, i: usize) -> Art<'_>;
     /// The block drawn under the FOCUSED card (asked for that one card per frame).
     fn label(&self, i: usize) -> TileLabel;
-    /// The amber resume fraction of card `i`, if it is partly watched.
+    /// The resume fraction of card `i`, if it is partly watched.
     fn progress(&self, _i: usize) -> Option<f32> {
         None
     }

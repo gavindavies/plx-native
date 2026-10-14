@@ -419,7 +419,7 @@ pub fn still_key<'a>(m: &TileFacts<'a>) -> &'a str {
 /// the focus pop without resizing.
 ///
 /// **`press_plays` is the whole of the app's play-indicator rule, at this one draw**, and
-/// [`still_glyph`] is the rule itself: the amber ▶ is a PROMISE — this press starts the video — so
+/// [`still_glyph`] is the rule itself: the white ▶ is a PROMISE — this press starts the video — so
 /// it is drawn on a surface whose press does that and on no other. The detail page's episode
 /// filmstrip always plays, and a Continue Watching deck plays only while the Playback setting says
 /// OK plays it (`DeckPress::Play`; by default OK opens the page and the deck draws no triangle,
@@ -436,7 +436,7 @@ pub fn still_key<'a>(m: &TileFacts<'a>) -> &'a str {
 ///
 /// Both are plain masks in ONE box, and the tick takes the line's own ink rather than a hue:
 /// a watched line is a statement about the past while an unstarted one is an invitation, and only
-/// the invitation earns the amber.
+/// the invitation earns the mark.
 ///
 /// **The ACTION wins the slot when there is one**, which is the rule the owner asked for on
 /// 2026-09-05 stated as a biconditional: *a play indicator means the press plays, a progress bar
@@ -1417,6 +1417,58 @@ pub fn keyline_chip(p: Painter, x: f32, cy: f32, text: &str, col: [f32; 4], meas
         KEYLINE_BOLD,
     );
     w
+}
+
+// ---- Facts line: a title's one line of facts, and where it would resume ------------------------
+
+/// The gap between the facts and the resume run, which carries its own `·`.
+const FACTS_SEP: &str = " · ";
+/// The ▶ before a resume run, as a share of the line's type size, and the air after it.
+const FACTS_PLAY_SHARE: f32 = 0.72;
+const FACTS_PLAY_GAP: f32 = 8.0;
+
+/// **One line of a title's facts at `BODY` in [`theme::TEXT_SECONDARY`]** — `2019 · 8 min ·
+/// Animation` — ending, for a part-watched video, in a white ▶ and `resume` (`Resume at 3:12`):
+/// the browsing preview's line (`PiTV Redesign.dc.html` 1b). `cap_top` is the line's cap top. The
+/// facts elide to leave the resume run whole, because where you stopped is the part a viewer acts
+/// on. Returns the drawn width.
+pub fn facts_line(
+    p: Painter,
+    x: f32,
+    cap_top: f32,
+    max_w: f32,
+    facts: &str,
+    resume: Option<&str>,
+    measure: &dyn plx_machine::machine::Measure,
+) -> f32 {
+    let sz = theme::size::BODY;
+    let glyph = (sz as f32 * FACTS_PLAY_SHARE).round();
+    let tail_w = resume.map_or(0.0, |r| {
+        let sep = if facts.is_empty() { 0.0 } else { measure.width_str(FACTS_SEP, sz, false) };
+        sep + glyph + FACTS_PLAY_GAP + measure.width_str(r, sz, false)
+    });
+    let shown = plx_gfx::text::elide_by(facts, (max_w - tail_w).max(0.0), false, |t| measure.width_str(t, sz, false));
+    let mut run = shown.clone();
+    if resume.is_some() && !facts.is_empty() {
+        run.push_str(FACTS_SEP);
+    }
+    // `Painter::text` takes the run's box top: the cap band's own offset puts its cap top here.
+    let (ct, cb) = plx_gfx::text::text_cap_band(sz, 0);
+    let y = cap_top - ct;
+    let mut dx = 0.0;
+    if !run.is_empty() {
+        if let Ok(c) = std::ffi::CString::new(run.as_str()) {
+            dx = p.text(c.as_ptr(), x, y, sz, theme::TEXT_SECONDARY, 0, 0);
+        }
+    }
+    let Some(r) = resume else { return dx };
+    let cap = cb - ct;
+    crate::icons::draw(p, crate::icons::Icon::Play, Rect::new(x + dx, cap_top + (cap - glyph) * 0.5, glyph, glyph), theme::RESUME_FILL);
+    dx += glyph + FACTS_PLAY_GAP;
+    if let Ok(c) = std::ffi::CString::new(r) {
+        dx += p.text(c.as_ptr(), x + dx, y, sz, theme::TEXT_SECONDARY, 0, 0);
+    }
+    dx
 }
 
 // ---- Key cap + key hint: a REMOTE BUTTON named in running prose --------------------------------

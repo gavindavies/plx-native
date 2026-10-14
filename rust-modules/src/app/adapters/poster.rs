@@ -1049,6 +1049,10 @@ fn lookup(srv: ServerId, key_s: &str, touch: Touch) -> (Hit, Warm) {
     (None, Warm::Claimed)
 }
 
+/// The box a clearLogo is decoded into: wide enough for the hero rung's widest wordmark
+/// (`theme::logo::HERO_AREA` over its height floor), so the hero never draws it upscaled.
+const LOGO_BOX: (c_int, c_int) = (800, 268);
+
 /// The [`tex::Source`] this module is to the library: one value, installed at [`init`].
 struct PosterSource;
 static SOURCE: PosterSource = PosterSource;
@@ -1098,15 +1102,20 @@ impl tex::Source for PosterSource {
         let srv = ServerId::from_raw(srv);
         built_key(srv, path, w, h, png).map_or(Warm::Known, |k| lookup(srv, k, Touch::Ahead).1)
     }
-    /// The library has no clearLogos: every title is drawn as type.
-    fn logo(&self, _srv: u16, _rk: &str) -> Option<PosterKey> {
-        None
+    /// A local title's clearLogo: `rk` is its artwork token (`local::Entry::logo`), decoded into
+    /// the one [`LOGO_BOX`] as a PNG so its alpha survives. An empty token is a title with none.
+    fn logo(&self, srv: u16, rk: &str) -> Option<PosterKey> {
+        self.probe(srv, rk, LOGO_BOX.0, LOGO_BOX.1, true)
     }
-    fn logo_warm(&self, _srv: u16, _rk: &str) -> Warm {
-        Warm::Known
+    fn logo_warm(&self, srv: u16, rk: &str) -> Warm {
+        self.warm(srv, rk, LOGO_BOX.0, LOGO_BOX.1, true)
     }
-    fn logo_failed(&self, _srv: u16, _rk: &str) -> bool {
-        true
+    fn logo_failed(&self, srv: u16, rk: &str) -> bool {
+        let sid = ServerId::from_raw(srv);
+        let Some(key) = built_key(sid, rk, LOGO_BOX.0, LOGO_BOX.1, true) else { return true };
+        let g = store();
+        let gen = plx_platform::imgcache::generation();
+        g.slots.iter().any(|s| s.cache_gen == gen && same_art(s, sid, key.as_bytes()) && s.state == P_FAILED)
     }
     fn unresident(&self, key: PosterKey, refused: bool) {
         let mut g = store();

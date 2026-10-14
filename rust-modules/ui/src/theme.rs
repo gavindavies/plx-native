@@ -652,6 +652,18 @@ pub const fn white(a: f32) -> [f32; 4] {
     with_a(WHITE, a)
 }
 
+/// **The app surface ([`SURFACE_APP`]) at alpha `a`** — the veil a page lays over its own artwork
+/// so that what stands below it (shelves, a row of stills) stands on the surface itself
+/// (`art_ground`). A weight of the surface, not a new hue.
+pub const fn surface(a: f32) -> [f32; 4] {
+    with_a(SURFACE_APP, a)
+}
+
+/// How strongly a BROWSING page's blurred artwork shows through (`art_ground::Treatment::Blurred`,
+/// the redesign's `opacity:.55`): enough to say which title is focused, not enough to compete with
+/// the posters over it.
+pub const ART_GROUND_BLUR_A: f32 = 0.55;
+
 /// Near-black scrim at alpha `a` — hero/scroll dimming.
 pub const fn scrim(a: f32) -> [f32; 4] {
     [SCRIM_INK[0], SCRIM_INK[1], SCRIM_INK[2], a]
@@ -785,8 +797,11 @@ pub const WASH_WARM: [f32; 4] = SAND_100;
 /// [`crate::route_screen::RouteGround`] uses that instead.
 pub const ROUTE_GROUND_FALLBACK: [[f32; 4]; 4] =
     [ATMOS_WARM_GREY, ATMOS_CHARCOAL, ATMOS_UMBER, ATMOS_ASH];
-/// Warm amber Continue-Watching progress fill (Plex-specific; no player equivalent). `#fab82e`.
-pub const RESUME_FILL: [f32; 4] = with_a(AMBER_300, 0.95);
+/// The resume bar's played fill, and the ▶ that promises a press plays: white, the tvOS progress
+/// ink (`PiTV Redesign.dc.html`, 2026-10-14: "plain white … the artwork carries the colour"). The
+/// same weight as [`RAIL_FILL`] and still its own role, so the card marks and the player scrubber
+/// can be retuned apart. Was amber `#fab82e` (`AMBER_300`) until then.
+pub const RESUME_FILL: [f32; 4] = with_a(WHITE, 0.95);
 /// Plex's own "Plex Pass" gold, `#e5a00d` — a BRAND REFERENCE, not a palette member
 /// (`Plex Pass Awareness.dc.html`, "the amber decision"). Two ambers exist ON PURPOSE and stay
 /// two tokens: [`RESUME_FILL`] is ours and tunable; this one names somebody else's colour and
@@ -804,12 +819,11 @@ pub const PASS_GOLD: [f32; 4] = AMBER_500;
 /// Near-black ink over a [`PASS_GOLD`] fill — the error read-out's FILLED capsule, the one place
 /// the capsule fills (on pure black an outline has no ground and reads as a hole). `#1a1204`.
 pub const PASS_GOLD_INK: [f32; 4] = AMBER_950;
-/// Unfilled track behind the Continue-Watching resume bar — the full-bleed card-bottom rail. A
-/// hair lighter than the player scrubber's so the amber reads against a bright poster.
-pub const RESUME_TRACK: [f32; 4] = with_a(WHITE, 0.22);
-/// Ink over [`RESUME_FILL`] when the amber is a SURFACE rather than a mark. Distinct from
-/// [`ACCENT_INK`]: that one is tuned against the near-white [`ACCENT`], and at that value it
-/// disappeared into the amber rather than reading as a knockout.
+/// Unfilled track behind the resume bar — the full-bleed card-bottom rail. The redesign's `.28`,
+/// [`RAIL_BUFFERED`]'s weight: a white fill needs the step the amber hue used to give it.
+pub const RESUME_TRACK: [f32; 4] = with_a(WHITE, 0.28);
+/// Ink over [`RESUME_FILL`] when the fill is a SURFACE rather than a mark. Tuned when the fill was
+/// amber; it reads as a knockout on the white fill too.
 ///
 /// **No consumer today** — its one user was the amber watched DISC, which the 2026-08-13 evening
 /// sync replaced with a bare tick over a veil ([`TILE_MARK_INK`]). Kept because the design system
