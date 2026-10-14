@@ -18,7 +18,7 @@ use crate::screen::{
     Stop,
 };
 use crate::widgets::Art;
-use crate::{Painter, Rect};
+use crate::{Painter, Rect, Spring};
 
 /// Cards past the last visible one the source is asked for.
 const LOOK_AHEAD: usize = 6;
@@ -87,7 +87,15 @@ pub struct Shelf {
     pool: RowPool,
     /// Where the artwork warm-ahead stands ([`warm_ahead`](Shelf::warm_ahead)).
     warm: Warm,
+    /// The focused card's LEAN into the last move (`theme::card_tilt`): kicked by a deliberate
+    /// left/right move, it rises to ±1 and settles back to 0 without ringing ([`LEAN_K`]). Only a
+    /// row whose style tilts reads it.
+    lean: Spring,
 }
+
+/// The lean's stiffness: it peaks `1/√k` (≈0.13 s) after the move and is gone by about half a
+/// second — a lean into the move, never a wobble.
+const LEAN_K: f32 = 60.0;
 
 /// Render history of the shelf's artwork warm-ahead: never canonised, restored or compared.
 #[derive(Clone, Copy)]
@@ -115,7 +123,7 @@ impl Shelf {
     pub const fn new(entry: EntryId, style: &'static RowStyle) -> Self {
         Self { entry, style, row: CardRow::new(), seen: Seen::Nothing, landed: None, left: false, asked: None, asked_before: None, in_flight: None, retry: Retry::new(), epoch: 0, head: 0, anchor: None,
             margin: 0.0, dormant: false, slept: false, pool: RowPool::new(),
-            warm: Warm { last: None, forward: true, walk: None } }
+            warm: Warm { last: None, forward: true, walk: None }, lean: Spring::at(0.0) }
     }
 
     /// Cards this far past the screen's leading (left) edge still paint (a popped card's shadow
@@ -177,6 +185,11 @@ impl Shelf {
                 }
                 let left = from.filter(|k| k.entry == self.entry).and_then(|k| here(&k.elem));
                 self.left |= left.is_some();
+                if let (Some(a), Some(b), plx_machine::machine::By::Dir) = (left, arrived, by) {
+                    if self.style.tilt > 0.0 && a != b {
+                        self.kick_lean(if b > a { 1.0 } else { -1.0 });
+                    }
+                }
                 if arrived.is_some() || left.is_some() {
                     fx.invalidate(Provenance::Input);
                 }
@@ -199,7 +212,30 @@ impl Shelf {
         super::focused_index(&cx.focus, self.entry, src).map(|i| (i, src.elem(i)))
     }
 
+    /// Lean the focused card into a move: `dir` +1 right, -1 left. The kick is the velocity whose
+    /// critically damped response peaks at exactly `dir` (`x(t) = v₀·t·e^(−ωt)` peaks at `v₀/(ωe)`).
+    fn kick_lean(&mut self, dir: f32) {
+        let w = LEAN_K.sqrt();
+        self.lean.vel = dir * w * std::f32::consts::E;
+    }
+
+    /// The focused card's lean, -1…1 (0 at rest).
+    pub fn lean(&self) -> f32 {
+        self.lean.pos
+    }
+
+    fn tick_lean(&mut self, dt: f32) {
+        if self.lean.pos == 0.0 && self.lean.vel == 0.0 {
+            return;
+        }
+        self.lean.step(0.0, LEAN_K, dt);
+        if self.lean.pos.abs() < 1e-3 && self.lean.vel.abs() < 1e-2 {
+            self.lean.jump(0.0);
+        }
+    }
+
     fn tick<H: Host, S: CardSource<H>>(&mut self, dt: f32, cx: &Cx<'_, H>, src: &S) {
+        self.tick_lean(dt);
         let focus = super::focused_index(&cx.focus, self.entry, src)
             .filter(|_| !self.dormant);
         self.landed = None;
@@ -733,12 +769,21 @@ impl Shelf {
         let unscrolled = card_row::tile_rect(i, self.style.margin_x, self.pitch(), 0.0, at.y - pr.dy(),
             (self.style.w, self.style.h));
         let rect = unscrolled.scaled(s);
+        // The focused card's pose grows with its pop and leans into the last move; the overlays it
+        // carries are drawn inside the same tilt scope, so they ride its plane exactly.
+        let pose = if focused && self.style.tilt > 0.0 {
+            let t = (s - 1.0) / (self.style.focus_scale - 1.0);
+            let (yaw, pitch) = crate::theme::card_tilt(t, self.lean.pos);
+            [yaw * self.style.tilt, pitch * self.style.tilt]
+        } else {
+            [0.0, 0.0]
+        };
         if focused {
             let label = src.label(i).revealed(self.row.band_reveal())
                 .settling(self.row.settle_lag(src.len(), i, self.style) * src.sweep());
             #[cfg(feature = "devtriggers")]
             crate::card_probe::begin_card();
-            card_row::draw_focused(pr, src.art(i), rect, s, self.style, src.progress(i), &label, f.measure);
+            card_row::draw_focused(pr.tilted(pose[0], pose[1]), src.art(i), rect, s, self.style, src.progress(i), &label, f.measure);
             #[cfg(feature = "devtriggers")]
             if !pr.is_recording() {
                 note_focused(pr, rect, i, src);
@@ -747,7 +792,9 @@ impl Shelf {
             card_row::draw_tile(pr, src.art(i), rect, s, self.style, src.progress(i));
         }
         let tile = Tile { rect, scale: s, radius: self.style.tile_radius(rect, s), focused };
-        src.overlay(pr, i, &tile, f.measure);
+        let posed = pr.tilted(pose[0], pose[1]);
+        let _pose = posed.tilt_scope(rect);
+        src.overlay(posed, i, &tile, f.measure);
     }
 
     /// The `Focusable` neighbour of `key` inside the shelf: left and right by index, the edge
@@ -833,5 +880,6 @@ impl Shelf {
 
     pub fn write(&self, c: &mut Canon) {
         self.row.write_motion(c);
+        c.f32(self.lean.pos).f32(self.lean.vel);
     }
 }

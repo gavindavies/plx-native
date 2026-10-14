@@ -47,6 +47,9 @@ pub struct RowStyle {
     /// A reserve from the physical edge, intersected with the shared safe area;
     /// [`RowStyle::with_right_reserve`] is how a screen declares one.
     pub right_reserve: f32,
+    /// **How much of the focused card's tvOS tilt this row wears** (`theme::card_tilt`): 1 for
+    /// the library's shelves (the redesign's), 0 everywhere else, which draws exactly as before.
+    pub tilt: f32,
 }
 impl RowStyle {
     /// The furthest a row of `n` cells scrolls: the content past the viewport, 0 for a row that
@@ -80,6 +83,7 @@ impl RowStyle {
         k_scroll: K_SCROLL,
         circular: false,
         right_reserve: 0.0,
+        tilt: 0.0,
     };
     /// **The library's poster shelf** (`PiTV Redesign.dc.html` 1b): HOME's poster, with the
     /// redesign's wider 56 px air between posters (the screens read as cramped on a 50" panel at
@@ -96,11 +100,12 @@ impl RowStyle {
         k_scroll: K_SCROLL,
         circular: false,
         right_reserve: 0.0,
+        tilt: 1.0,
     };
     /// **The library's shelf of landscape stills** — EPISODE's 420×236 with [`RowStyle::SHELF`]'s
     /// air (48, the mock's Continue Watching gap), for a season's episodes and a title page's
     /// "More in" row.
-    pub const STILL_SHELF: RowStyle = RowStyle { gap: 48.0, ..RowStyle::EPISODE };
+    pub const STILL_SHELF: RowStyle = RowStyle { gap: 48.0, tilt: 1.0, ..RowStyle::EPISODE };
     /// **A shelf of EPISODES: landscape stills.** Same motion as HOME — the spring magnification,
     /// the scroll, the glow ring and the heading lift are all one vocabulary — and a different
     /// aspect, because an episode is not a poster.
@@ -126,6 +131,7 @@ impl RowStyle {
         k_scroll: K_SCROLL,
         circular: false,
         right_reserve: 0.0,
+        tilt: 0.0,
     };
     /// Detail "Cast & Crew": circular headshots, the tight strip ring. Same motion as HOME (spring
     /// magnification + scroll), so cast animates like the poster shelves.
@@ -147,6 +153,7 @@ impl RowStyle {
         k_scroll: K_SCROLL,
         circular: true,
         right_reserve: 0.0,
+        tilt: 0.0,
     };
     /// "Who's watching" profile pictures: big circular avatars with a clear pop. Centered by the
     /// caller (a short roster), so the scroll spring stays put unless the row overflows.
@@ -167,6 +174,7 @@ impl RowStyle {
         k_scroll: K_SCROLL,
         circular: true,
         right_reserve: 0.0,
+        tilt: 0.0,
     };
     /// ring focus scalar denominator — `(s-1)/ring_denom` maps scale∈[1, focus_scale] to [0, 1].
     #[inline]
@@ -898,9 +906,13 @@ pub fn draw_focused(
     let f = ((s - 1.0) / sty.ring_denom()).clamp(0.0, 1.0);
     // `card` takes the RESTING rect and the scale, not the popped rect: whatever it sets from the
     // tile's size (a fan's live name) must not re-layout on every frame of a pop.
-    card(p, rect.scaled(1.0 / s), art, rad, true, s, f);
-    if let Some(frac) = resume {
-        resume_bar(p, rect, frac, rad);
+    {
+        // the card and its bar on one tilted plane (a painter carrying no pose opens nothing)
+        let _pose = p.tilt_scope(rect);
+        card(p, rect.scaled(1.0 / s), art, rad, true, s, f);
+        if let Some(frac) = resume {
+            resume_bar(p, rect, frac, rad);
+        }
     }
     // The label block anchors to the UNSCALED card bottom (rect is scaled about its center, so
     // base bottom = cy + (h/s)/2). In the mock the label is normal-flow BELOW the transformed
@@ -1589,6 +1601,19 @@ mod tests {
         assert_eq!(caption(0, 0).as_deref(), Some("0 items"));
         let film = TileFacts { year: 1999, child_count: 3, ..Default::default() };
         assert_eq!(super::focused_caption(&film, false).unwrap().to_str().unwrap(), "1999");
+    }
+
+    #[test]
+    fn the_tilt_grows_with_the_pop_and_a_zero_knob_turns_it_off() {
+        let (yaw, pitch) = crate::theme::card_tilt(1.0, 0.0);
+        assert!((yaw.to_degrees() + crate::theme::CARD_TILT_DEG).abs() < 1e-4, "the mock's rotateY(-6deg)");
+        assert!((pitch.to_degrees() - crate::theme::CARD_TILT_DEG * 0.5).abs() < 1e-4, "and rotateX(3deg)");
+        assert_eq!(crate::theme::card_tilt(0.0, 0.0), (0.0, 0.0), "a card at rest stands upright");
+        let (right, _) = crate::theme::card_tilt(1.0, 1.0);
+        let (left, _) = crate::theme::card_tilt(1.0, -1.0);
+        assert!(right < yaw && left > yaw, "a move leans the card further into its direction");
+        assert_eq!(super::RowStyle::HOME.tilt, 0.0, "only the library's shelves tilt");
+        assert_eq!(super::RowStyle::SHELF.tilt, 1.0);
     }
 
     #[test]

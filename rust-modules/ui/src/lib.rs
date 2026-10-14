@@ -346,7 +346,24 @@ pub struct Painter {
     /// later `translate` moves it with the content. Set only through the scoped
     /// [`text_lift::draw`]; `Zoom::NONE` for every ordinary painter.
     zoom: Zoom,
+    /// The focused card's pose (`theme::card_tilt`), radians `(yaw, pitch)`: a value carried to
+    /// whoever draws the card, applied only inside a [`tilt_scope`](Self::tilt_scope). `[0, 0]`
+    /// for every painter but the one a shelf draws its focused card through.
+    tilt: [f32; 2],
 }
+/// An open [`Painter::tilt_scope`]; closes the scope when it drops.
+pub struct TiltScope {
+    open: bool,
+}
+
+impl Drop for TiltScope {
+    fn drop(&mut self) {
+        if self.open {
+            plx_gfx::gfx::set_tilt_scope(plx_gfx::gfx::CardTilt::NONE, 0.0, 0.0);
+        }
+    }
+}
+
 thread_local! {
     static RECORD_WALK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
@@ -461,6 +478,7 @@ impl Painter {
             clip: Rect::FULL,
             text_recorder: false,
             zoom: Zoom::NONE,
+            tilt: [0.0, 0.0],
         }
     }
     pub const fn recording() -> Self {
@@ -1048,6 +1066,36 @@ impl Painter {
     /// rect; the quad is inflated by the penumbra AND the downward shift internally. This is how
     /// every art tile gets its resting-and-rising shadow without a separate soft-shadow pass.
     /// `uv` is the window of the texture the card shows ([`tex_uv`](Self::tex_uv)).
+    /// This painter, carrying the pose `yaw`/`pitch` radians for the card it draws — see
+    /// [`plx_gfx::gfx::CardTilt`]. Nothing tilts until a [`tilt_scope`](Self::tilt_scope) opens.
+    pub fn tilted(mut self, yaw: f32, pitch: f32) -> Self {
+        self.tilt = [yaw, pitch];
+        self
+    }
+
+    /// The pose [`tilted`](Self::tilted) set, `[0, 0]` when none.
+    pub fn tilt(&self) -> [f32; 2] {
+        self.tilt
+    }
+
+    /// **Pose everything this painter's quads draw, about the centre of `card`, until the scope
+    /// drops** — the card itself, its resume bar, its marks, all on one tilted plane
+    /// (`gfx::set_tilt_scope`). Text never tilts (a label is not the card). A painter carrying no
+    /// pose, a recording painter, or a discovery walk opens nothing.
+    #[must_use]
+    pub fn tilt_scope(self, card: Rect) -> TiltScope {
+        if self.tilt == [0.0, 0.0] || self.records() || frame::backdrop::discovering() {
+            return TiltScope { open: false };
+        }
+        let m = self.place(card);
+        plx_gfx::gfx::set_tilt_scope(
+            plx_gfx::gfx::CardTilt { yaw: self.tilt[0], pitch: self.tilt[1], perspective: self.px(theme::CARD_TILT_PERSPECTIVE) },
+            m.x + m.w * 0.5,
+            m.y + m.h * 0.5,
+        );
+        TiltScope { open: true }
+    }
+
     pub fn tex_carded(self, tex: u32, uv: [f32; 4], r: Rect, rad: f32, tint: [f32; 4], f: f32) {
         if self.declare({ let (b,o,_,_)=card_shadow_params(r.h,f,theme::CARD_SHADOW[3]); Rect::new(r.x-b,r.y+o-b,r.w+2.0*b,r.h+2.0*b) }, 14, |data| {
             use frame::backdrop::Value;

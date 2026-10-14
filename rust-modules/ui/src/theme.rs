@@ -1376,6 +1376,24 @@ pub const PILL_BLEND_SLACK: f32 = 0.86;
 /// card composite) keeps a shallower [`CARD_SHADOW_CHIP_A`] instead, since chip-sized art never
 /// approaches the blur/offset ceilings that would otherwise cap its own alpha too.
 pub const CARD_SHADOW: [f32; 4] = with_a(BLACK, 0.50);
+
+/// **The focused card's tilt, in degrees** — `PiTV Redesign.dc.html` 1b's
+/// `rotateY(-6deg) rotateX(3deg)`, the tvOS parallax pose, on the focused card of a shelf whose
+/// style opts in (`RowStyle::tilt`). The ONE knob: the pitch is half of it and the lean a movement
+/// adds two thirds of it, so `0.0` turns the whole effect off and leaves every card upright.
+pub const CARD_TILT_DEG: f32 = 6.0;
+/// The viewer's distance for that pose, in layout pixels (CSS `perspective: 900px`).
+pub const CARD_TILT_PERSPECTIVE: f32 = 900.0;
+
+/// The focused card's pose `(yaw, pitch)` in radians at pop progress `t` (0 at rest, 1 fully
+/// popped) and lean `lean` (-1 just moved left … +1 just moved right, 0 settled): the mock's pose
+/// grows with the pop, and a move leans the card further into its direction for a moment.
+pub fn card_tilt(t: f32, lean: f32) -> (f32, f32) {
+    let t = t.clamp(0.0, 1.0);
+    let yaw = -(CARD_TILT_DEG * t + CARD_TILT_DEG * (2.0 / 3.0) * lean.clamp(-1.0, 1.0));
+    let pitch = CARD_TILT_DEG * 0.5 * t;
+    (yaw.to_radians(), pitch.to_radians())
+}
 /// The profile chip's own focused-shadow alpha ceiling ([`Painter::focus_shadow`](crate::Painter::focus_shadow)) —
 /// kept at the art tile's PRE-lift depth (.40) because the chip's real, always-offset shadow was
 /// tuned at that depth and the tile's own bump to .50 answers a bigger, further-falling shadow the
