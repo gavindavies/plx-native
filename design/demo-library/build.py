@@ -175,7 +175,11 @@ def clip(still, dst, seconds, title, lines):
         fps = 24
         frames = seconds * fps
         # A slow push-in across the art, the title fading out over the first four seconds.
-        title_file = dst.with_suffix(".title.txt")
+        # A temp file with a plain name: the path sits inside the filter graph, where a comma or
+        # colon from a title ("The future of Hubble, part 1") would end the argument.
+        fd, name = tempfile.mkstemp(suffix=".txt")
+        os.close(fd)
+        title_file = pathlib.Path(name)
         title_file.write_text(title)
         draw = (f",drawtext=fontfile={FONT}:textfile={title_file}:fontsize=64:fontcolor=white:"
                 f"x=(w-tw)/2:y=h*0.78:shadowcolor=black@0.6:shadowy=3:"
@@ -250,6 +254,8 @@ class Builder:
         for season in s["seasons"]:
             sd = root / f"Season {season['index']:02}"
             sd.mkdir(exist_ok=True)
+            if not (sd / "poster.jpg").exists():
+                shutil.copyfile(root / "poster.jpg", sd / "poster.jpg")
             for n, e in enumerate(season["episodes"], 1):
                 stem = safe(f"{s['title']} - S{season['index']:02}E{n:02} - {e['title']}")
                 thumb = sd / f"{stem}.jpg"
@@ -257,12 +263,15 @@ class Builder:
                 clip(thumb, sd / f"{stem}.mkv", self.episode_seconds, e["title"], sentences(e.get("summary")))
 
     def mosaic(self, folder):
-        """A folder's own poster: its first four titles' posters, two by two."""
+        """A folder's own poster: its first four titles' posters, two by two (fewer than four: the
+        first one)."""
         dst = folder / "poster.jpg"
         posters = sorted(folder.glob("*/poster.jpg"))[:4]
         if dst.exists() or not posters:
             return
-        posters += posters[:1] * (4 - len(posters))
+        if len(posters) < 4:  # too few to tile: the first title's poster
+            shutil.copyfile(posters[0], dst)
+            return
         w, h = POSTER[0] // 2, POSTER[1] // 2
         scaled = "".join(f"[{i}:v]scale={w}:{h}[p{i}];" for i in range(4))
         graph = scaled + "[p0][p1][p2][p3]xstack=inputs=4:layout=0_0|w0_0|0_h0|w0_h0,format=yuvj444p[o]"

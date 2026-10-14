@@ -25,6 +25,9 @@ The interface is drawn straight on the GPU, and video is decoded by the machine'
 | ![Player](design/screenshots/linux/05-player.jpg) | ![Subtitles](design/screenshots/linux/06-subtitles-menu.jpg) |
 | ![Audio tracks](design/screenshots/linux/07-audio-menu.jpg) | ![A subtitle on screen](design/screenshots/linux/08-subtitle.jpg) |
 
+The screenshots show the demo library below; its artwork is credited in
+[design/screenshots/linux/CREDITS.md](design/screenshots/linux/CREDITS.md).
+
 ## Building
 
 Linux only. You need a nightly Rust toolchain, a C compiler, SDL2 and SDL2_ttf, and GStreamer with
