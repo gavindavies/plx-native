@@ -1,5 +1,6 @@
-//! **The install-wide player settings**: the subtitle tone, size and placement, and how far one
-//! Left/Right press jumps. A legible caption answers a fact about the screen and the distance to
+//! **The install-wide player settings**: the subtitle tone, size and placement, how far one
+//! Left/Right press jumps, the languages a file with no saved choice starts on, and the player's
+//! read-ahead cache (how it reads ahead of the playhead, how much, how fast). A legible caption answers a fact about the screen and the distance to
 //! it, not about one film, so these are one value each for the whole install; what the viewer
 //! chooses per FILE (the audio track, the subtitle and its timing) is `local_progress`'s.
 //!
@@ -10,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering::Relaxed};
 use std::sync::Mutex;
 
 const FILE_NAME: &str = "settings.json";
@@ -202,6 +203,114 @@ impl SkipInterval {
     }
 }
 
+/// **Which files the player reads ahead of the playhead** (Kodi's "buffer mode"): a file on a
+/// network share is the one a bitrate spike can stall, so that is the default; a local disk keeps
+/// up by itself.
+#[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReadAhead {
+    #[serde(rename = "off")]
+    Off,
+    #[default]
+    #[serde(rename = "network")]
+    NetworkShares,
+    #[serde(rename = "all")]
+    AllFiles,
+}
+
+impl ReadAhead {
+    pub const LADDER: [ReadAhead; 3] = [ReadAhead::Off, ReadAhead::NetworkShares, ReadAhead::AllFiles];
+    pub fn from_index(i: u8) -> ReadAhead {
+        Self::LADDER.get(i as usize).copied().unwrap_or_default()
+    }
+    pub fn index(self) -> u8 {
+        Self::LADDER.iter().position(|&o| o == self).unwrap_or(1) as u8
+    }
+}
+
+/// **How much the read-ahead holds** (Kodi's "memory size"). The buffer is filled up to this much
+/// past the playhead and released behind it, so it is the most memory one playback spends on it.
+#[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CacheSize {
+    #[serde(rename = "32mb")]
+    Mb32,
+    #[serde(rename = "64mb")]
+    Mb64,
+    #[default]
+    #[serde(rename = "128mb")]
+    Mb128,
+    #[serde(rename = "256mb")]
+    Mb256,
+    #[serde(rename = "512mb")]
+    Mb512,
+}
+
+impl CacheSize {
+    pub const LADDER: [CacheSize; 5] = [CacheSize::Mb32, CacheSize::Mb64, CacheSize::Mb128, CacheSize::Mb256, CacheSize::Mb512];
+    pub fn from_index(i: u8) -> CacheSize {
+        Self::LADDER.get(i as usize).copied().unwrap_or_default()
+    }
+    pub fn index(self) -> u8 {
+        Self::LADDER.iter().position(|&o| o == self).unwrap_or(2) as u8
+    }
+    pub fn megabytes(self) -> u64 {
+        match self {
+            CacheSize::Mb32 => 32,
+            CacheSize::Mb64 => 64,
+            CacheSize::Mb128 => 128,
+            CacheSize::Mb256 => 256,
+            CacheSize::Mb512 => 512,
+        }
+    }
+    pub fn bytes(self) -> u64 {
+        self.megabytes() * 1024 * 1024
+    }
+}
+
+/// **How fast the read-ahead fills** (Kodi's "read factor"): a multiple of the file's average
+/// bitrate. Higher fills the buffer sooner after a seek; a cap keeps a share's link free for
+/// whatever else uses it. `Unlimited` reads as fast as the source answers.
+#[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReadFactor {
+    #[serde(rename = "2x")]
+    X2,
+    #[default]
+    #[serde(rename = "4x")]
+    X4,
+    #[serde(rename = "8x")]
+    X8,
+    #[serde(rename = "20x")]
+    X20,
+    #[serde(rename = "unlimited")]
+    Unlimited,
+}
+
+impl ReadFactor {
+    pub const LADDER: [ReadFactor; 5] = [ReadFactor::X2, ReadFactor::X4, ReadFactor::X8, ReadFactor::X20, ReadFactor::Unlimited];
+    pub fn from_index(i: u8) -> ReadFactor {
+        Self::LADDER.get(i as usize).copied().unwrap_or_default()
+    }
+    pub fn index(self) -> u8 {
+        Self::LADDER.iter().position(|&o| o == self).unwrap_or(1) as u8
+    }
+    /// The multiple of the bitrate, `None` for unlimited.
+    pub fn multiple(self) -> Option<u32> {
+        match self {
+            ReadFactor::X2 => Some(2),
+            ReadFactor::X4 => Some(4),
+            ReadFactor::X8 => Some(8),
+            ReadFactor::X20 => Some(20),
+            ReadFactor::Unlimited => None,
+        }
+    }
+}
+
+/// The languages the default-language pickers offer, as ISO 639-1 codes, most spoken first.
+/// A track matches one through `metadata::lang_matches`, whatever spelling its file uses.
+pub const LANGUAGES: [&str; 24] = [
+    "en", "es", "fr", "de", "it", "pt", "nl", "sv", "no", "da", "fi", "pl",
+    "cs", "hu", "ru", "uk", "be", "el", "tr", "ar", "he", "hi", "ja", "zh",
+];
+
 #[derive(Default, Serialize, Deserialize)]
 struct Disk {
     #[serde(default)]
@@ -212,12 +321,30 @@ struct Disk {
     subtitle_position: SubtitlePosition,
     #[serde(default)]
     skip_interval: SkipInterval,
+    /// The subtitle a file with no saved choice starts on: an ISO 639-1 code, empty for Off.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    subtitle_language: String,
+    /// The audio a file with no saved choice starts on: an ISO 639-1 code, empty for the file's own
+    /// first track.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    audio_language: String,
+    #[serde(default)]
+    read_ahead: ReadAhead,
+    #[serde(default)]
+    cache_size: CacheSize,
+    #[serde(default)]
+    read_factor: ReadFactor,
 }
 
 static SUBTITLE_TONE: AtomicU8 = AtomicU8::new(0);
 static SUBTITLE_SIZE: AtomicU8 = AtomicU8::new(1);
 static SUBTITLE_POSITION: AtomicU8 = AtomicU8::new(0);
 static SKIP_INTERVAL: AtomicU8 = AtomicU8::new(1);
+static READ_AHEAD: AtomicU8 = AtomicU8::new(1);
+static CACHE_SIZE: AtomicU8 = AtomicU8::new(2);
+static READ_FACTOR: AtomicU8 = AtomicU8::new(1);
+/// The two default languages: `(subtitle, audio)`.
+static LANGUAGES_CHOSEN: Mutex<(String, String)> = Mutex::new((String::new(), String::new()));
 static REVISION: AtomicU64 = AtomicU64::new(0);
 /// Serializes the file writes, so an older snapshot can never land after a newer one.
 static WRITER: Mutex<()> = Mutex::new(());
@@ -231,6 +358,10 @@ fn publish(disk: &Disk) {
     SUBTITLE_SIZE.store(disk.subtitle_size.index(), Relaxed);
     SUBTITLE_POSITION.store(disk.subtitle_position.index(), Relaxed);
     SKIP_INTERVAL.store(disk.skip_interval.index(), Relaxed);
+    READ_AHEAD.store(disk.read_ahead.index(), Relaxed);
+    CACHE_SIZE.store(disk.cache_size.index(), Relaxed);
+    READ_FACTOR.store(disk.read_factor.index(), Relaxed);
+    *languages() = (disk.subtitle_language.clone(), disk.audio_language.clone());
     REVISION.fetch_add(1, Relaxed);
 }
 
@@ -240,7 +371,16 @@ fn snapshot() -> Disk {
         subtitle_size: subtitle_size(),
         subtitle_position: subtitle_position(),
         skip_interval: skip_interval(),
+        subtitle_language: subtitle_language(),
+        audio_language: audio_language(),
+        read_ahead: read_ahead(),
+        cache_size: cache_size(),
+        read_factor: read_factor(),
     }
+}
+
+fn languages() -> std::sync::MutexGuard<'static, (String, String)> {
+    LANGUAGES_CHOSEN.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Read the settings from disk. Blocking: call it at boot, before the frame loop. A missing or
@@ -277,6 +417,54 @@ pub fn subtitle_position() -> SubtitlePosition {
 }
 pub fn skip_interval() -> SkipInterval {
     SkipInterval::from_index(SKIP_INTERVAL.load(Relaxed))
+}
+
+pub fn read_ahead() -> ReadAhead {
+    ReadAhead::from_index(READ_AHEAD.load(Relaxed))
+}
+pub fn cache_size() -> CacheSize {
+    CacheSize::from_index(CACHE_SIZE.load(Relaxed))
+}
+pub fn read_factor() -> ReadFactor {
+    ReadFactor::from_index(READ_FACTOR.load(Relaxed))
+}
+/// The default subtitle language (ISO 639-1), empty for Off.
+pub fn subtitle_language() -> String {
+    languages().0.clone()
+}
+/// The default audio language (ISO 639-1), empty for the file's own first track.
+pub fn audio_language() -> String {
+    languages().1.clone()
+}
+
+pub fn set_read_ahead(v: ReadAhead) {
+    change(&READ_AHEAD, v.index());
+}
+pub fn set_cache_size(v: CacheSize) {
+    change(&CACHE_SIZE, v.index());
+}
+pub fn set_read_factor(v: ReadFactor) {
+    change(&READ_FACTOR, v.index());
+}
+pub fn set_subtitle_language(code: &str) {
+    set_language(|l| &mut l.0, code);
+}
+pub fn set_audio_language(code: &str) {
+    set_language(|l| &mut l.1, code);
+}
+
+fn set_language(slot: impl FnOnce(&mut (String, String)) -> &mut String, code: &str) {
+    {
+        let mut held = languages();
+        let cell = slot(&mut held);
+        if cell == code {
+            return;
+        }
+        *cell = code.to_owned();
+    }
+    REVISION.fetch_add(1, Relaxed);
+    plx_machine::idle::invalidate();
+    save();
 }
 
 pub fn set_subtitle_tone(v: SubtitleTone) {
@@ -340,7 +528,11 @@ mod tests {
         assert!(SubtitleSize::LADDER.iter().all(|&t| SubtitleSize::from_index(t.index()) == t));
         assert!(SubtitlePosition::LADDER.iter().all(|&t| SubtitlePosition::from_index(t.index()) == t));
         assert!(SkipInterval::LADDER.iter().all(|&t| SkipInterval::from_index(t.index()) == t));
+        assert!(ReadAhead::LADDER.iter().all(|&t| ReadAhead::from_index(t.index()) == t));
+        assert!(CacheSize::LADDER.iter().all(|&t| CacheSize::from_index(t.index()) == t));
+        assert!(ReadFactor::LADDER.iter().all(|&t| ReadFactor::from_index(t.index()) == t));
         assert_eq!(SubtitleSize::from_index(200), SubtitleSize::Medium, "out of range is the default");
+        assert_eq!(CacheSize::from_index(200), CacheSize::Mb128);
     }
 
     #[test]
@@ -350,6 +542,19 @@ mod tests {
         assert_eq!(disk.skip_interval, SkipInterval::Seconds30);
         assert_eq!(disk.subtitle_tone, SubtitleTone::White);
         assert_eq!(disk.subtitle_position, SubtitlePosition::Low);
+        assert_eq!((disk.read_ahead, disk.cache_size, disk.read_factor), (ReadAhead::NetworkShares, CacheSize::Mb128, ReadFactor::X4));
+        assert!(disk.subtitle_language.is_empty() && disk.audio_language.is_empty());
+    }
+
+    #[test]
+    fn the_cache_and_language_settings_are_written_by_name() {
+        let disk: Disk = serde_json::from_str(r#"{"read_ahead":"all","cache_size":"512mb","read_factor":"unlimited","subtitle_language":"en"}"#).unwrap();
+        assert_eq!((disk.read_ahead, disk.cache_size, disk.read_factor), (ReadAhead::AllFiles, CacheSize::Mb512, ReadFactor::Unlimited));
+        assert_eq!(disk.subtitle_language, "en");
+        assert_eq!(CacheSize::Mb512.bytes(), 512 * 1024 * 1024);
+        assert_eq!(ReadFactor::Unlimited.multiple(), None);
+        let json = serde_json::to_string(&disk).unwrap();
+        assert!(json.contains(r#""cache_size":"512mb""#) && !json.contains("audio_language"), "{json}");
     }
 
     #[test]
