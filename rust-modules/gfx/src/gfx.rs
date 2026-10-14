@@ -907,6 +907,10 @@ pub fn use_prog(p: c_uint) {
             glUseProgram(p);
             CUR_PROG = p;
         }
+        // 0 until the first tilt scope of the process: every draw before that pays one compare
+        if TILT_GEN != 0 {
+            sync_tilt(p);
+        }
     }
 }
 
@@ -2515,6 +2519,117 @@ fn draw_tex_core(
         glBindTexture(GL_TEXTURE_2D, tex);
         glUniform4f(loc.rect, qx, qy, qw, qh);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
+}
+
+// ---- The TILT SCOPE: a perspective pose for everything drawn while it is set — the focused card
+// of a shelf and what it carries (its resume bar, its watched mark): tvOS's parallax look,
+// `PiTV Redesign.dc.html` 1b's `perspective(900px) rotateY(-6deg) rotateX(3deg)`.
+//
+// The two quad vertex shaders (`vs_src.vert`, `vs_img.vert`) rotate each corner about `u_pivot`
+// (the card's centre) and emit it with a real `w`, so the GPU interpolates every varying — texture
+// UVs, the card-local SDF coordinates, the gloss — perspective-correctly: no fragment shader
+// changes, and the rounded corners, rim, shadow, the bar's band and the mark's disc all land on the
+// card's own tilted plane, exactly. Glyph text (`vs_text.vert`) never tilts: a label is not part of
+// the card. Outside a scope `u_tilt` is zero and a vertex takes the upright path it always took —
+// a uniform test per VERTEX (four a quad), which is the whole cost to a draw that does not tilt.
+//
+// Uniforms are per program, so [`use_prog`] brings a program's `u_tilt`/`u_pivot` up to date when
+// the scope has changed since that program last saw it ([`TILT_GEN`]); a program that never draws
+// inside a scope is never sent anything, and GL starts every uniform at zero.
+
+/// A pose: yaw (about the vertical axis; negative brings the RIGHT edge toward the viewer, as CSS
+/// `rotateY`), pitch (about the horizontal axis; positive tips the TOP edge away, as CSS
+/// `rotateX`) and the viewer's distance in the same pixels the card is drawn in (CSS `perspective`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CardTilt {
+    pub yaw: f32,
+    pub pitch: f32,
+    pub perspective: f32,
+}
+
+impl CardTilt {
+    pub const NONE: CardTilt = CardTilt { yaw: 0.0, pitch: 0.0, perspective: 0.0 };
+
+    pub fn is_none(&self) -> bool {
+        (self.yaw == 0.0 && self.pitch == 0.0) || self.perspective <= 0.0
+    }
+
+    /// `u_tilt`: `(sin yaw, sin pitch, 1/perspective)`, all zero for no tilt (the shaders' own
+    /// test). Cosines are the shaders' `sqrt(1 - s²)`: both angles are far inside ±90°.
+    pub fn uniform(&self) -> [f32; 3] {
+        if self.is_none() {
+            return [0.0; 3];
+        }
+        [self.yaw.sin(), self.pitch.sin(), 1.0 / self.perspective]
+    }
+}
+
+/// The screen point `(x, y)` lands on under `t` about the pivot `(cx, cy)` — the vertex shaders'
+/// tilt, written once more on the CPU and pinned to them by `tilt_projection_matches_the_shaders`.
+pub fn project_card_point(cx: f32, cy: f32, lx: f32, ly: f32, t: CardTilt) -> (f32, f32) {
+    let [sy, sp, inv_d] = t.uniform();
+    if inv_d == 0.0 {
+        return (cx + lx, cy + ly);
+    }
+    let (cyw, cp) = ((1.0 - sy * sy).sqrt(), (1.0 - sp * sp).sqrt());
+    let x1 = lx * cyw;
+    let z1 = -lx * sy;
+    let y2 = ly * cp - z1 * sp;
+    let z2 = ly * sp + z1 * cp;
+    let w = 1.0 - z2 * inv_d;
+    (cx + x1 / w, cy + y2 / w)
+}
+
+/// The scope in force: `u_tilt`, `u_pivot` (device px), and a generation that moves on every
+/// change. Main-thread only, like every other piece of GL state this module keeps.
+static mut TILT: [f32; 3] = [0.0; 3];
+static mut PIVOT: [f32; 2] = [0.0; 2];
+static mut TILT_GEN: u32 = 0;
+/// Per program: `(program, generation last sent, u_tilt, u_pivot)`. A program without the uniforms
+/// keeps locations of -1 and is skipped for good.
+static mut TILT_SEEN: [(c_uint, u32, c_int, c_int); 32] = [(0, 0, -1, -1); 32];
+
+/// Open (or, with `CardTilt::NONE`, close) the tilt scope: everything drawn through the quad
+/// programs until the next call is posed by `t` about the device-pixel point `(px, py)`. Callers
+/// go through `ui::Painter::tilt_scope`, which closes it when it drops.
+pub fn set_tilt_scope(t: CardTilt, px: f32, py: f32) {
+    unsafe {
+        let u = t.uniform();
+        let pivot = if u[2] == 0.0 { [0.0; 2] } else { [px, py] };
+        if TILT == u && PIVOT == pivot {
+            return;
+        }
+        TILT = u;
+        PIVOT = pivot;
+        TILT_GEN = TILT_GEN.wrapping_add(1).max(1);
+    }
+}
+
+/// Bring program `p` (bound) up to the scope in force. Only ever reached once something has opened
+/// a scope; a linear look-up over the few quad programs there are.
+#[cold]
+fn sync_tilt(p: c_uint) {
+    unsafe {
+        let seen = &mut *std::ptr::addr_of_mut!(TILT_SEEN);
+        let slot = match seen.iter().position(|e| e.0 == p) {
+            Some(i) => i,
+            None => {
+                let Some(free) = seen.iter().position(|e| e.0 == 0) else { return };
+                let (t, v) = (glGetUniformLocation(p, c"u_tilt".as_ptr()), glGetUniformLocation(p, c"u_pivot".as_ptr()));
+                seen[free] = (p, 0, t, v);
+                free
+            }
+        };
+        let (_, gen, lt, lp) = seen[slot];
+        if gen == TILT_GEN || lt < 0 {
+            return;
+        }
+        glUniform3f(lt, TILT[0], TILT[1], TILT[2]);
+        if lp >= 0 {
+            glUniform2f(lp, PIVOT[0], PIVOT[1]);
+        }
+        seen[slot].1 = TILT_GEN;
     }
 }
 
@@ -7019,6 +7134,45 @@ mod tests {
     /// copies — the ones the shader keeps as plain distances/fractions rather than folding into an
     /// algebraic form (unlike `CARD_GLARE_EASE`, which the shader halves into `chh * 0.32` rather
     /// than `(2*chh) * 0.16`; that transform is checked numerically below instead of by text).
+    #[test]
+    fn tilt_projection_matches_the_shaders() {
+        // the same lines `project_card_point` evaluates, in both quad vertex shaders
+        for vs in [shader_code(VS_IMG), shader_code(VS_SRC)] {
+            for line in [
+                "uniform highp vec3 u_tilt;",
+                "uniform highp vec2 u_pivot;",
+                "highp vec2 c = px - u_pivot;",
+                "highp float x1 = c.x * cyw;",
+                "highp float z1 = -c.x * u_tilt.x;",
+                "highp float y2 = c.y * cp - z1 * u_tilt.y;",
+                "highp float z2 = c.y * u_tilt.y + z1 * cp;",
+                "tw = 1.0 - z2 * u_tilt.z;",
+                "px = u_pivot * tw + vec2(x1, y2);",
+                "gl_Position = vec4(ndc.x, -ndc.y, 0.0, tw);",
+            ] {
+                assert!(vs.contains(line), "a quad vertex shader lost `{line}`");
+            }
+        }
+        assert!(!include_str!("shaders/vs_text.vert").contains("u_tilt"), "a label never tilts");
+    }
+
+    #[test]
+    fn a_tilted_card_leans_the_way_its_css_pose_says() {
+        let t = CardTilt { yaw: (-6.0f32).to_radians(), pitch: 3.0f32.to_radians(), perspective: 900.0 };
+        let (hw, hh) = (140.0, 210.0);
+        let at = |lx, ly| project_card_point(0.0, 0.0, lx, ly, t);
+        assert_eq!(at(0.0, 0.0), (0.0, 0.0), "the card turns about its own centre");
+        let (tl, tr, br, bl) = (at(-hw, -hh), at(hw, -hh), at(hw, hh), at(-hw, hh));
+        assert!(tr.1.abs() > tl.1.abs() && br.1 > bl.1, "rotateY(-6deg): the right edge is nearer, so taller");
+        assert!(tr.0 - tl.0 < br.0 - bl.0, "rotateX(3deg): the top edge is further, so narrower");
+        // the pose is subtle by design: no corner moves more than a few pixels at this size
+        for ((x, y), (ex, ey)) in [tl, tr, br, bl].into_iter().zip([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]) {
+            assert!((x - ex).abs() < 14.0 && (y - ey).abs() < 14.0, "{x},{y} vs {ex},{ey}");
+        }
+        assert_eq!(project_card_point(5.0, 7.0, 10.0, -3.0, CardTilt::NONE), (15.0, 4.0));
+        assert_eq!(CardTilt { perspective: 0.0, ..t }.uniform(), [0.0; 3], "no distance, no tilt");
+    }
+
     #[test]
     fn image_focus_geometry_matches_the_shader_literals() {
         use crate::gfx::tokens::{
