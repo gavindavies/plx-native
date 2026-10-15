@@ -81,6 +81,9 @@ echo ok > $R/pitv-remote                 # tokens: up down left right ok back ok
 pkill -x pitv
 ```
 
+`PITV_MEDIA_DIRS` replaces the library config for the run; to exercise `library.conf` (SMB shares
+mounted through gio) instead, leave it unset, point `PITV_CONFIG` at a file and run the app under
+`dbus-run-session` with `XDG_RUNTIME_DIR` set (`rust-modules/data/src/library.rs`).
 `PITV_SHOT*` and `PITV_RENDER_SCALE` (supersampled screenshots) are documented in
 `rust-modules/src/shot.rs`; the event log is `$R/pitv-events.log`. Use `pkill -x pitv`, never
 `pkill -f`.

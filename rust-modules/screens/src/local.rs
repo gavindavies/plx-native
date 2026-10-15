@@ -147,7 +147,7 @@ fn trail(path: &str, roots: &[PathBuf]) -> String {
     };
     let mut steps: Vec<String> = Vec::new();
     if roots.len() > 1 {
-        steps.push(root.file_name().map_or_else(|| root.display().to_string(), |n| n.to_string_lossy().into_owned()));
+        steps.push(plx_data::local::root_name(root));
     }
     if let Ok(rest) = path.strip_prefix(root) {
         steps.extend(rest.components().map(|c| c.as_os_str().to_string_lossy().into_owned()));
@@ -570,14 +570,14 @@ impl LocalScreen {
             plx_platform::i18n::msg::browse_local_title().to_owned()
         } else if arg.path.is_empty() {
             // a library of one folder is that folder: its name is the page's
-            roots[0].file_name().map_or_else(|| plx_platform::i18n::msg::browse_local_title().to_owned(), |n| n.to_string_lossy().into_owned())
+            plx_data::local::root_name(&roots[0])
         } else {
-            Path::new(&arg.path).file_name().map_or_else(|| arg.path.clone(), |n| n.to_string_lossy().into_owned())
+            plx_data::local::folder_name(Path::new(&arg.path))
         };
         let shown = if arg.path.is_empty() {
             plx_data::local::roots().iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join("  ·  ")
         } else {
-            trail(&arg.path, plx_data::local::roots())
+            trail(&arg.path, &plx_data::local::roots())
         };
         let mut page = Page {
             entry,

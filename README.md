@@ -56,8 +56,8 @@ anywhere and run `pitv` from it.
 ## Running
 
 ```sh
-dist/linux/pitv/pitv                     # the library: ~/Videos
-PITV_MEDIA_DIRS=/srv/films:/srv/tv dist/linux/pitv/pitv   # other folders, ':'-separated
+dist/linux/pitv/pitv                     # the library: ~/.config/pitv/library.conf, else ~/Videos
+PITV_MEDIA_DIRS=/srv/films:/srv/tv dist/linux/pitv/pitv   # just these folders, ':'-separated
 dist/linux/pitv/pitv /path/to/film.mkv   # play one file
 PITV_FULLSCREEN=0 dist/linux/pitv/pitv   # a window instead of the whole screen
 ```
@@ -65,6 +65,33 @@ PITV_FULLSCREEN=0 dist/linux/pitv/pitv   # a window instead of the whole screen
 Arrows move, Enter is OK, holding Enter opens a title's menu (play from the start, mark as
 watched), and Escape (or Q) goes back. In the player, OK pauses and resumes, Left and Right seek,
 and Up reaches the subtitle and audio buttons; a remote's media keys work too. Logs and the per-file progress live in `~/.local/state/pitv`.
+
+## Library folders and SMB shares
+
+The library is configured in a file, not on screen: `~/.config/pitv/library.conf` (or
+`$XDG_CONFIG_HOME/pitv/library.conf`, or wherever `PITV_CONFIG` points). Each section is one tab:
+
+```ini
+[Films]
+path = /srv/media/Films
+
+[TV Shows]
+share = smb://nas.local/media/TV Shows
+user = pi
+password-file = ~/.config/pitv/nas.password
+```
+
+`dist/linux/pitv/library.conf.example` is a commented starting point. SMB shares are mounted
+through gio when PiTV starts, so they need gvfs's SMB backend and its FUSE bridge:
+
+```sh
+sudo apt install gvfs-backends gvfs-fuse
+```
+
+gio talks to the gvfs daemons over the session D-Bus; the launcher starts one when PiTV is run
+outside a desktop session. Settings › Library shows each folder and share with its status (a
+share's reason when it would not connect), reconnects a share, and *Rescan library* reads the file
+again after an edit. `PITV_MEDIA_DIRS`, when set, replaces the file for that run.
 
 ## Demo library
 

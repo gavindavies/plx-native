@@ -125,7 +125,7 @@ fn find(video: &Path, listing: impl Fn(&Path) -> Option<Arc<Vec<Entry>>>) -> Opt
         let entry = all.iter().find(|e| e.path == video)?.clone();
         let set = entry.collection();
         let (more_of, more): (String, Vec<Entry>) = if set.is_empty() {
-            let name = home.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            let name = plx_data::local::folder_name(&home);
             (name, all.iter().filter(|e| e.kind == EntryKind::Video && e.path != video).take(MORE_MAX).cloned().collect())
         } else {
             (set.to_owned(), all.iter().filter(|e| e.collection() == set && e.path != video).take(MORE_MAX).cloned().collect())
@@ -519,7 +519,7 @@ impl LocalDetailScreen {
 
     fn draw_crumb(&self, p: Painter, measure: &dyn Measure) {
         let Some(found) = &self.page.found else { return };
-        let Some(name) = found.home.file_name().map(|n| n.to_string_lossy().into_owned()) else { return };
+        let name = plx_data::local::folder_name(&found.home);
         let Ok(c) = CString::new(name) else { return };
         let sz = theme::size::CAPTION;
         let cap = measure.cap_h(sz);

@@ -1,0 +1,23 @@
+# PiTV library — copy to ~/.config/pitv/library.conf and edit.
+#
+# One section per tab, in tab-bar order; the section's name is the tab's label.
+# After editing, choose Settings > Library > Rescan library (or restart PiTV).
+
+# A folder on this machine (a USB disk, or a share fstab already mounts).
+[Films]
+path = /srv/media/Films
+
+# An SMB share, mounted through gio (gvfs) when PiTV starts. Needs the
+# gvfs-backends and gvfs-fuse packages. A share is listed once it is connected.
+[TV Shows]
+share = smb://nas.local/media/TV Shows
+user = pi
+# domain = WORKGROUP
+# The password: the first line of a file only you can read (chmod 600) ...
+password-file = ~/.config/pitv/nas.password
+# ... or written here:
+# password = secret
+
+# No user and no password: mounted as a guest.
+# [Public]
+# share = smb://nas.local/public

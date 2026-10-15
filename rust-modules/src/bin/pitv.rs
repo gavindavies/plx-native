@@ -2,10 +2,11 @@
 //! a keyboard), full screen on the television this machine is plugged into.
 //!
 //! Usage:
-//!   pitv                  the library, from the folders in PITV_MEDIA_DIRS
+//!   pitv                  the library: PITV_MEDIA_DIRS, else library.conf, else ~/Videos
 //!   pitv <media-file>     play one file
 //! Environment:
-//!   PITV_MEDIA_DIRS     the library's folders, `:`-separated
+//!   PITV_MEDIA_DIRS     the library's folders, `:`-separated, instead of the config file
+//!   PITV_CONFIG         the library config (`plx_data::library`), else ~/.config/pitv/library.conf
 //!   PITV_FULLSCREEN=0   a desktop window instead of full screen
 //!   PITV_RUNTIME_DIR    this instance's trigger/FIFO/log root
 //!   PITV_APP_DIR        where appfont*.ttf and the icons live (repo `pkg/`)

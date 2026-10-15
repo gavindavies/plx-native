@@ -5,15 +5,22 @@
 # logs and state in one per-user directory (PITV_RUNTIME_DIR): $XDG_STATE_HOME/pitv,
 # else ~/.local/state/pitv. Both can be overridden from the environment.
 #
-#   pitv                            open the library (PITV_MEDIA_DIRS, else ~/Videos)
+#   pitv                            open the library (~/.config/pitv/library.conf, else ~/Videos)
 #   pitv /path/to/film.mkv          play one file
 #
-#   PITV_MEDIA_DIRS=/srv/films:/srv/tv   library folders, ':'-separated
+#   PITV_MEDIA_DIRS=/srv/films:/srv/tv   just these folders, ':'-separated, instead of the config
+#   PITV_CONFIG=/path/library.conf       another config file
 #   PITV_FULLSCREEN=0                    a window instead of the whole screen
+#
+# SMB shares are mounted through gio, which needs a session D-Bus: outside a desktop session (a
+# console or kiosk login) the app is started under its own, whose gvfs mounts end with it.
 set -eu
 here=$(dirname "$(readlink -f "$0")")
 state=${XDG_STATE_HOME:-$HOME/.local/state}/pitv
 export PITV_RUNTIME_DIR="${PITV_RUNTIME_DIR:-$state}"
 export PITV_APP_DIR="${PITV_APP_DIR:-$here}"
 mkdir -p "$PITV_RUNTIME_DIR"
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v dbus-run-session >/dev/null 2>&1; then
+    exec dbus-run-session -- "$here/pitv-bin" "$@"
+fi
 exec "$here/pitv-bin" "$@"

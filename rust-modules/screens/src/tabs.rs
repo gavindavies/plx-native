@@ -1,7 +1,8 @@
 //! **The top tab bar's destinations** (`PiTV Redesign.dc.html` 1a/1b): Home, then the library
 //! itself, one pill per place a viewer browses from, then Settings.
 //!
-//! - **Several library folders** (`PITV_MEDIA_DIRS=/srv/films:/srv/tv`): one pill per folder.
+//! - **Several library folders** (`library.conf` sections, or `PITV_MEDIA_DIRS=/srv/films:/srv/tv`):
+//!   one pill per folder, labelled with its section's name.
 //! - **One folder holding plain folders** (`~/Videos` with `Films/` and `TV Shows/`): one pill per
 //!   such folder — the folder is a container, its children are the libraries.
 //! - **One folder of titles**: one pill, that folder.
@@ -29,16 +30,16 @@ pub fn destinations() -> Vec<(String, AppArg)> {
 /// The library pills: `(label, the folder page's path argument)`.
 pub fn libraries() -> Vec<(String, String)> {
     let roots = plx_data::local::roots();
-    let listing = match roots {
+    let listing = match &*roots {
         [one] => Some(plx_data::local::listing(one)),
         _ => None,
     };
-    choose(roots, listing.as_ref())
+    choose(&roots, listing.as_ref(), plx_data::local::root_name)
 }
 
-/// The pure half of [`libraries`]: `listing` is the single root's, when there is one root.
-fn choose(roots: &[PathBuf], listing: Option<&Listing>) -> Vec<(String, String)> {
-    let name = |p: &Path| p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned());
+/// The pure half of [`libraries`]: `listing` is the single root's, when there is one root, and
+/// `name` labels a root (its config section's name, else its folder's).
+fn choose(roots: &[PathBuf], listing: Option<&Listing>, name: impl Fn(&Path) -> String) -> Vec<(String, String)> {
     if roots.len() != 1 {
         return roots.iter().map(|r| (name(r), r.display().to_string())).collect();
     }
@@ -135,10 +136,22 @@ mod tests {
         e
     }
 
+    /// A root's label when no config names it: the folder's own name.
+    fn name(p: &Path) -> String {
+        p.file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_pill_wears_the_label_the_config_gives_its_root() {
+        let roots = [PathBuf::from("/run/user/1000/gvfs/smb-share:server=nas,share=media"), PathBuf::from("/srv/Films")];
+        let label = |p: &Path| if p.starts_with("/run") { "NAS".to_owned() } else { name(p) };
+        assert_eq!(choose(&roots, None, label)[0].0, "NAS");
+    }
+
     #[test]
     fn several_roots_are_a_pill_each() {
         let roots = [PathBuf::from("/srv/Films"), PathBuf::from("/srv/TV Shows")];
-        assert_eq!(choose(&roots, None), [("Films".into(), "/srv/Films".into()), ("TV Shows".into(), "/srv/TV Shows".into())]);
+        assert_eq!(choose(&roots, None, name), [("Films".into(), "/srv/Films".into()), ("TV Shows".into(), "/srv/TV Shows".into())]);
     }
 
     #[test]
@@ -149,7 +162,7 @@ mod tests {
             folder("/home/u/Videos/Caminandes", true),
             folder("/home/u/Videos/TV Shows", false),
         ]));
-        assert_eq!(choose(&roots, Some(&listing)), [
+        assert_eq!(choose(&roots, Some(&listing), name), [
             ("Films".into(), "/home/u/Videos/Films".into()),
             ("TV Shows".into(), "/home/u/Videos/TV Shows".into()),
         ], "a show is a title, not a library");
@@ -158,8 +171,8 @@ mod tests {
     #[test]
     fn one_root_of_titles_or_still_loading_is_one_pill() {
         let roots = [PathBuf::from("/srv/Films")];
-        assert_eq!(choose(&roots, Some(&Listing::Loading)), [("Films".into(), String::new())]);
+        assert_eq!(choose(&roots, Some(&Listing::Loading), name), [("Films".into(), String::new())]);
         let titles = Listing::Ready(Arc::new(vec![folder("/srv/Films/Caminandes", true)]));
-        assert_eq!(choose(&roots, Some(&titles)), [("Films".into(), String::new())]);
+        assert_eq!(choose(&roots, Some(&titles), name), [("Films".into(), String::new())]);
     }
 }
