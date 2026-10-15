@@ -220,6 +220,8 @@ pub mod word {
     pub const LOCAL_DETAIL: &str = "localdetail";
     /// Home (`screens::home`).
     pub const HOME: &str = "home";
+    /// Settings (`screens::settings`).
+    pub const SETTINGS: &str = "settings";
 }
 
 /// An element key for a route-family screen: table rows are their index; the action band's
@@ -458,6 +460,8 @@ pub enum AppArg {
     /// Home: the newest title, Continue Watching and Recently Added (`screens::home`). The app's
     /// root, and the tab bar's first pill.
     Home,
+    /// Settings (`screens::settings`): the tab bar's last pill.
+    Settings,
 }
 
 /// The argument of [`AppArg::Local`] and [`AppArg::LocalDetail`]: which folder or video the page
@@ -476,6 +480,7 @@ impl LogicalState for AppArg {
             Self::Local(arg) => { c.u32(13).str(&arg.path); }
             Self::LocalDetail(arg) => { c.u32(14).str(&arg.path); }
             Self::Home => { c.u32(15); }
+            Self::Settings => { c.u32(16); }
         }
     }
     fn probe(&self, out: &mut String) { out.push_str("app_arg"); }
@@ -498,6 +503,7 @@ impl plx_ui::screen::ScreenArg for AppArg {
             AppArg::Local(_) => 25,
             AppArg::LocalDetail(_) => 26,
             AppArg::Home => 27,
+            AppArg::Settings => 28,
         })
     }
     fn title(&self) -> Option<&str> {
@@ -564,6 +570,7 @@ where
             AppArg::Local(arg) => Box::new(crate::local::LocalScreen::new(entry, id, arg)),
             AppArg::LocalDetail(arg) => Box::new(crate::local_detail::LocalDetailScreen::new(entry, id, arg)),
             AppArg::Home => Box::new(crate::home::HomeScreen::new(entry, id)),
+            AppArg::Settings => Box::new(crate::settings::SettingsScreen::new(entry, id)),
         }
     }
 }
@@ -587,7 +594,7 @@ pub fn every_surface_arg() -> Vec<AppArg> {
     for a in &args {
         match a {
             AppArg::ItemMenu(_) | AppArg::PlayerOverlay(_) => {}
-            AppArg::Player | AppArg::Local(_) | AppArg::LocalDetail(_) | AppArg::Home => panic!("a page argument is not a surface: its word is `route=`"),
+            AppArg::Player | AppArg::Local(_) | AppArg::LocalDetail(_) | AppArg::Home | AppArg::Settings => panic!("a page argument is not a surface: its word is `route=`"),
         }
     }
     args

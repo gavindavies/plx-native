@@ -113,6 +113,15 @@ fn prefer_lossless_dts() {
     }
 }
 
+/// The system GStreamer's version (`1.24.2`), as Settings › About names it. `None` when GStreamer
+/// could not initialise.
+pub fn gst_version() -> Option<String> {
+    gst_ready().then(|| {
+        let (major, minor, micro, _) = gst::version();
+        format!("{major}.{minor}.{micro}")
+    })
+}
+
 pub(crate) fn gst_ready() -> bool {
     static INIT: OnceLock<bool> = OnceLock::new();
     *INIT.get_or_init(|| match gst::init() {

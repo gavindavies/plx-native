@@ -888,6 +888,17 @@ pub fn majors() -> (u32, u32, u32) {
 }
 
 /// Boot smoke test + optional ABI probe. Called once at startup.
+/// The bundled libavformat's version as boot read it (`major << 16 | minor << 8 | micro`), 0 before
+/// boot or without the libraries.
+static AVFORMAT_VERSION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The bundled FFmpeg, as Settings › About names it: `libavformat 63.1.100`. `None` when the
+/// libraries did not load.
+pub fn library_version() -> Option<String> {
+    let v = AVFORMAT_VERSION.load(Ordering::Relaxed);
+    (v != 0).then(|| format!("libavformat {}", ver(v)))
+}
+
 pub fn boot() {
     if !load_libraries() {
         ABI_OK.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -896,6 +907,7 @@ pub fn boot() {
     }
     unsafe {
         let (fmt, cod, utl) = (avformat_version(), avcodec_version(), avutil_version());
+        AVFORMAT_VERSION.store(fmt, Ordering::Relaxed);
         crate::player::log(&format!(
             "ff: avformat={} avcodec={} avutil={}",
             ver(fmt),

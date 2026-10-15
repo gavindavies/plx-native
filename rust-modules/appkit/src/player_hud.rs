@@ -377,6 +377,31 @@ fn caption_fit(lines: usize, scale: f32, baseline: f32, floor: f32) -> (CaptionL
     (lay, fits)
 }
 
+/// How much larger than a true miniature the preview's caption is drawn.
+const PREVIEW_MAGNIFY: f32 = 2.0;
+
+/// **A sample caption in `card`, as the player would draw it now** — the viewer's tone, size and
+/// position (Settings › Subtitles' live preview). The card is the screen in miniature: the
+/// position lift shrinks by the card's share of the screen's height, and the face by twice that
+/// ([`PREVIEW_MAGNIFY`]) so the sample stays readable while each size keeps its step over the
+/// last. The sample line must be short enough that Extra Large still fits the card.
+pub fn draw_caption_preview(p: Painter, card: Rect, text: &str) {
+    // the player's caption face (see `caption_fit`), a carve-out from theme::size like it
+    let scale = subtitle_size_scale(plx_data::settings::subtitle_size()) * card.h / SCR_H * PREVIEW_MAGNIFY;
+    let face = (36.0 * scale).round() as i32;
+    let pitch = CAPTION_LINE_PITCH * scale;
+    let lift = subtitle_position_lift(plx_data::settings::subtitle_position()) * card.h / SCR_H;
+    let foot = card.y + card.h - (SCR_H - SUB_BASE_Y) * card.h / SCR_H - lift;
+    let Ok(cs) = CString::new(text) else { return };
+    let (ink, outline) = (subtitle_ink(), theme::scrim_black(0.85));
+    let (cx, top) = (card.x + card.w * 0.5, foot - pitch);
+    let o = (2.0 * scale).max(1.0);
+    for (dx, dy) in [(-o, 0.0), (o, 0.0), (0.0, -o), (0.0, o)] {
+        p.text(cs.as_ptr(), cx + dx, top + 4.0 + dy, face, outline, 1, 1);
+    }
+    p.text(cs.as_ptr(), cx, top + 4.0, face, ink, 1, 1);
+}
+
 /// The ink both subtitle draws use this frame: the viewer's tone ([`plx_media::player::subtitle_tone`])
 /// resolved on [`theme::SUBTITLE_INKS`]. A rung the table does not have is white, never a
 /// neighbour.

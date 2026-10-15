@@ -1,5 +1,5 @@
 //! **The top tab bar's destinations** (`PiTV Redesign.dc.html` 1a/1b): Home, then the library
-//! itself, one pill per place a viewer browses from.
+//! itself, one pill per place a viewer browses from, then Settings.
 //!
 //! - **Several library folders** (`PITV_MEDIA_DIRS=/srv/films:/srv/tv`): one pill per folder.
 //! - **One folder holding plain folders** (`~/Videos` with `Films/` and `TV Shows/`): one pill per
@@ -22,6 +22,7 @@ use crate::registry::{AppArg, LocalArg};
 pub fn destinations() -> Vec<(String, AppArg)> {
     let mut out = vec![(plx_platform::i18n::msg::browse_chrome_home().to_owned(), AppArg::Home)];
     out.extend(libraries().into_iter().map(|(name, path)| (name, AppArg::Local(LocalArg { path }))));
+    out.push((plx_platform::i18n::msg::settings_title().to_owned(), AppArg::Settings));
     out
 }
 
@@ -58,7 +59,7 @@ fn choose(roots: &[PathBuf], listing: Option<&Listing>) -> Vec<(String, String)>
 /// Whether `arg` is a page the tab bar stands over: Home, or a library pill's folder.
 pub fn is_tab_page(arg: &AppArg) -> bool {
     match arg {
-        AppArg::Home => true,
+        AppArg::Home | AppArg::Settings => true,
         AppArg::Local(a) => libraries().iter().any(|(_, path)| *path == a.path),
         _ => false,
     }

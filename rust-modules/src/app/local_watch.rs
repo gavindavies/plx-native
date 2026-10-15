@@ -89,7 +89,8 @@ fn choices_now(w: &Watch, audio_sid: i64, sub_sid: i64, offset_ms: i64) -> local
 }
 
 /// The audio track this play starts on: the viewer's choice for the file when it is one the sink
-/// decodes, else the file's first decodable track. Staged BEFORE the play starts, because the
+/// decodes, else the first decodable track in the Settings language, else the file's first
+/// decodable track. Staged BEFORE the play starts, because the
 /// start builds the Load from it (`player::stage_native_audio`: its codec and the demuxer's index).
 fn stage_audio(
     ps: &mut plx_media::playback::PlaybackSession,
@@ -102,6 +103,7 @@ fn stage_audio(
         .and_then(|c| c.audio)
         .map(|i| i as usize)
         .filter(|&i| item.audio.get(i).is_some_and(|s| plx_media::player::engine::audio_payload_codec(&s.codec).is_some()))
+        .or_else(|| plx_media::localplay::preferred_audio(item, &plx_data::settings::audio_language()))
         .map(|i| plx_media::playback::CarriedAudio::from_stream(&item.audio[i], plx_data::metadata::audio_ordinal(&item.audio, i)))
         .or(start);
     if let Some(audio) = &audio {
@@ -110,7 +112,8 @@ fn stage_audio(
     audio
 }
 
-/// The subtitle this play shows: the viewer's choice for the file with its timing, else Off —
+/// The subtitle this play shows: the viewer's choice for the file with its timing, else the
+/// Settings subtitle language's track, else Off —
 /// which also clears whatever the PREVIOUS local file had on (a new Plex item is reset by its
 /// resolve; a local one has none). After the start, which leaves the subtitle alone.
 fn apply_subtitle(
@@ -122,9 +125,13 @@ fn apply_subtitle(
     plx_media::player::reset_subtitle();
     let off = TrackCommit::Subtitle { render_ordinal: -1, stream_id: 0, sidecar_key: None, sidecar_codec: String::new() };
     super::playback::commit_track(ps, off);
-    let Some(saved) = saved else { return };
     let ids = sub_ids(&item.subs);
-    if let Some(i) = saved.subtitle.as_ref().and_then(|c| ids.iter().position(|s| &s.choice == c)) {
+    // A saved choice wins, Off included; a file never chosen for follows the Settings language.
+    let pick = match saved.and_then(|c| c.subtitle.as_ref()) {
+        Some(choice) => ids.iter().position(|s| &s.choice == choice),
+        None => plx_media::localplay::preferred_subtitle(item, &plx_data::settings::subtitle_language()),
+    };
+    if let Some(i) = pick {
         let s = &item.subs[i];
         super::playback::commit_track(ps, TrackCommit::Subtitle {
             render_ordinal: plx_data::metadata::sub_render_ordinal(&item.subs, i),
@@ -133,7 +140,7 @@ fn apply_subtitle(
             sidecar_codec: s.codec.clone(),
         });
         // After the pick: a new subtitle starts from no offset.
-        plx_media::player::set_subtitle_offset(saved.subtitle_offset_ms);
+        plx_media::player::set_subtitle_offset(saved.map_or(0, |c| c.subtitle_offset_ms));
     }
 }
 
