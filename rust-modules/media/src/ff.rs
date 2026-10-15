@@ -2251,9 +2251,10 @@ pub fn demux(
                         break;
                     }
                 };
+                let file = file.with_read_ahead(&path);
                 let size = file.size();
                 SHARED.file_size.store(size, Ordering::Release);
-                crate::player::log(&format!("ff: open local size={size}"));
+                crate::player::log(&format!("ff: open local size={size} read-ahead={}", file.reads_ahead()));
                 let mut state = Box::new(AvioState {
                     file: Box::new(file),
                     aq: aq_p,
@@ -2425,6 +2426,7 @@ pub fn demux(
                     SHARED
                         .duration_ns
                         .store(dur.saturating_mul(1000), Ordering::Relaxed);
+                    state.file.set_duration(dur.saturating_mul(1000));
                 }
                 // The NAME as well as the id, and the name is what anything downstream should grade.
                 // A raw AV_CODEC_ID is an FFmpeg enum, and that enum RENUMBERS between majors — H264

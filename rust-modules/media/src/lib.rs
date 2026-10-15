@@ -13,6 +13,7 @@ pub mod aq;
 #[macro_use]
 pub mod ff; // the demuxer: FFmpeg, dlopen'd by absolute path from the application's own directory
 pub mod localfile; // the local-disk media plane: a file on this machine read by pread
+pub mod readahead; // the player's read-ahead cache under `localfile` (Settings › Cache)
 pub mod localplay; // a file on this machine's disk, probed and installed as the next Load
 pub mod thumbs; // scrub preview frames: a local file's pictures, decoded off the frame thread
 pub mod playback; // the playback session: the stream, its declaration, the tracks, the Load reducer
