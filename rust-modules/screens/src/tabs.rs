@@ -9,9 +9,11 @@
 //!
 //! A pill's argument is the page it selects (`NavOp::SelectTab`), so the container's strip, the
 //! app's labels and [`AppArg::chrome`](crate::registry::AppArg) all read this one list. It is
-//! process state like the catalog it reads: the one-folder case changes when that folder's listing
-//! lands, and the app republishes the pills then (their keys are positions in this list, which only
-//! grows from one pill to its final count once, at boot).
+//! process state like the catalog it reads, and the app republishes it every frame: the one-folder
+//! case changes when that folder's listing lands, a share's pill appears when it connects (seconds
+//! after boot, or after Settings › Library reconnects it), and a rescan can add or drop pills. The
+//! pills' keys are positions in this list, so a focus resting on the bar while a pill is inserted
+//! before it stays on the same position, now the neighbouring pill.
 
 use std::path::{Path, PathBuf};
 
