@@ -1,17 +1,19 @@
 # PiTV
 
-A native media player for the folders of films and shows on your own disk, built for the living
-room: a Raspberry Pi or any Linux machine under the TV, driven by a remote or the arrow keys.
+A lightweight 4K player for the films and shows in your own folders — on the machine's disk or on
+an SMB share mounted from a NAS — built for the living room: a Raspberry Pi 5 under the TV, driven
+by a remote or the arrow keys. 4K HEVC and H.264 in MKV or MP4, lossless audio, styled subtitles.
 
 The interface is drawn straight on the GPU, and video is decoded by the machine's own GStreamer
-(a hardware decoder where it has one: V4L2 on a Pi, VA-API on a PC) and composited under the UI.
+(the Pi 5's V4L2 HEVC decoder; VA-API on a PC) and composited under the UI.
 
 ![The library](design/screenshots/linux/01-library.jpg)
 
 ## What it does
 
-- **Your library, from folders.** Point it at directories of films and shows; it lists them with
-  their posters and remembers where you stopped in each file.
+- **Your library, from folders.** Point it at directories of films and shows — local, or SMB shares
+  mounted with `cifs` (e.g. an `/etc/fstab` entry) — and it lists them with their posters and
+  remembers where you stopped in each file.
 - **Kodi-style audio and subtitle choices per file.** Pick the audio track, the subtitle (embedded,
   or a `.srt`/`.ass` beside the video) and its timing; the choice is remembered for that file.
 - **Lossless audio.** DTS-HD Master Audio, TrueHD, FLAC, Opus, E-AC-3, AC-3, AAC, MP3 and PCM, at
@@ -90,9 +92,8 @@ file is its standard 1280-pixel thumbnail, pinned in the asset's `file` entry.
 ## Status
 
 PiTV began as a fork of PlxNative, a Plex client for LG televisions. The Plex client, its screens
-and the LG webOS build are gone. Internal crate names still carry the old `plx` prefix, and some
-webOS platform code below the player (device capability probes, the webOS key and storage layers)
-is still in the tree and has yet to be removed.
+and the LG webOS port are gone; internal crate names still carry the old `plx` prefix. The
+interface is English only. Developer notes are in [AGENTS.md](AGENTS.md).
 
 ## Licence
 

@@ -40,14 +40,6 @@ pub enum PageEdge {
     After,
 }
 
-/// The focus read-out for card `i` of `src`, drawn at `rect`: its slot in the held window and its
-/// place in the whole listing the window is part of (`pitv-focusx`).
-#[cfg(feature = "devtriggers")]
-pub(super) fn note_focused<H: Host, S: CardSource<H>>(pr: Painter, rect: Rect, i: usize, src: &S) {
-    let at = pr.to_screen(rect).0;
-    crate::card_probe::focused(at.x, at.y, at.w, i, src.len(), src.global(i));
-}
-
 pub struct Shelf {
     entry: EntryId,
     style: &'static RowStyle,
@@ -150,10 +142,6 @@ impl Shelf {
     /// The y the screen last laid the shelf out at (kept in the motion canon).
     pub fn base_y(&self) -> f32 {
         self.row.base_y
-    }
-
-    pub fn set_base_y(&mut self, y: f32) {
-        self.row.base_y = y;
     }
 
     /// How far card `i`'s caption block still trails the scroll (`n` cards in the shelf).
@@ -336,10 +324,6 @@ impl Shelf {
         self.pool.len()
     }
 
-    pub fn has_page_request(&self) -> bool {
-        self.asked.is_some() || self.asked_before.is_some() || self.in_flight.is_some()
-    }
-
     /// Release paging demand when the owner leaves this row.
     pub fn reset_page_requests(&mut self) {
         self.asked = None;
@@ -358,20 +342,6 @@ impl Shelf {
             self.asked = None;
             self.asked_before = None;
         }
-    }
-
-    /// The owner withdrew the ask itself (it left the row): there is nothing for
-    /// [`page_cancel`](Self::page_cancel) to withdraw. A landing does not call this: the ask it
-    /// answered is simply no longer in the store, and a late cancel for it is a no-op there.
-    pub fn drop_page_flight(&mut self) {
-        self.in_flight = None;
-        self.retry.reset();
-    }
-
-    /// The row leads with `head` cards that no window slides over (Detail's Related head): the leading
-    /// edge's zone is the first [`PAGE_EDGE_CARDS`] cards after them, and focus on them counts too.
-    pub fn set_head(&mut self, head: usize) {
-        self.head = head;
     }
 
     /// Request an earlier window while its leading edge remains active: once per window, and again
@@ -781,13 +751,7 @@ impl Shelf {
         if focused {
             let label = src.label(i).revealed(self.row.band_reveal())
                 .settling(self.row.settle_lag(src.len(), i, self.style) * src.sweep());
-            #[cfg(feature = "devtriggers")]
-            crate::card_probe::begin_card();
             card_row::draw_focused(pr.tilted(pose[0], pose[1]), src.art(i), rect, s, self.style, src.progress(i), &label, f.measure);
-            #[cfg(feature = "devtriggers")]
-            if !pr.is_recording() {
-                note_focused(pr, rect, i, src);
-            }
         } else {
             card_row::draw_tile(pr, src.art(i), rect, s, self.style, src.progress(i));
         }
@@ -836,13 +800,6 @@ impl Shelf {
 
     pub fn scroll(&self) -> f32 {
         self.row.scroll_x()
-    }
-
-    /// Card `i`'s pop as the draw paints it before any press, given the index of the focused card
-    /// (the focus rule and [`dormant`](Self::dormant) included): what a probe reads between frames.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn drawn_pop(&self, i: usize, focus: Option<usize>) -> f32 {
-        self.pop_at(i, focus)
     }
 
     /// Every spring is parked exactly at rest: nothing here needs stepping.

@@ -155,27 +155,6 @@ impl RowStyle {
         right_reserve: 0.0,
         tilt: 0.0,
     };
-    /// "Who's watching" profile pictures: big circular avatars with a clear pop. Centered by the
-    /// caller (a short roster), so the scroll spring stays put unless the row overflows.
-    ///
-    /// The pop is much larger than the shelves' 1.09 **on purpose**: a poster shelf marks its focus
-    /// against close, hard-edged neighbours, but a lone row of widely-spaced circles has no such
-    /// reference and the same 9% read as "nothing is selected". 1.18 still leaves 28px between
-    /// adjacent tiles at full pop (slot 292 − 264), and `profiles::NAME_DY` derives the name band's
-    /// drop from this number so the label can never collide with the popped circle.
-    pub const PROFILES: RowStyle = RowStyle {
-        w: 220.0,
-        h: 220.0,
-        gap: 72.0,
-        margin_x: MARGIN_X,
-        radius: 110.0,
-        focus_scale: 1.18,
-        k_scale: K_SCALE,
-        k_scroll: K_SCROLL,
-        circular: true,
-        right_reserve: 0.0,
-        tilt: 0.0,
-    };
     /// ring focus scalar denominator — `(s-1)/ring_denom` maps scale∈[1, focus_scale] to [0, 1].
     #[inline]
     fn ring_denom(&self) -> f32 {
@@ -602,7 +581,6 @@ pub fn heading_clearance(focused: Option<usize>, sty: &RowStyle, scroll: f32) ->
 /// The gap either side of the heading's separator dot.
 pub const HEADING_SOURCE_PAD: f32 = theme::space::XS;
 
-
 /// The shelf heading, flowed left→right from the heading origin: the hub's title, and — only when
 /// the row came from ANOTHER server — a quiet `· handle` naming that source ("Recently Added in
 /// Film Club · friend").
@@ -723,7 +701,6 @@ pub fn bounded_heading_flow(
 /// but its own ellipsis, and a heading ending in a bare `…` beside another bare `…` reads as
 /// damage rather than as truncation.
 const MIN_HEADING_RUN: f32 = 48.0;
-
 
 /// Conservative paint bounds for a complete card, including its shadow and focused label.
 /// The label anchors to the unscaled bottom even during a press, just as `draw_focused` does.
@@ -1151,7 +1128,6 @@ thread_local! {
 /// instead of being sliced by it.
 const MARQUEE_AIR: f32 = 6.0;
 
-
 /// Air between Continue-Watching's play glyph and the name that follows it.
 const PLAY_ICON_GAP: f32 = 10.0;
 
@@ -1436,11 +1412,6 @@ fn draw_label_block(
     // ([`anchor_label`]).
     let want = title_w_val.map_or(0.0, |w| lead + w).max(caption_w);
     let at = place_label_wide(p, rect, sty, title_run.max(caption_w.min(full)), want, label.settle_lag);
-    #[cfg(feature = "devtriggers")]
-    {
-        let placed = p.to_screen(Rect::new(at.x, 0.0, at.w, 1.0)).0;
-        crate::card_probe::caption(placed.x, placed.w);
-    }
 
     // Which lines of the block do not fit it? They glide together on ONE clock and ONE cycle (the
     // longest's); when none does, the clock is released so an overflowing block focused again

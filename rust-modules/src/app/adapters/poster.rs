@@ -520,7 +520,7 @@ static RESIDENCY_REARMED: AtomicU64 = AtomicU64::new(0);
 /// screen's diagnostic climb forever, because a refused arrival's cooldown keeps expiring and
 /// retrying even once no real eviction is happening at all. Kept on this seam — not folded into
 /// `tex.rs` — because that cache must stay ignorant of app-level metrics; the bool crossing it is
-/// the minimal signal [`card_motion_metrics`](plx_ui::card_motion_metrics) needs.
+/// the minimal signal the residency read-out needs.
 static RESIDENCY_REFUSED: AtomicU64 = AtomicU64::new(0);
 
 /// The interval throttle's clock, and the `(lost, rearmed, refused)` triple the LAST emitted line
@@ -899,17 +899,10 @@ fn lookup(srv: ServerId, key_s: &str, touch: Touch) -> (Hit, Warm) {
                 }
                 if decline {
                     plx_ui::card_motion::deferred();
-                    #[cfg(feature = "devtriggers")]
-                    plx_ui::card_motion_metrics::refused(plx_ui::card_motion_metrics::Refused::Evicted);
                     // The same deferral the cooldown just made, for the same reason: the slot
                     // stays EVICTED and the first draw at a settled speed re-arms it as usual.
                     trace::outcome("declined_evicted");
                     return (None, Warm::Known);
-                }
-                #[cfg(feature = "devtriggers")]
-                {
-                    plx_ui::card_motion_metrics::request();
-                    plx_ui::card_motion_metrics::rearmed();
                 }
                 g.slots[i].state = P_WANT;
                 g.slots[i].evict_wake_sent = false;
@@ -977,8 +970,6 @@ fn lookup(srv: ServerId, key_s: &str, touch: Touch) -> (Hit, Warm) {
     // draw first) bound.
     if decline {
         plx_ui::card_motion::deferred();
-        #[cfg(feature = "devtriggers")]
-        plx_ui::card_motion_metrics::refused(plx_ui::card_motion_metrics::Refused::New);
         trace::outcome("declined_new");
         return (None, Warm::Full);
     }
@@ -1043,8 +1034,6 @@ fn lookup(srv: ServerId, key_s: &str, touch: Touch) -> (Hit, Warm) {
     if old_px != 0 {
         img::img_free(old_px as *mut c_uchar);
     }
-    #[cfg(feature = "devtriggers")]
-    plx_ui::card_motion_metrics::request();
     CV.notify_one();
     (None, Warm::Claimed)
 }
@@ -1162,8 +1151,6 @@ impl tex::Source for PosterSource {
                 RESIDENCY_REFUSED.fetch_add(1, Ordering::Relaxed);
             } else {
                 RESIDENCY_LOST.fetch_add(1, Ordering::Relaxed);
-                #[cfg(feature = "devtriggers")]
-                plx_ui::card_motion_metrics::evicted();
             }
             log_residency();
         }
@@ -1302,8 +1289,6 @@ impl Uploader for GfxUploader {
     fn upload(&mut self, d: &Decoded) -> Tex {
         let id = img::img_upload_rgba(d.rgba.as_ptr(), d.w as c_int, d.h as c_int);
         UP_CT.fetch_add(1, Ordering::Relaxed);
-        #[cfg(feature = "devtriggers")]
-        plx_ui::card_motion_metrics::upload();
         UP_PX.fetch_add((d.w as u64) * (d.h as u64), Ordering::Relaxed);
         Tex {
             id,

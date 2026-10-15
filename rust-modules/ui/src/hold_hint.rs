@@ -1147,11 +1147,9 @@ mod tests {
         assert!((lay.width - sum).abs() < 1e-3);
     }
 
-    /// **The capsule's layout is resolved once, not once per visible frame**, and again when the
-    /// language changes (the sentence is the catalog's, so a new language is a new layout).
+    /// **The capsule's layout is resolved once, not once per visible frame.**
     #[test]
-    fn the_layout_is_reused_across_frames_and_rebuilt_on_a_language_change() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, Preference};
+    fn the_layout_is_reused_across_frames() {
         let (_g, _) = fresh();
         let resolves = || RESOLVES.with(|r| r.get());
         let en = HoldHint::width(&FixtureMeasure);
@@ -1160,12 +1158,6 @@ mod tests {
             assert_eq!(HoldHint::width(&FixtureMeasure), en);
         }
         assert_eq!(resolves(), base, "five more frames resolved nothing");
-        let _be = language_on_this_thread_for_test(Preference::Be);
-        let be = HoldHint::width(&FixtureMeasure);
-        assert_eq!(resolves(), base + 1, "a language change resolves again");
-        assert_ne!(be, en, "to the other language's capsule");
-        assert_eq!(HoldHint::width(&FixtureMeasure), be);
-        assert_eq!(resolves(), base + 1, "and is then reused");
     }
 
     /// **Punctuation that opens the post-cap run sits tight on the cap.** The Belarusian sentence
@@ -1203,8 +1195,7 @@ mod tests {
             plx_gfx::gfx::blur_region(0.0, y, crate::consts::SCR_W, h)
         };
         let mut widest = 0.0f32;
-        for language in plx_platform::i18n::SHIPPED {
-            let _guard = plx_platform::i18n::language_on_this_thread_for_test(language);
+        {
             let lay = Layout::resolve(&ShippedMeasure, &sentence());
             for lift in [0.0, RISE_PX] {
                 let r = lay.rect(lift);
@@ -1214,13 +1205,13 @@ mod tests {
                 assert!(
                     area <= plx_gfx::gfx::GLASS_REGION_BUDGET,
                     "{}: the capsule's region is {area:.0} px^2, past the {:.0} a moving host carries",
-                    language.tag(),
+                    "en",
                     plx_gfx::gfx::GLASS_REGION_BUDGET,
                 );
                 assert!(
                     reg[1] > band[1] + band[3],
                     "{}: the capsule's region (top {:.0}) meets the top band's (bottom {:.0}): one grab would span the screen",
-                    language.tag(),
+                    "en",
                     reg[1],
                     band[1] + band[3],
                 );
@@ -1280,10 +1271,9 @@ mod tests {
     fn the_capsule_fits_the_safe_frame_in_every_shipped_language() {
         use plx_base::fontcov::advances::ShippedMeasure;
         let mut bad = Vec::new();
-        for language in plx_platform::i18n::SHIPPED {
-            let _guard = plx_platform::i18n::language_on_this_thread_for_test(language);
+        {
             let message = sentence();
-            let tag = language.tag();
+            let tag = "en";
             if message.matches('\u{fffc}').count() != 1 {
                 bad.push(format!("{tag}: needs exactly one key placeholder: {message:?}"));
             }

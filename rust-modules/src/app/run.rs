@@ -65,7 +65,6 @@ pub(crate) unsafe fn run(app: &mut App) {
         let mut fr = Frame::begin();
         let fr = &mut fr;
         app.instr.mark(plx_base::diag::heartbeat::Phase::Top);
-        plx_platform::tv::window::pump_bus();
         ingest(app, fr);
         app.instr.mark(plx_base::diag::heartbeat::Phase::Ingest); // ingest
 
@@ -111,9 +110,7 @@ pub(crate) unsafe fn run(app: &mut App) {
         app.instr.mark(plx_base::diag::heartbeat::Phase::NavCommit); // navcommit
         update(fr);
         app.instr.mark(plx_base::diag::heartbeat::Phase::TickDrain); // tick_drain
-        plx_platform::tv::window::frame_probe_prepare_begin();
         prepare_window(app, fr);
-        plx_platform::tv::window::frame_probe_prepare_end();
         present_and_swap(app, fr, wslg_frame_budget);
         if fr.present { watchdog.presented(); }
         report(app, fr);
@@ -286,15 +283,6 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
             plx_base::diag::heartbeat::now_us,
         );
     }
-    // EXPERIMENT (`/tmp/pitv-opaque`): one `static` read and a return when the trigger
-    // is absent. Edge-triggered — see `system.rs`.
-    //
-    // Called on EVERY frame, from the BIT rather than from the route. The false edge after an
-    // unbind may land on a frame that would otherwise not present (spec §3.3 step 9), and
-    // there is nothing else in the loop that would carry it: a `return` above, or a term that
-    // only ran on player frames, would leave the compositor believing our surface is still
-    // opaque with an ordinary UI on it.
-    plx_platform::tv::window::opaque_route(app.player.video_plane_bound);
     app.instr.mark(plx_base::diag::heartbeat::Phase::Prepare); // prepare
     // `worstprep=`: the prepare phase is timed on EVERY iteration, presented or not — a
     // settled screen must never run untimed work at the loop rate (spec §8.3).
@@ -302,28 +290,6 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
     // Hoisted: the frame-drop detector reads these after the gate. Seeded to the pump
     // stamp so a skipped frame reports zero draw/cap/swap rather than a stale delta.
     app.instr.seed_present_phases();
-}
-
-/// **The `Rig`-delegated privileged primitives** (spec §15.2, D4). `Bridge`'s `Rig` impl
-/// (`app/bridge.rs`) cannot itself move here: a trait's implementation for a type is one
-/// syntactic unit, and that `impl Rig<AppHost> for Bridge` block carries two dozen other methods
-/// beside these three — so this is the "or just its three privileged methods" half of the D4
-/// move. `Bridge::opaque_route`/`Bridge::clear_opaque_region` call these instead of
-/// `plx_platform::tv::window::` directly, which is what keeps the OS-facing text — the thing the `frame`
-/// gate greps for — in this ONE file rather than split across the loop and the bridge. Each is a
-/// pure pass-through: the loop's own per-frame call above (`plx_platform::tv::window::opaque_route`, from
-/// `fr`) and the dispatcher's `Rig` hook (from `Bridge`'s own copy of the same bit) are two
-/// independent callers of one primitive, not two implementations of it. `ls2_pump` needs no
-/// twin here — `Bridge::ls2_pump` is or stays a no-op, since the dispatcher does not yet run a
-/// phase this early in the frame.
-pub(crate) fn rig_opaque_route(video_plane_bound: bool) {
-    plx_platform::tv::window::opaque_route(video_plane_bound);
-}
-
-/// See [`rig_opaque_route`]. The `if self.video_plane` guard stays on `Bridge`'s side — this is
-/// the OS call alone, exactly what `plx_platform::tv::window::clear_opaque_region` was before the move.
-pub(crate) fn rig_clear_opaque_region() {
-    plx_platform::tv::window::clear_opaque_region();
 }
 
 /// One idle iteration's font-warming slice: a key pressed during it waits at most this long more
@@ -361,24 +327,14 @@ unsafe fn present_and_swap(
             #[cfg(feature = "threadcheck")]
             let _present_scope = plx_base::task::watchdog::present_scope();
             plx_base::surface::present_supersampled();
-            // dev (`/tmp/pitv-framecb`): this frame's compositor callback, requested before
-            // the swap that commits it. One latched bool unarmed.
-            plx_platform::tv::window::frame_probe_request();
             SDL_GL_SwapWindow(app.win);
         }
         app.window_activity.presented();
-        // One increment, then nothing: re-ask EGL for the back buffer's AGE after real
-        // presents have happened. The boot reading is 0 by construction. See `egl.rs`.
-        plx_gfx::egl::late_probe();
         #[cfg(feature = "devtools")]
         {
             app.buffer_flip_count = (app.buffer_flip_count + 1) % 60;
         }
         app.instr.mark(plx_base::diag::heartbeat::Phase::Swap); // swap
-        // Inside the gate: `frame_end` is the end of a DRAWN frame. Counting frames the
-        // idle gate skipped would pace the profiler's once-per-N-frames log off frames
-        // that ran no phases at all.
-        plx_ui::profile::frame_end();
         plx_gfx::overdraw::frame_end();
         // Same reason, same gate: the blur's region accounting is per DRAWN frame. It rolls
         // "what every glass surface asked for this frame" into the region the next frame's
@@ -396,8 +352,6 @@ unsafe fn present_and_swap(
         // The poster-gate scenes' frame counter, at the same post-swap seam as the present count
         // above. It was called from inside `note_present`; `plx_machine::idle` is the machine layer and
         // no longer names `ui`'s metrics.
-        #[cfg(feature = "devtriggers")]
-        plx_ui::card_motion_metrics::presented(fr.now);
         if let Some(budget) = wslg_frame_budget {
             budget.finish();
         }
@@ -964,11 +918,9 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
         if let Some(bound) = plx_media::player::observe_video_plane(&mut app.player, &mut app.adapters.player) {
             // One edge, three gates. `set_video_plane_bound` has already told the LIVE one
             // (`plx_machine::idle`); these are the two §4.4 machines — the one `App` owns and the
-            // dispatcher's, which is what answers `Rig::opaque_route` at step 9 — plus the rig's
-            // own copy for the draw-entry call. `PresentEvent::VideoPlane` has no other source.
+            // dispatcher's. `PresentEvent::VideoPlane` has no other source.
             app.present.note(plx_machine::present::PresentEvent::VideoPlane(bound));
             app.pages.present.note(plx_machine::present::PresentEvent::VideoPlane(bound));
-            app.bridge.publish_video_plane(bound);
         }
         // end-of-stream: the pipeline drained at the credits → leave the player (back to the
         // folder it was launched from) instead of freezing on the last frame.
@@ -1081,17 +1033,6 @@ pub(crate) fn update(fr: &Frame) {
 pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32) {
     #[cfg(feature = "threadcheck")]
     let _draw_scope = plx_base::task::watchdog::draw_scope();
-            // EXPERIMENT (`/tmp/pitv-egldamage`), no-op without the trigger. FIRST, before
-            // any GL command of this frame: `EGL_KHR_partial_update` only permits a damage
-            // region to be declared before rendering begins. See `egl.rs`.
-            plx_gfx::egl::frame_damage();
-            // dev: the backdrop-glass LOAD DIAL and the blurred-transition prototype
-            // (`/tmp/pitv-glassload`, `/tmp/pitv-navblur`). Both are no-ops when
-            // their trigger is absent. HERE and not below the gate, because the dial's cadence
-            // is counted in PRESENTS — a loop iteration the gate skipped drew no glass — and
-            // because a step rollover invalidates the snapshot, which must precede every glass
-            // surface drawn by the synthetic dial.
-            app.glass.prepare_dial(fr.now);
             // The authored canvas, scaled UNIFORMLY into the drawable and centred. The shaders
             // divide every coordinate by `u_screen` (which stays 1920x1080), so this one call
             // is the entire logical->physical mapping — nothing else in the renderer knows the
@@ -1112,26 +1053,13 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
             // the last screen that could have left a clip armed. See `ui::guard` for what this does
             // NOT cover (worker-thread panics, aborts, half-mutated state). Everything inside is a
             // read of loop state, so the closure only borrows; nothing is moved out of the loop.
-            // An empty selected phase provides the profiler floor for this build; it
-            // deliberately issues no GL commands between its two boundaries.
-            plx_ui::profile::phase("profile.empty", || {});
-            plx_ui::profile::phase("frame.ui", || {
+            {
                 plx_ui::guard(|| {
                     if fr.player {
-                        // `plx_platform::tv::window::clear_opaque_region()` used to be called here. It is
-                        // §3.3 step 10's privileged call and belongs at the container library's
-                        // OWN draw entry, which `app.pages.draw` below reaches in this same frame:
-                        // `Bridge::clear_opaque_region` performs it, keyed on the plane's bit
-                        // rather than on this route test. Calling it in both places would send the
-                        // same wayland request twice per frame for the whole of a playback.
                         glClearColor(0.0, 0.0, 0.0, 0.0);
                         // The frame's first framebuffer-0 command, where this driver parks the
                         // wait for a free back buffer: spanned like every other route's `clear`.
-                        // dev (`/tmp/pitv-framecb`): the frame thread's cost over the wait
-                        // and, from the acquired buffer to the swap, over the commit phase.
-                        plx_platform::tv::window::frame_probe_waiting();
                         plx_base::diag::spans::span("clear", || glClear(GL_COLOR_BUFFER_BIT));
-                        plx_platform::tv::window::frame_probe_acquired();
                         // ONE resolve of which surface owns the "pipeline is working" signal,
                         // handed to both the transport and the read-out, so the centred read-out
                         // and the transport's inline spinner can never both light in the same
@@ -1180,9 +1108,6 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                         // (`RenderStrategy::VideoPlane`).
                         app.pages.draw(&mut app.bridge, true);
                     } else {
-                        // dev (`/tmp/pitv-framecb`): the page's first clear is this route's
-                        // first framebuffer command, so `gfx` brackets the back-buffer wait there.
-                        plx_gfx::gfx::arm_clear_probe();
                         // Open the shared popover frame FIRST: it takes this frame's page damage
                         // and decides whether the frozen-host snapshot still describes the page. Route-agnostic by construction —
                         // see `ui::popover::host::begin_frame`.
@@ -1236,20 +1161,13 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                         }
                         // An opaque route ground replaces the page entirely.
                         if plan != super::bridge::PagePlan::SurfacesOnly {
-                            plx_ui::profile::phase("main.ui", || page(Z::ALL));
+                            (page(Z::ALL));
                         }
                         // Owned pages already dispatched their surfaces in the visible walk.
                         if plan != super::bridge::PagePlan::Owned {
                             app.pages.draw_with_glass_below(&mut app.bridge, &mut app.glass, false, Z::ALL);
                         }
-                        // dev: the blurred route transition, then the load dial's glass surfaces.
-                        // LAST on the non-player path, so the snapshot either takes is of the
-                        // COMPLETE page — which is the honest source for a surface that sits on
-                        // top of everything, and the one thing the tab track (drawn inside the
-                        // page) cannot have.
                         drop(_visible_walk);
-                        app.glass.draw_nav_blur();
-                        app.glass.draw_dial();
                         // The on-screen counter, off the player route (chrome over video). It draws
                         // the last completed `fps=` window — frames actually swapped, not loop
                         // iterations. It necessarily HOLDS its last painted value on a settled
@@ -1283,7 +1201,7 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                     #[cfg(feature = "threadcheck")]
                     plx_ui::runtime_warning::draw(false);
                 });
-            });
+            };
     (vx, vy, vw, vh)
 }
 
@@ -1300,8 +1218,6 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
         app.last_route_reported = fr.rn;
     }
     // `pitv-focusx`: the card read-out belongs to the frame just sampled.
-    #[cfg(feature = "devtriggers")]
-    plx_ui::card_probe::clear();
         // `coldopen screen=<name> ms=<n> prepared=<bool>` — one line per screen MOUNT, on every
         // build, no trigger (spec §8.4). The dispatcher owns both ends of the measurement (the
         // mount at nav commit, the first prepared+drawn frame); this drains what it closed.
@@ -1337,10 +1253,8 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
             let spans = plx_base::diag::spans::take();
             for line in app.instr.frame_drop_lines(&|| {
                 format!(
-                    "route={rn} dip={} load={} {spans}{}",
+                    "route={rn} dip={} {spans}",
                     app.pages.dip_word(),
-                    plx_ui::glassload::step_index(),
-                    plx_platform::tv::window::frame_probe_fields()
                 )
             }) {
                 log(&line);
@@ -1435,21 +1349,6 @@ pub(crate) unsafe fn heartbeat(app: &mut App, fr: &mut Frame) {
             {
                 app.fps_shown = pres.min(i32::MAX as u32) as i32;
             }
-            // dev: which LOAD-DIAL step these frames belong to, the blur refreshes
-            // actually TAKEN in that second. Absent unless the dial is armed, and placed
-            // after `fps=` / before
-            // `worstframe=` so both harness regexes are untouched. `snap=` is the one
-            // thing a cadence claim cannot be trusted without: it is the rate that RAN,
-            // not the rate that was requested.
-            let ld = if plx_ui::glassload::armed() {
-                format!(
-                    " load={} snap={}",
-                    plx_ui::glassload::step_index(),
-                    plx_gfx::gfx::take_blur_snapshots()
-                )
-            } else {
-                String::new()
-            };
             // `worstframe=` stays LAST of the graded fields (both harness regexes anchor on it);
             // `worstprep=` follows it, ungated by present. Both are empty unarmed. After them
             // ride the frame plan's four (spec §8.4), which print in every build because none of
@@ -1477,7 +1376,7 @@ pub(crate) unsafe fn heartbeat(app: &mut App, fr: &mut Frame) {
                 None,
             );
             log(&format!(
-                "loop={} route={rn}{ov}{pos}{vp} fps={pres}{ld}{tail}{SIM_TAG}",
+                "loop={} route={rn}{ov}{pos}{vp} fps={pres}{tail}{SIM_TAG}",
                 app.loop_shown
             ));
         }

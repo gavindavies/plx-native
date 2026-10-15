@@ -27,6 +27,7 @@ pub mod gst_sink; // the Linux build's player: the fed AUs decoded by the system
 mod pump;
 mod shared;
 pub mod sidecar;
+pub mod sink; // the verbs the engine speaks to the decoder
 pub mod threads;
 pub mod video_geometry;
 pub mod vp9_hdr; // HDR10 for a VP9 stream: the container's PQ tag, written into the sourceInfo envelope ACB is sent
@@ -48,11 +49,11 @@ use shared::{
 /// hostsim test binary reads the host sink directly, so it needs no port. Everything in `player/`
 /// reaches the seam as `sink().<verb>(mt, ..)`, and nothing branches on which platform it is.
 #[cfg(not(any(test, feature = "test-support")))]
-fn sink() -> &'static dyn plx_platform::tv::sink::VideoSink {
-    plx_platform::tv::sink::installed()
+fn sink() -> &'static dyn sink::VideoSink {
+    &gst_sink::GstSink
 }
 #[cfg(any(test, feature = "test-support"))]
-fn sink() -> &'static dyn plx_platform::tv::sink::VideoSink {
+fn sink() -> &'static dyn sink::VideoSink {
     &ffi_host::HostSink
 }
 
@@ -190,13 +191,6 @@ pub fn audio_switching() -> bool {
     }
 }
 
-/// The read-out beside the spinner for `st`: [`PlaybackState::caption`], except that a load which
-/// is an audio-track switch says so ("Switching audio…") instead of "Buffering…". Any other
-/// rebuild (a seek's reload, a quality or subtitle change) keeps the plain caption.
-pub fn busy_caption(st: PlaybackState) -> &'static std::ffi::CStr {
-    busy_caption_with(st, audio_switching())
-}
-
 /// [`busy_caption`] with the audio-switch fact given — the pure choice, host-testable.
 pub fn busy_caption_with(st: PlaybackState, audio_switch: bool) -> &'static std::ffi::CStr {
     if audio_switch && st == PlaybackState::Buffering {
@@ -206,12 +200,6 @@ pub fn busy_caption_with(st: PlaybackState, audio_switch: bool) -> &'static std:
     }
 }
 
-/// Test-only: stand the audio-switch state up (`0` none, `1` picked, `2` reloading).
-#[cfg(any(test, feature = "test-support"))]
-pub fn set_audio_switch_for_test(state: u8) {
-    SHARED.audio_pick_ms.store(i64::from(vclock_ms()), Relaxed);
-    SHARED.audio_switch.store(state, Relaxed);
-}
 pub fn pause(pa: &mut adapter::PlayerAdapter) -> bool {
     match SHARED.prepare_hls_user_pause() {
         Some(HlsUserPause::AlreadyHeld) => {
@@ -714,10 +702,6 @@ fn failtest_arm() -> Option<ErrorShape> {
 pub fn error_caption(ps: &crate::playback::PlaybackSession) -> &'static std::ffi::CStr {
     error_now(ps).caption
 }
-/// The same non-empty answer for the diagnostics panel's verdict line.
-pub fn error_reason(ps: &crate::playback::PlaybackSession) -> &'static str {
-    error_now(ps).panel
-}
 /// Test-only: drive the derived playback state, returning the previous raw value to restore.
 ///
 /// `pb_state` is the pump's field and `shared` is a private module, so a host test that needs the
@@ -748,7 +732,7 @@ pub use engine::aq_caps;
 /// value, deliberately, so the plant grading the controller is not the controller agreeing with
 /// itself.
 pub use engine::feed_leads_ms;
-pub use plx_platform::tv::sink::{VP_ACB, VP_EXPORTED, VP_NONE};
+pub use sink::{VP_ACB, VP_EXPORTED, VP_NONE};
 /// The simulator's clock-sink stop; the television's pipeline has no such control.
 pub use ffi_host::stop_clock_at as stop_sim_clock_at;
 
@@ -791,11 +775,6 @@ pub fn stage_native_audio(ps: &mut crate::playback::PlaybackSession, audio_idx: 
     SHARED.desired_audio_idx.store(audio_idx, Relaxed);
     SHARED.sub_cues.lock().unwrap().clear();
 }
-/// reset to the default (best) audio stream — called on a new item so a prior track choice
-/// does not leak across items (desired_audio_idx persists across seeks, not across items).
-pub fn reset_audio_track() {
-    SHARED.desired_audio_idx.store(-1, Relaxed);
-}
 /// reset the subtitle selection to Off — called on a NEW item. Like desired_audio_idx, the
 /// subtitle selection PERSISTS across seeks/reloads (it is no longer cleared in reset_session),
 /// so a reload-based seek (transcode, or the direct-play reload fallback) keeps the chosen sub
@@ -805,23 +784,10 @@ pub fn reset_subtitle() {
     sidecar::reset(); // …and the previous item's external subtitle file with it
     SUBTITLE_OFFSET_MS.store(0, Relaxed); // …and the timing offset tuned against that file
 }
-/// select the audio stream index the demuxer feeds at the FIRST Load (before start_bufferfeed) —
-/// used by the decision to direct-play a non-default direct-playable track (e.g. an AC3 track on
-/// a TrueHD-default item). -1 = default/best.
-pub fn set_audio_track(idx: i32) {
-    SHARED.desired_audio_idx.store(idx, Relaxed);
-}
 
 // Dev-only: used only by `route::decision`'s `#[cfg(feature = "devtriggers")]` tests (a store
 // build's `CredentialPolicy::HttpsOnly` refuses those tests' plaintext loopback PMS fixtures; see
 // the comment on that module's first gated test).
-
-/// Route-policy tests share the process-wide player mailbox even though no Engine pumps it.
-/// Empty it between cases so one test's requested handoff cannot become the next test's input.
-#[cfg(any(test, feature = "test-support"))]
-pub fn reset_route_requests_for_test(ps: &crate::playback::PlaybackSession) {
-    crate::playback::reset_player_control_for_test(ps);
-}
 
 // ---- client-rendered subtitles (direct-play only; a transcode carries no subs) ----
 /// selected subtitle track index (-1 = off); the demuxer reads this per block.
@@ -964,22 +930,6 @@ pub fn set_subtitle_tone(tone: plx_data::settings::SubtitleTone) {
 pub fn set_subtitle_offset(offset_ms: i64) {
     SUBTITLE_OFFSET_MS.store(clamp_subtitle_offset_ms(offset_ms), Relaxed);
     plx_machine::idle::invalidate();
-}
-
-/// Carry a retry's offset through [`reset_subtitle`] (`route::reset_track_selection`). The
-/// subtitle it was tuned against is re-selected only when the retry lands — a sidecar, whose range
-/// allows an advance, among them — so this holds it to the WIDEST range, and the landing narrows it
-/// with [`reclamp_subtitle_offset`].
-pub fn restore_subtitle_offset(offset_ms: i64) {
-    let clamped = offset_ms.clamp(SUBTITLE_OFFSET_EARLIEST_SIDECAR_MS, SUBTITLE_OFFSET_LATEST_MS);
-    SUBTITLE_OFFSET_MS.store(clamped as i32, Relaxed);
-}
-
-/// Hold the offset to the range of the subtitle now selected ([`subtitle_offset_range_ms`]) —
-/// called by a landing, after it has re-selected the subtitle, so an advance carried by a retry
-/// never outlives the sidecar that allowed it.
-pub fn reclamp_subtitle_offset() {
-    SUBTITLE_OFFSET_MS.store(clamp_subtitle_offset_ms(subtitle_offset_ms()), Relaxed);
 }
 
 /// The text store's hard cap, a runaway guard that an ordinary file never reaches. The store
@@ -1346,27 +1296,6 @@ pub extern "C" fn sf_on_event(epoch: c_uint, ty: c_int, num: i64, s: *const c_ch
         SHARED.with_native_session(epoch, class, num, || sf_on_event_inner(ty, num, s));
     }));
 }
-/// The two libpf frame counters a callback type can name, once the webOS 4 vs 5+ numbering
-/// shift is taken out.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SinkCounter {
-    Dropped,
-    Displayed,
-}
-
-/// PURE: which sink counter a raw callback type is, on a firmware of this major. Decompiled from
-/// libpf on webOS 4.10 (`CustomPipeline::updateDroppedFrame` → 0x2e = 46,
-/// `updateDisplayedFrame` → 0x2f = 47); every type above 0x1c is two higher on webOS 5+
-/// (Kodi's `if (webOSVersion < 5 && type > ENDOFSTREAM) type += 2`), so 48/49 there. An unknown
-/// major (0, os_info unreadable) is read as the numbering this project has actually measured.
-fn sink_counter_kind(ty: c_int, major: u32) -> Option<SinkCounter> {
-    let normalised = if major == 0 || major < 5 { ty + 2 } else { ty };
-    match normalised {
-        48 => Some(SinkCounter::Dropped),
-        49 => Some(SinkCounter::Displayed),
-        _ => None,
-    }
-}
 
 fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
     if ty != 0 {
@@ -1397,17 +1326,6 @@ fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
                 .collect()
         };
         log(&format!("smp_cb type={ty} num={num} str={preview}"));
-        // The video sink's own frame counters, forwarded by libpf every 200 ms (see the payload
-        // note in engine.rs: `streamQualityInfo` / `streamQualityInfoNonFlushable`). Logged under
-        // a firmware-independent name because these two sit ABOVE the 0x1c point where the
-        // callback numbering shifts by two between webOS 4 and 5+ (`docs/webos5-port.md` §5):
-        // 46/47 on this set are 48/49 on a webOS 5+ set. The harness reads THIS line, never
-        // the raw type.
-        match sink_counter_kind(ty, plx_platform::tv::device::info().major) {
-            Some(SinkCounter::Displayed) => log(&format!("sink: displayed={num} (type={ty})")),
-            Some(SinkCounter::Dropped) => log(&format!("sink: dropped={num} (type={ty})")),
-            None => {}
-        }
         // **A refusal before the first picture is a VERDICT, not a statistic.** Until 2026-09-03
         // the latch above was all this arm did, and `docs/webos10-lab-report.md` §3.5 records the
         // result on a set that refused the Load asynchronously (`Load()` returned ok=1, then
@@ -1718,19 +1636,6 @@ mod tests {
         assert_eq!(SHARED.dg_cb_err_num.load(std::sync::atomic::Ordering::Acquire), 0);
         SHARED.retire_native_session(epoch);
         SHARED.reset_session();
-    }
-
-    #[test]
-    fn the_sink_counters_are_read_through_the_numbering_shift() {
-        use SinkCounter::{Displayed, Dropped};
-        assert_eq!(sink_counter_kind(46, 4), Some(Dropped));
-        assert_eq!(sink_counter_kind(47, 4), Some(Displayed));
-        assert_eq!(sink_counter_kind(47, 0), Some(Displayed), "unknown major reads as measured");
-        assert_eq!(sink_counter_kind(48, 5), Some(Dropped));
-        assert_eq!(sink_counter_kind(49, 10), Some(Displayed));
-        assert_eq!(sink_counter_kind(47, 10), None, "47 is something else on webOS 5+");
-        assert_eq!(sink_counter_kind(49, 4), None);
-        assert_eq!(sink_counter_kind(18, 4), None);
     }
 
     #[test]

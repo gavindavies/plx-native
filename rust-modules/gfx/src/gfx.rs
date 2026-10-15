@@ -17,7 +17,6 @@ pub mod backdrop;
 mod geom;
 /// Draw-phase instrumentation (`phase`, the GPU timer / HWCNT / CPU profilers) and the LOAD DIAL's
 /// published state.
-pub mod profile;
 /// The design tokens the renderer draws with: the app ground and scrim ink, the card shading
 /// constants its image shader mirrors, and the type-size ladder.
 pub mod tokens;
@@ -247,8 +246,6 @@ extern "C" {
     fn glClear(mask: c_uint);
     #[cfg(feature = "devtriggers")]
     fn glFinish();
-    #[cfg(feature = "devtriggers")]
-    fn glFlush();
     fn glGenTextures(n: c_int, textures: *mut c_uint);
     // `#[allow(dead_code)]` — the same shape as `app/mod.rs`'s SDL text-input externs: the sole
     // caller (`delete_tex`, below) compiles its real call out under `cfg(test)`, so this
@@ -418,15 +415,6 @@ pub fn frame_clear(r: f32, g: f32, b: f32) {
     frame_clear_alpha(r, g, b, 1.0);
 }
 
-/// Transparent black. The compositor blends this surface over the hardware video plane, so alpha 0
-/// is a hole, not a black fill. The player route clears this way from the loop because that page
-/// never paints a ground. A page that keeps its own chrome (the detail trailer preview) has to
-/// punch the same hole itself: [`frame_clear`] here is a full-screen sheet over the plane, which
-/// is sound with no picture.
-pub fn frame_clear_through() {
-    frame_clear_alpha(0.0, 0.0, 0.0, 0.0);
-}
-
 thread_local! {
     static SUPPRESS_FRAME_CLEAR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -462,51 +450,10 @@ fn frame_clear_alpha(r: f32, g: f32, b: f32, a: f32) {
     if !frame_clear_allowed() {
         return;
     }
-    probed_clear(|| {
-        plx_base::diag::spans::span("clear", || unsafe {
-            glClearColor(r, g, b, a);
-            glClear(GL_COLOR_BUFFER_BIT);
-        })
+    plx_base::diag::spans::span("clear", || unsafe {
+        glClearColor(r, g, b, a);
+        glClear(GL_COLOR_BUFFER_BIT);
     });
-}
-
-/// Run `clear`, bracketed by the installed probe when [`arm_clear_probe`] offered it this frame.
-fn probed_clear(clear: impl FnOnce()) {
-    let probe = CLEAR_PROBE.with(|p| p.armed.replace(false).then(|| p.hooks.get())).flatten();
-    if let Some((waiting, _)) = probe {
-        waiting();
-    }
-    clear();
-    if let Some((_, acquired)) = probe {
-        acquired();
-    }
-}
-
-/// The frame's first framebuffer-0 command is where this driver parks the wait for a free back
-/// buffer, and on every route but the player it is the page's [`frame_clear`]. The dev frame
-/// probe (`/tmp/pitv-framecb`) prices that wait, but its clock is `platform`'s and this
-/// crate does not depend on `platform`, so the application hands the two edges down once at boot:
-/// `waiting` runs just before the clear, `acquired` just after it returns.
-pub fn install_clear_probe(waiting: fn(), acquired: fn()) {
-    CLEAR_PROBE.with(|p| p.hooks.set(Some((waiting, acquired))));
-}
-
-/// Offer the installed probe the next clear, and only the next one: the first clear that actually
-/// reaches the framebuffer after this call brackets the wait, later clears of the same frame (a
-/// popover's, a second pass) do not, so one frame yields one waiting/acquired pair. The loop calls
-/// this once per non-player frame; the player clears from the loop and brackets that itself.
-pub fn arm_clear_probe() {
-    CLEAR_PROBE.with(|p| p.armed.set(p.hooks.get().is_some()));
-}
-
-#[derive(Default)]
-struct ClearProbe {
-    hooks: std::cell::Cell<Option<(fn(), fn())>>,
-    armed: std::cell::Cell<bool>,
-}
-
-thread_local! {
-    static CLEAR_PROBE: ClearProbe = ClearProbe::default();
 }
 
 /// Block until the GPU has finished all queued commands. Used as a completion boundary by the draw
@@ -516,16 +463,6 @@ thread_local! {
 #[cfg(feature = "devtriggers")]
 pub fn gl_finish() {
     unsafe { glFinish() }
-}
-
-/// Submit everything queued without waiting for it. Unlike [`gl_finish`] this does not stall the
-/// CPU, which is what lets the asynchronous timer path use it: on a tile-based Midgard GPU the
-/// fragment work for a render target is only issued when that target's pass is flushed, so a
-/// `GL_TIME_ELAPSED` interval closed before the flush contains no submitted job and reports a
-/// cost of essentially zero. Profiler-only, for the same reason `gl_finish` is.
-#[cfg(feature = "devtriggers")]
-pub fn gl_flush() {
-    unsafe { glFlush() }
 }
 
 static mut PROG: c_uint = 0;
@@ -1512,14 +1449,6 @@ fn draw_ambient_impl(
     }
 }
 
-/// Can the wash carry an ink ramp ([`draw_ambient_inked`])? Only the dithered program has one; if
-/// it failed to link, the plain twin draws the wash and the caller keeps the ramp as its own layer.
-#[inline]
-pub fn wash_ink_ok() -> bool {
-    // SAFETY: written once at init on the render thread, read on the render thread.
-    unsafe { APROG != 0 }
-}
-
 /// [`draw_ambient`] with a vertical INK RAMP laid over the field in the same pass: `ink` (rgb) at an
 /// alpha running linearly from `inka[0]` at the rect's top edge to `inka[1]` at its bottom — the
 /// screen's atmospheric scrim, cut by the caller at its knees so each rect is one straight segment.
@@ -1962,15 +1891,6 @@ fn init_hero() {
     }
 }
 
-/// Is the hero-ground program usable? `false` means its link failed and the caller must draw the
-/// art and the scrims the way it always has.
-#[inline]
-pub fn hero_ground_ok() -> bool {
-    // Not `HPROG != 0`: the link has not been attempted until the first draw, so before that the
-    // honest answer is "nothing has refused it yet". A refusal latches through `HERO_TRIED`.
-    unsafe { HPROG != 0 || !HERO_TRIED }
-}
-
 /// Draw the hero ground: the art quad `(x,y,w,h)` with the atmospheric ramp and the corner wedge
 /// evaluated per fragment. `ramp` is `(y0, knee, alpha_at_knee, alpha_at_foot)` and `wedge` is
 /// `(peak, width, feather_top, feather_knee)`, both in authored pixels with the alphas already
@@ -2036,14 +1956,6 @@ pub fn draw_hero_ground(
         glUniform4f(HL_RECT, x, y, w, h);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
-}
-
-/// Can the wash carry its artwork in one pass? `false` means the caller draws [`draw_ambient`] and
-/// then the art as two layers — the same picture.
-#[inline]
-pub fn art_wash_ok() -> bool {
-    // SAFETY: written once at init on the render thread, read on the render thread.
-    unsafe { std::ptr::addr_of!(ART_WASH).read().is_some() }
 }
 
 /// **The wash with a photograph dissolved into it, in ONE opaque pass**: the four-corner field
@@ -2170,12 +2082,6 @@ pub mod tex_ledger {
         #[cfg(any(test, feature = "test-support"))]
         static MUTATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     }
-
-    /// Test-support: how many times a texture was specified or deleted on this thread, ever. A
-    /// test that must show "no texture work happened across this span" compares two readings; the
-    /// live set alone cannot (a delete paired with a re-specify leaves it unchanged).
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn mutations() -> u64 { MUTATIONS.with(|n| n.get()) }
 
     #[cfg(any(test, feature = "test-support"))]
     fn note_mutation() { MUTATIONS.with(|n| n.set(n.get().wrapping_add(1))); }
@@ -3249,40 +3155,6 @@ const _: () = assert!(
 /// as an exact 2x2 box — a real property, and a smaller one than what it costs: the alignment buys
 /// a marginally cleaner kernel, and structure at the scale of a letterform is the entire effect.
 const BLUR_TAPS: [f32; 2] = [0.35, 0.75];
-/// `/tmp/pitv-blurtaps=<a>,<b>` — those offsets, swept.
-///
-/// The taps are now the WHOLE of "how much structure survives" that anyone gets to tune — the
-/// source scale is pinned to the direct path's, see [`BLUR_REDUCTIONS`] — and until this existed
-/// neither half could be moved without a rebuild, so a ladder of blur weights cost one
-/// cross-compile and one deploy per rung. That is why these were inherited rather than chosen for
-/// as long as they were. Read once at boot, like every other sweep here.
-///
-/// Widening is asserted by the chain's own shape test, so a rung that narrows the second tap past
-/// the first is refused rather than silently reordered.
-#[cfg(feature = "devtriggers")]
-fn blur_taps() -> [f32; 2] {
-    static SEEN: std::sync::OnceLock<[f32; 2]> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let Some(v) = plx_base::devtrig::read("blurtaps") else {
-            return BLUR_TAPS;
-        };
-        let mut it = v.split(',').map(|t| t.trim().parse::<f32>());
-        match (it.next(), it.next()) {
-            (Some(Ok(a)), Some(Ok(b))) if a > 0.0 && b > a => {
-                plx_base::eventlog::log(&format!("glass: blur taps swept to {a},{b}"));
-                [a, b]
-            }
-            _ => {
-                plx_base::eventlog::log("glass: blurtaps ignored (want <a>,<b> with 0 < a < b)");
-                BLUR_TAPS
-            }
-        }
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn blur_taps() -> [f32; 2] {
-    BLUR_TAPS
-}
 /// The UP pass's tap offset, in texels of the target it writes.
 ///
 /// **This pass is what stops the result looking like enlarged pixels rather than like blur**, and
@@ -3473,11 +3345,6 @@ pub fn retain_backdrop(z: backdrop::Z) -> bool {
 /// schedules a capture, and a containment miss can take one no clock asked for.
 pub static BLUR_SNAPSHOTS: AtomicU32 = AtomicU32::new(0);
 
-/// Take and clear the snapshot count, for the once/sec heartbeat.
-pub fn take_blur_snapshots() -> u32 {
-    BLUR_SNAPSHOTS.swap(0, Ordering::Relaxed)
-}
-
 static mut BLURST: Option<BlurChain> = None;
 /// Latched off: no FBO, no program, or a failed copy. Callers draw no backdrop and keep their own
 /// ground — checked before every snapshot so a failure costs one log line, not a frame loop.
@@ -3538,49 +3405,6 @@ const STANDING_SHARP: f32 = 0.0;
 /// fill. Shedding it at the edge costs the interior nothing — the ramp is zero where the bevel
 /// meets the flat middle, so the density the labels were solved against is untouched.
 const STANDING_RIMCLEAR: f32 = 0.6;
-/// `/tmp/pitv-rimclear=<w>` — that shed, swept. `0` is the uniform scrim.
-#[cfg(feature = "devtriggers")]
-fn rimclear_sweep() -> Option<f32> {
-    static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("rimclear")?.trim().parse::<f32>().ok()?;
-        plx_base::eventlog::log(&format!("glass: rim scrim shed swept to {v}"));
-        Some(v.clamp(0.0, 1.0))
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn rimclear_sweep() -> Option<f32> {
-    None
-}
-/// `/tmp/pitv-tracksharp=<w>` — that weight, swept. `0` is the single-source material.
-#[cfg(feature = "devtriggers")]
-fn sharp_sweep() -> Option<f32> {
-    static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("tracksharp")?.trim().parse::<f32>().ok()?;
-        plx_base::eventlog::log(&format!("glass: rim sharp source swept to {v}"));
-        Some(v.clamp(0.0, 1.0))
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn sharp_sweep() -> Option<f32> {
-    None
-}
-/// `/tmp/pitv-paneldeep=<px>` — the panel's extra sample radius, swept. `0` is the bar's own
-/// single-fetch material.
-#[cfg(feature = "devtriggers")]
-fn deep_sweep() -> Option<f32> {
-    static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("paneldeep")?.trim().parse::<f32>().ok()?;
-        plx_base::eventlog::log(&format!("glass: panel deep-sample radius swept to {v}"));
-        Some(v.max(0.0))
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn deep_sweep() -> Option<f32> {
-    None
-}
 
 /// The lit chamfer's colour. A weight on the overlay ramp rather than a hue, per the theme rule —
 /// it is white light, and its ALPHA is the only thing tuned.
@@ -3727,7 +3551,7 @@ impl GlassRim {
     fn sharp(self) -> f32 {
         match self {
             Self::Bevelled => 0.0,
-            Self::Standing => sharp_sweep().unwrap_or(STANDING_SHARP),
+            Self::Standing => STANDING_SHARP,
         }
     }
 
@@ -3737,7 +3561,7 @@ impl GlassRim {
     fn rimclear(self) -> f32 {
         match self {
             Self::Bevelled => 0.0,
-            Self::Standing => rimclear_sweep().unwrap_or(STANDING_RIMCLEAR),
+            Self::Standing => STANDING_RIMCLEAR,
         }
     }
 
@@ -3746,65 +3570,11 @@ impl GlassRim {
             Self::Bevelled => (GLASS_BEVEL, GLASS_LENS, GLASS_SPEC),
             Self::Standing => (STANDING_BEVEL, STANDING_LENS, [0.0, 0.0, 1.0, 0.0]),
         };
-        match self {
-            Self::Standing => standing_sweep().unwrap_or(base),
-            Self::Bevelled => base,
-        }
+        base
     }
 }
 
-/// **`/tmp/pitv-tracklens=<bevel>,<lens>,<spec>[,<edge_a>,<shade>]` — the container, swept.**
-///
-/// [`GlassRim::Standing`] was for a while the one material parameter in this app decided by an
-/// argument rather than by looking at a ladder: a 38px lens in a 2px band is a smear, so the lens
-/// was set to zero and the chamfer collapsed onto the perimeter. That is right about 38 and says
-/// nothing about 8, and the thing the container has to do — read as a slab with thickness rather
-/// than as a rectangle of darker picture — is exactly what a lens does and what a drawn line
-/// cannot.
-///
-/// So this exists for the same reason `ui::widgets::tab_glass_stops`'s density override
-/// does: the values are a judgement about a picture, and a judgement about a picture is made by
-/// putting the ladder side by side. Absent, the returned params are byte-identical to the variant's
-/// own. Read once per process, so a simulator instance is one capture of one rung —
-/// `tools/glass-patterns.py --lens "off:2,0,0 b:12,12,0 c:12,24,0"` launches one per rung and
-/// drives them in lockstep over the same grounds, which is how 12/24 was picked — over
-/// `checker:96`, `hbars:64` and `edge`, the three grounds coarse enough to survive the blur.
-#[cfg(feature = "devtriggers")]
-fn swept() -> Option<(f32, f32, [f32; 4], Option<f32>, Option<f32>)> {
-    static SEEN: std::sync::OnceLock<Option<(f32, f32, [f32; 4], Option<f32>, Option<f32>)>> =
-        std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("tracklens")?;
-        let mut it = v.split(',').map(|t| t.trim().parse::<f32>().ok());
-        let (b, l, w) = (it.next()??, it.next()??, it.next()??);
-        // The chamfer's two weights are OPTIONAL: three fields is the geometry alone, five adds the
-        // lighting, and a rung that omits them must be byte-identical to one written before they
-        // existed — the earlier sheets are still the comparison.
-        let (edge_a, shade) = (it.next().flatten(), it.next().flatten());
-        // The bevel divides in the shader and bounds its early-out, so zero is a division by zero on
-        // every glass fragment in the frame — the same floor the variant itself keeps.
-        let out = (
-            b.max(1.0),
-            l.max(0.0),
-            [GLASS_SPEC[0], GLASS_SPEC[1], GLASS_SPEC[2], w.max(0.0)],
-            edge_a.map(|v| v.clamp(0.0, 1.0)),
-            shade.map(|v| v.clamp(0.0, 1.0)),
-        );
-        plx_base::eventlog::log(&format!(
-            "glass: track swept to bevel={} lens={} spec={} edge={:?} shade={:?}",
-            out.0, out.1, w, out.3, out.4
-        ));
-        Some(out)
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn swept() -> Option<(f32, f32, [f32; 4], Option<f32>, Option<f32>)> {
-    None
-}
 
-fn standing_sweep() -> Option<(f32, f32, [f32; 4])> {
-    swept().map(|(b, l, s, _, _)| (b, l, s))
-}
 
 /// The chamfer's LIGHTING, as the shader is given it: `(u_edge, u_light)`.
 ///
@@ -3819,16 +3589,7 @@ fn standing_sweep() -> Option<(f32, f32, [f32; 4])> {
 /// the bottom chamfer multiplying down to .247 from .345 over 12px. The lens is the part that
 /// earns its keep; this is the part that might just be weight.
 fn chamfer() -> ([f32; 4], [f32; 3]) {
-    let (mut edge, mut light) = (GLASS_EDGE, GLASS_LIGHT);
-    if let Some((_, _, _, a, shade)) = swept() {
-        if let Some(a) = a {
-            edge[3] = a;
-        }
-        if let Some(s) = shade {
-            light[2] = s;
-        }
-    }
-    (edge, light)
+    (GLASS_EDGE, GLASS_LIGHT)
 }
 
 static mut GPROG: c_uint = 0;
@@ -4263,8 +4024,7 @@ fn blur_lazy_init() -> bool {
 /// flips it took to get there, and the parity, the region and the valid flag fall out here.
 ///
 /// `passes_from_grab` counts the flipping passes since the chain's bottom-up ORIGIN — the window
-/// copy or the scene render, whichever this path used. `live_w`/`live_h` are the live area of the
-/// final target, for the profiler's read-out only.
+/// copy or the scene render, whichever this path used.
 ///
 /// The region is republished because [`blur_region_px_align`] aligns and clamps: the rect the draw
 /// maps out of has to be the ALIGNED one, or a panel's sampling window is off by up to three
@@ -4277,8 +4037,6 @@ fn blur_publish(
     rh: c_int,
     out: c_uint,
     passes_from_grab: usize,
-    live_w: c_int,
-    live_h: c_int,
 ) {
     unsafe {
         let Some(c) = (*std::ptr::addr_of_mut!(BLURST)).as_mut() else {
@@ -4292,9 +4050,6 @@ fn blur_publish(
             rw as f32 / sx,
             rh as f32 / sy,
         ];
-        profile::note_blur_config(
-            live, rx, ry, rw, rh, c.gw, c.gh, c.mw, c.mh, live_w, live_h,
-        );
         c.reg = live;
         c.rw = rw;
         c.rh = rh;
@@ -4325,7 +4080,7 @@ fn blur_publish(
 /// further pass fusion can help. Use measured regions and end-to-end A/Bs; `design/specs/liquid-glass.md`
 /// records the current envelope.
 fn blur_snapshot(reg: [f32; 4]) {
-    let taps = blur_taps();
+    let taps = BLUR_TAPS;
     blur_snapshot_with_taps(reg, &taps);
 }
 
@@ -4355,7 +4110,6 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
         // Split into exact phases for the asynchronous timer-query and serialized HWCNT diagnostic
         // modes. The candidates are a framebuffer copy/resolve and five render-target passes.
         // The phase wrapper is an inline passthrough in a release build.
-        use crate::gfx::profile::phase;
         // The region, in drawable px and 4-aligned, landing at the BOTTOM-LEFT of every target. Each
         // pass then draws a full quad into a viewport of the region's own size and samples the
         // matching corner of its source, so the whole chain is the same shape it always was, one
@@ -4365,7 +4119,7 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
         let win = |uw: c_int, uh: c_int, tw: c_int, th: c_int| {
             (uw as f32 / tw as f32, uh as f32 / th as f32)
         };
-        let e = phase("blur.copy", || {
+        let e = {
             glBindTexture(GL_TEXTURE_2D, c.grab);
             // `glCopyTexSubImage2D` reads the framebuffer bottom-left-origin while the region is
             // measured from the canvas TOP, so the row has to be flipped into window space here.
@@ -4382,7 +4136,7 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
                 rh,
             );
             glGetError()
-        });
+        };
         if e != GL_NO_ERROR {
             // The same failure `capture` guards: a window config without alpha bits makes the copy
             // a silent no-op, which would read as "the blur is black" rather than as a fault.
@@ -4426,16 +4180,8 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
             (c.mid_fbo, c.grab, r2w, r2h, win(rw, rh, c.gw, c.gh)),
             (c.a_fbo, c.mid, r4w, r4h, win(r2w, r2h, c.mw, c.mh)),
         ];
-        // ONE PHASE PER PASS, deliberately: this split is what MEASURED the cost model above, and
-        // it is left in place because it is the only way to re-measure it. `phase` takes a
-        // `&'static str`, so the names are written out rather than indexed.
-        for (i, &(fbo, src, w, h, uv)) in reductions.iter().enumerate() {
-            let name = if i == 0 {
-                "blur.reduce1"
-            } else {
-                "blur.reduce2"
-            };
-            phase(name, || {
+        for &(fbo, src, w, h, uv) in reductions.iter() {
+            {
                 glBindFramebuffer(GL_FRAMEBUFFER, fbo);
                 glViewport(0, 0, w, h);
                 glClear(GL_COLOR_BUFFER_BIT);
@@ -4463,15 +4209,14 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
                     0.0,
                     None,
                 );
-            });
+            };
         }
         // The taps run where the reductions ended — quarter res, which is the scale the direct path
         // renders its source at. See [`BLUR_REDUCTIONS`] for why that equality is not optional.
         let (tw, th) = (r4w, r4h);
         let tap_uv = win(tw, th, c.sw, c.sh);
         for (i, tap) in taps.iter().enumerate() {
-            let name = if i == 0 { "blur.tap1" } else { "blur.tap2" };
-            phase(name, || {
+            {
                 glViewport(0, 0, tw, th);
                 // even pass -> a into b, odd -> b into a; with an even tap count the finished
                 // snapshot lands back in `a`, which is what `draw_blur_backdrop` samples.
@@ -4493,13 +4238,13 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
                 glUniform2f(BL_TEXEL, tap / c.sw as f32, tap / c.sh as f32);
                 glBindTexture(GL_TEXTURE_2D, src);
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-            });
+            };
         }
 
         // Back UP one level through the same filter — the half of a dual-filter blur that stops the
         // result reading as enlarged pixels. See `BLUR_UP_TAP`. `mid` is free by now: it was the
         // first reduction's target and nothing has read it since the second reduction.
-        phase("blur.up", || {
+        {
             // UNCONDITIONAL, and it must never ask `c.out != c.a` to decide: `out` is written by
             // whichever path ran LAST, and `blur_snapshot_direct` leaves it at `mid`, so that
             // question silently added a FOURTH pass here on every frame after a direct one — a 1:1
@@ -4517,7 +4262,7 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
             // modal chains finish in `a`. The assertion at entry keeps that property structural.
             glBindTexture(GL_TEXTURE_2D, c.a);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        });
+        };
 
         glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
         let (vx, vy, vw, vh) = plx_base::surface::viewport();
@@ -4530,10 +4275,7 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
             rw,
             rh,
             c.mid,
-            BLUR_REDUCTIONS + taps.len() + 1,
-            c.sw,
-            c.sh,
-        );
+            BLUR_REDUCTIONS + taps.len() + 1);
     }
 }
 
@@ -4805,12 +4547,6 @@ impl<const N: usize> GroundProbe<N> {
         }
     }
 
-    /// Drop any reading in flight or read back, and queue a fresh one on the next call.
-    fn invalidate(&mut self) {
-        self.cadence.invalidate();
-        self.ready = None;
-    }
-
     /// **The read-back, at a frame BOUNDARY.** Called right after the swap, before the next frame
     /// draws anything: reading the probe's target here binds another framebuffer while the
     /// frame's own has nothing pending, so it neither splits a render pass nor waits on one. The
@@ -5030,15 +4766,6 @@ static mut CONTROL_GROUND_RGB: Option<[f32; 3]> = None;
 /// The Hero row's probe — its own cadence and its own target, never the bar's.
 static mut CONTROL_PROBE: GroundProbe<CONTROL_GROUND_TAPS> =
     GroundProbe::new(CONTROL_GROUND_SAMPLE_EVERY, CONTROL_GROUND_TAP_PX);
-
-/// Mark a Hero's sampled ground stale when the item behind the row changes. The last honest answer
-/// remains available during the carousel/route transition; the first settled draw queues a fresh
-/// reading, and a reading still in flight for the old item is dropped rather than latched.
-pub fn control_ground_invalidate() {
-    unsafe {
-        (*std::ptr::addr_of_mut!(CONTROL_PROBE)).invalidate();
-    }
-}
 
 /// **One display-encoded sRGB channel as RADIANCE** (IEC 61966-2-1), and [`enc`] back again.
 ///
@@ -5515,8 +5242,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
 
         let vx = -rx / step;
         let vy = -(c.gh - ry - rh) / step;
-        use crate::gfx::profile::phase;
-        phase("blur.scene", || {
+        {
             // Armed before anything else, and disarmed by `DirectPass::drop` however this exits.
             BLUR_IN_PASS = true;
             let _restore = DirectPass;
@@ -5549,7 +5275,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
             // specialize RGB blending restore it before returning, so enabling is sufficient.
             glEnable(GL_BLEND);
             draw_scene();
-        });
+        };
 
         glDisable(GL_BLEND);
         let win = |uw: c_int, uh: c_int, tex_w: c_int, tex_h: c_int| {
@@ -5561,9 +5287,8 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
         // look at quarter resolution have to shrink in proportion at any finer divisor. Without
         // this a scale sweep changes two variables at once and measures neither.
         let tap_k = 4.0 * plx_base::surface::render_scale() as f32 / scale as f32;
-        for (i, taps) in blur_taps().iter().enumerate() {
-            let name = if i == 0 { "blur.tap1" } else { "blur.tap2" };
-            phase(name, || {
+        for (i, taps) in BLUR_TAPS.iter().enumerate() {
+            {
                 glViewport(0, 0, tw, th);
                 let (fbo, src) = if i % 2 == 0 {
                     (c.b_fbo, c.a)
@@ -5579,7 +5304,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
                 glUniform2f(BL_TEXEL, off / c.sw as f32, off / c.sh as f32);
                 glBindTexture(GL_TEXTURE_2D, src);
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-            });
+            };
         }
 
         // Up to half resolution, exactly as the capture path does, so `out` is `mid` and the glass
@@ -5587,7 +5312,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
         // larger magnification than 2x, which is precisely the quality question the scale sweep is
         // for; the filter itself is unchanged.
         let (r2w, r2h) = ((rw / 2).max(1), (rh / 2).max(1));
-        phase("blur.up", || {
+        {
             glBindFramebuffer(GL_FRAMEBUFFER, c.mid_fbo);
             glViewport(0, 0, r2w, r2h);
             glClear(GL_COLOR_BUFFER_BIT);
@@ -5601,7 +5326,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
             );
             glBindTexture(GL_TEXTURE_2D, c.a);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        });
+        };
 
         glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
         let (vx, vy, vw, vh) = plx_base::surface::viewport();
@@ -5616,7 +5341,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
             return false;
         }
 
-        blur_publish(rx, ry, rw, rh, c.mid, blur_direct_passes(), tw, th);
+        blur_publish(rx, ry, rw, rh, c.mid, blur_direct_passes());
         true
     }
 }
@@ -5842,7 +5567,7 @@ pub fn draw_blur_backdrop(
             // exactly like the backdrop being flipped and is not that at all.
             glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D, c.grab);
-            profile::phase("glass.sharp", || {
+            {
                 glCopyTexSubImage2D(
                     GL_TEXTURE_2D,
                     0,
@@ -5853,7 +5578,7 @@ pub fn draw_blur_backdrop(
                     dw,
                     dh,
                 );
-            });
+            };
             glActiveTexture(GL_TEXTURE0);
         }
         let suv = blur_uv_rect(x, y, w, h, sreg, sspan, true);
@@ -5871,11 +5596,7 @@ pub fn draw_blur_backdrop(
         // and the "softer material" was squashed. `GL_UVPX` two lines up already computes the pair;
         // this is the same expression, rectified. The shader reads the ON/OFF state off `.x` now,
         // which is why there is no flag component left to carry.
-        let dpx = if deep > 0.0 {
-            deep_sweep().unwrap_or(deep)
-        } else {
-            0.0
-        };
+        let dpx = if deep > 0.0 { deep } else { 0.0 };
         glUniform2f(
             GL_DEEP,
             dpx * (span[0] / c.reg[2]).abs(),
@@ -5902,9 +5623,9 @@ pub fn draw_blur_backdrop(
         glUniform1f(GL_RADIUS, radius);
         glUniform2f(GL_CH, w * 0.5, h * 0.5);
         glUniform4f(GL_RECT, x, y, w, h);
-        profile::phase("glass.composite", || {
+        {
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        });
+        };
         true
     }
 }
@@ -5947,46 +5668,7 @@ const GL_FRAMEBUFFER_COMPLETE: c_uint = 0x8CD5;
 const GL_PACK_ALIGNMENT: c_uint = 0x0D05;
 const GL_NO_ERROR: c_uint = 0;
 
-const CAP_W: c_int = 1920;
-const CAP_H: c_int = 1080;
-const CAP_MID_W: c_int = 960;
-const CAP_MID_H: c_int = 540;
-const CAP_OUT_W: c_int = 480;
-const CAP_OUT_H: c_int = 270;
 const CAP_TINT: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; // untinted blit
-
-struct CapChain {
-    grab: c_uint, // 1920x1080 back-buffer copy target
-    mid: c_uint,  // 960x540 downscale target
-    mid_fbo: c_uint,
-    /// 480x270 downscale target. **Deliberately never read**, unlike `grab` and `mid`, which are
-    /// both sampled as the next pass's source: this is the LAST pass, and its frame leaves through
-    /// `glReadPixels` on `out_fbo`. Kept because it is the only handle on the texture object
-    /// backing that fbo — dropping the name leaks it unrecoverably, with nothing to delete or
-    /// re-attach it by. `#[allow]` rather than `_out` so it still reads as a live GL resource.
-    #[allow(dead_code)]
-    out: c_uint,
-    out_fbo: c_uint,
-    pending: bool,    // a frame was rendered into this chain, not yet read back
-    pw: c_int,        // dims of the pending frame — LATCHED at write time (never
-    ph: c_int,        //   re-derived from the live request; kills the switch race)
-    read_fbo: c_uint, // which fbo holds the pending frame (mid_fbo or out_fbo)
-    flip: bool,       // pending frame is bottom-up (even pass count) — encoder reverses rows
-}
-
-struct CapState {
-    chains: [CapChain; 2],
-    parity: usize,
-    first_copy_checked: bool,
-}
-static mut CAPST: Option<CapState> = None;
-static mut CAP_LATCHED_OFF: bool = false;
-
-// glReadPixels time split out of the whole-cycle time (capture.rs owns that one and
-// folds both into its periodic stats line). The read is the only synchronous GL call
-// in the cycle — everything else is submission cost that lands at the swap.
-pub static CAP_READ_US: AtomicU32 = AtomicU32::new(0);
-pub static CAP_READ_N: AtomicU32 = AtomicU32::new(0);
 
 /// A capture-ready NPOT texture: storage only (pixels NULL), refreshed via CopyTexSubImage.
 /// `upload_rgba` already sets the CLAMP_TO_EDGE + LINEAR quartet these NPOT targets REQUIRE
@@ -6014,147 +5696,6 @@ fn fbo_target(w: c_int, h: c_int, who: &str) -> Option<(c_uint, c_uint)> {
             return None;
         }
         Some((t, f))
-    }
-}
-
-fn cap_lazy_init() -> bool {
-    unsafe {
-        if (*std::ptr::addr_of!(CAPST)).is_some() {
-            return true;
-        }
-        let mk_chain = || -> Option<CapChain> {
-            let grab = cap_tex(CAP_W, CAP_H);
-            let (mid, mid_fbo) = fbo_target(CAP_MID_W, CAP_MID_H, "capture")?;
-            let (out, out_fbo) = fbo_target(CAP_OUT_W, CAP_OUT_H, "capture")?;
-            Some(CapChain {
-                grab,
-                mid,
-                mid_fbo,
-                out,
-                out_fbo,
-                pending: false,
-                pw: 0,
-                ph: 0,
-                read_fbo: 0,
-                flip: false,
-            })
-        };
-        match (mk_chain(), mk_chain()) {
-            (Some(a), Some(b)) => {
-                CAPST = Some(CapState {
-                    chains: [a, b],
-                    parity: 0,
-                    first_copy_checked: false,
-                });
-                true
-            }
-            _ => {
-                CAP_LATCHED_OFF = true; // cap_target already logged the status
-                false
-            }
-        }
-    }
-}
-
-/// One capture cycle, called by `capture::tick` on the GL (main) thread between the last UI
-/// draw and the swap. Writes the current back buffer (grab + downscale) into this cycle's
-/// chain, and — if the *other* chain has a frame pending from the previous cycle — reads it
-/// into `buf` (resized exactly). Returns `Some((w, h, flip))` when `buf` was filled.
-/// `want_960` selects the 960x540 output (single pass) over the default 480x270 (two passes).
-/// Returns `None` and does nothing after a completeness/copy failure (latched off).
-pub fn cap_cycle(want_960: bool, buf: &mut Vec<u8>) -> Option<(c_int, c_int, bool)> {
-    unsafe {
-        if CAP_LATCHED_OFF || !cap_lazy_init() {
-            return None;
-        }
-        // through a raw pointer, not `&mut CAPST` (`static_mut_refs`, a future hard error). Sound
-        // for the same reason the direct form was: `cap_cycle` runs only on the GL (main) thread.
-        let st = (*std::ptr::addr_of_mut!(CAPST)).as_mut().unwrap();
-        let w = st.parity;
-        let r = 1 - w;
-
-        // A. grab the finished UI frame (framebuffer 0 is bound; nothing drawn after this,
-        //    so the pass-flush this forces is work the swap would submit anyway).
-        glBindTexture(GL_TEXTURE_2D, st.chains[w].grab);
-        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, CAP_W, CAP_H);
-        if !st.first_copy_checked {
-            st.first_copy_checked = true;
-            let e = glGetError();
-            if e != GL_NO_ERROR {
-                // e.g. INVALID_OPERATION if the window config lost its alpha bits — the copy
-                // silently no-ops (black stream), so latch off loudly instead.
-                log(&format!(
-                    "capture: CopyTexSubImage error=0x{e:x} — capture off"
-                ));
-                CAP_LATCHED_OFF = true;
-                return None;
-            }
-        }
-
-        // B. downscale pass(es). Blend OFF (fresh target, raw copy); glClear before each pass
-        //    spares Midgard the tile preserve-load of the stale FBO contents (a full-screen
-        //    quad does NOT relieve that obligation). Scissor is off here (clip pairs in-frame).
-        glDisable(GL_BLEND);
-        let c = &st.chains[w];
-        glBindFramebuffer(GL_FRAMEBUFFER, c.mid_fbo);
-        glViewport(0, 0, CAP_MID_W, CAP_MID_H);
-        glClear(GL_COLOR_BUFFER_BIT);
-        // full-authored-screen rect: IPROG maps (0,0,1920,1080) to the whole viewport
-        draw_tex(c.grab, 0.0, 0.0, SCR_W, SCR_H, 0.0, CAP_TINT.as_ptr());
-        if !want_960 {
-            glBindFramebuffer(GL_FRAMEBUFFER, c.out_fbo);
-            glViewport(0, 0, CAP_OUT_W, CAP_OUT_H);
-            glClear(GL_COLOR_BUFFER_BIT);
-            draw_tex(c.mid, 0.0, 0.0, SCR_W, SCR_H, 0.0, CAP_TINT.as_ptr());
-        }
-        let ch = &mut st.chains[w];
-        ch.pending = true;
-        if want_960 {
-            ch.pw = CAP_MID_W;
-            ch.ph = CAP_MID_H;
-            ch.read_fbo = ch.mid_fbo;
-            ch.flip = false; // 1 pass: cap (bottom-up) + 1 flip = top-down
-        } else {
-            ch.pw = CAP_OUT_W;
-            ch.ph = CAP_OUT_H;
-            ch.read_fbo = ch.out_fbo;
-            ch.flip = true; // 2 passes: flips cancel = bottom-up; encoder reverses rows
-        }
-
-        // C. read the OTHER chain's frame, rendered >=1 cycle ago (complete — no drain).
-        let mut got = None;
-        let rc = &mut st.chains[r];
-        if rc.pending {
-            rc.pending = false;
-            glBindFramebuffer(GL_FRAMEBUFFER, rc.read_fbo);
-            glPixelStorei(GL_PACK_ALIGNMENT, 1); // RGBA rows are 4-aligned anyway; belt+braces
-            let n = (rc.pw * rc.ph * 4) as usize;
-            buf.resize(n, 0); // resize, NOT with_capacity: glReadPixels needs len, not capacity
-            let t0 = std::time::Instant::now();
-            glReadPixels(
-                0,
-                0,
-                rc.pw,
-                rc.ph,
-                GL_RGBA,
-                GL_UNSIGNED_BYTE,
-                buf.as_mut_ptr() as *mut c_void,
-            );
-            CAP_READ_US.fetch_add(t0.elapsed().as_micros() as u32, Ordering::Relaxed);
-            CAP_READ_N.fetch_add(1, Ordering::Relaxed);
-            got = Some((rc.pw, rc.ph, rc.flip));
-        }
-
-        // D. restore the world exactly: framebuffer 0 (or every next frame renders into the
-        //    FBO = frozen screen), full viewport, blend back on (func untouched). Program binding
-        //    needs no restore — every draw fn binds its own lazily (use_prog); texture unit 0
-        //    stays active; vertex state untouched.
-        glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
-        glViewport(0, 0, CAP_W, CAP_H);
-        glEnable(GL_BLEND);
-
-        st.parity = r;
-        got
     }
 }
 
@@ -8071,34 +7612,6 @@ mod tests {
             uv[3] < 0.0,
             blur_is_bottom_up(),
             "the v span runs backwards iff stored bottom-up"
-        );
-    }
-}
-
-#[cfg(test)]
-mod clear_probe_tests {
-    use std::cell::RefCell;
-
-    thread_local! { static LOG: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) }; }
-
-    #[test]
-    fn a_frame_brackets_its_first_clear_once() {
-        super::install_clear_probe(
-            || LOG.with(|l| l.borrow_mut().push("waiting")),
-            || LOG.with(|l| l.borrow_mut().push("acquired")),
-        );
-        let clear = || LOG.with(|l| l.borrow_mut().push("clear"));
-        super::probed_clear(clear);
-        super::arm_clear_probe();
-        super::probed_clear(clear);
-        super::probed_clear(clear);
-        super::arm_clear_probe();
-        super::probed_clear(clear);
-        let log = LOG.with(|l| std::mem::take(&mut *l.borrow_mut()));
-        assert_eq!(
-            log,
-            ["clear", "waiting", "clear", "acquired", "clear", "waiting", "clear", "acquired"],
-            "an unarmed clear is bare; an armed frame gets one pair, and its second clear none"
         );
     }
 }

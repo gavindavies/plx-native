@@ -150,15 +150,6 @@ pub fn surface_released(cached: bool, was_closing: bool) {
     host::invalidate();
 }
 
-/// [`HOST_USERS`], for a test that has to grade the counter from another module — `app/bridge.rs`,
-/// whose `sync_host` is the only other caller that takes and releases one. Read as a DELTA against
-/// a base taken at the top of the test: the counter is process-wide and `testlock::serial()` bounds
-/// interleaving, not what a previous test in the same process left behind.
-#[cfg(any(test, feature = "test-support"))]
-pub fn host_users_for_test() -> u32 {
-    HOST_USERS.load(Relaxed)
-}
-
 /// How many OPEN popovers have asked for a cached host — see [`Popover::caching_host`].
 ///
 /// A separate counter from [`OPEN_COUNT`] and not a filter over it, for the same reason that one is
@@ -532,33 +523,6 @@ impl Popover {
         if scrim_a > 0.0 {
             let dim = theme::scrim_black(scrim_a * self.appear() * crate::nav::page_alpha());
             Painter::root().rect(Rect::FULL, 0.0, dim, dim, 0.0);
-        }
-    }
-
-    /// Draw the modal scrim, then LIFT `opener` back out of it: the element the popover was opened
-    /// FROM, re-drawn on top of the dim, so the one thing the panel is about stays at full strength
-    /// while the page around it recedes.
-    ///
-    /// **Both calls belong to the HOST PAGE**, for the reason [`scrim`](Self::scrim) already gives
-    /// and one more. The direct blur source path re-renders the page closure into a small target
-    /// before any popover draws, so a lift drawn WITH the panel would reach the visible frame and
-    /// never the snapshot — and a glass panel frosting a *dimmed* copy of the very card it is about
-    /// is exactly the class of artefact the scrim's own placement rule exists to prevent.
-    ///
-    /// **The lift is a SECOND DRAW, not a cut-out, and that is a visual decision rather than an
-    /// implementation detail.** Everything the element paints OPAQUELY comes out at exactly its own
-    /// colour, which is the point. Everything it paints with ALPHA — its soft shadow, its focus
-    /// glow, the anti-aliased edges of its label — composites twice, once dimmed under the scrim
-    /// and once over it, so those read heavier than the same element does anywhere else on the
-    /// screen. The shadow reading twice is what a raised object would really cast; the label's AA
-    /// edges thickening is the price, and it is paid from the first frame the panel is up, not
-    /// only once the scrim has ramped in. The alternative — scrim as four quads around the rect —
-    /// has neither cost and cannot follow an element whose glow and caption run outside its own
-    /// frame, which every card surface here has.
-    pub fn scrim_lifting(&self, scrim_a: f32, opener: &Opener) {
-        self.scrim(scrim_a);
-        if scrim_a > 0.0 {
-            (opener.redraw)();
         }
     }
 

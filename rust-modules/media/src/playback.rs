@@ -232,14 +232,6 @@ pub fn ctxline_cptr(ps: &PlaybackSession) -> *const c_char {
 
 // ---- resume -----------------------------------------------------------------------------------
 
-/// Record the resume target a start was asked for, until a frame proves it.
-pub fn note_requested_resume(ps: &mut PlaybackSession, resume_ns: i64) {
-    ps.requested_resume_ns = resume_ns.max(0);
-}
-/// The resume target no frame has proven yet (0 when there is none).
-pub fn unpresented_resume_ns(ps: &PlaybackSession) -> i64 {
-    ps.requested_resume_ns
-}
 /// A frame of this playback was presented: the resume it was started with is spent.
 pub fn confirm_resume_presented(ps: &mut PlaybackSession) {
     ps.requested_resume_ns = 0;
@@ -359,18 +351,6 @@ pub fn claim_route_start_attempt(ticket: RouteStartTransaction) -> Option<RouteS
     let attempt = control.next_start_attempt;
     control.phase = ControlPhase::Starting(ticket.serial, attempt);
     Some(RouteStartAttempt { serial: ticket.serial, attempt })
-}
-
-/// The preparation of a pending start failed before any Load: the transaction ends `Failed`.
-pub fn reject_route_start_preparation(ticket: RouteStartTransaction) -> bool {
-    let mut control = control();
-    match control.phase {
-        ControlPhase::Prepared(serial) if serial == ticket.serial => {
-            control.phase = ControlPhase::Failed(serial);
-            true
-        }
-        _ => false,
-    }
 }
 
 /// Settle a transaction that never reached a callable native thread (no callback can race it).

@@ -147,8 +147,6 @@ impl Scope {
     pub fn card(id: Identity, rect: Rect) -> Self {
         let v = HISTORY.with(|h| {
             let mut h = h.borrow_mut();
-            #[cfg(feature = "devtriggers")]
-            if h.frame != h.drawn_frame { super::card_motion_metrics::frame(); }
             h.observe(id, rect, frame_ms())
         });
         Self::enter(v)

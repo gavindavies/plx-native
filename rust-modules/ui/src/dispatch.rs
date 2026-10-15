@@ -137,8 +137,6 @@ where
 pub const MAX_STEPS_PRE: u32 = 192;
 /// Reserved for the post-commit drain (§3.3 step 7); never consumable by step 6.
 pub const MAX_STEPS_POST: u32 = 64;
-/// The coarse round counter, diagnostics only.
-pub const MAX_ROUNDS: u32 = 4;
 /// A debug build asserts when `carried` grows for this many consecutive frames.
 pub const CARRY_GROWTH_FRAMES: u8 = 8;
 
@@ -244,12 +242,6 @@ pub trait Rig<H: Host> {
     fn log(&mut self, line: &str);
     /// The application's prepare work outside any screen (the `TexCache` upload step, §10).
     fn prepare(&mut self, b: &mut Budget, present: &mut Present);
-    /// Privileged call 1 (§3.3 step 1).
-    fn ls2_pump(&mut self);
-    /// Privileged call 2 (§3.3 step 9): every frame, presented or not.
-    fn opaque_route(&mut self, video_plane_bound: bool);
-    /// Privileged call 3 (§3.3 step 10): at draw entry.
-    fn clear_opaque_region(&mut self);
     /// The clock for `Budget` (one reading per take).
     fn now_us(&self) -> u64;
     /// BACK at the root of the root stack (§3.4): the application decides — the platform's Home
@@ -529,11 +521,6 @@ where
             .map_or(false, |i| i.screen.hit_source() == HitSource::Engine)
     }
 
-    /// A replay's mode (§5.5): `Some(Legacy)` bypasses the engine and the map for every page.
-    pub fn set_focus_source_override(&mut self, o: Option<FocusSource>) {
-        self.focus_override = o;
-    }
-
     /// `Event::Store{id, gen}` (§3.4): a notice to every live instance, then the engine's
     /// `reconcile` before draw.
     pub fn store_changed(&mut self, ord: StoreOrd, gen: u32) {
@@ -603,19 +590,6 @@ where
     /// until the commit's `Mount` step has run.
     pub fn top_arg(&self) -> Option<&H::Arg> {
         self.nav.top_page().map(|e| &e.arg)
-    }
-
-    /// The top page's argument, or — while there is NO top page yet — the page the first nav
-    /// commit is about to mount (the last parked `Root`/`Push`/`Replace`/`SelectTab`). A caller
-    /// that runs BEFORE the frame's commit (the bridge's chrome capture) asks this rather than
-    /// [`Self::top_arg`], which is `None` on a boot's first frame — the route is parked, not
-    /// mounted — and would make that frame look like no page at all. Once a page is up this IS
-    /// `top_arg`: a push parked behind it changes the chrome at its own commit, not a frame early.
-    pub fn top_or_mounting_arg(&self) -> Option<&H::Arg> {
-        self.top_arg().or_else(|| self.parked.iter().rev().find_map(|(s, _)| match &s.fx {
-            Fx::Nav(NavOp::Root(a) | NavOp::Push(a) | NavOp::Replace(a) | NavOp::SelectTab(a)) => Some(a),
-            _ => None,
-        }))
     }
 
     /// …and its `ScreenId`, the identity every argument of one screen shares.
@@ -781,20 +755,6 @@ where
         self.page_image_alpha
     }
 
-    /// Is a modal surface or a popover's held image up? The frame dump fails closed on it: the dim
-    /// field behind a modal is sampled on a cadence of presented iterations.
-    pub fn overlay_open(&self) -> bool {
-        !self.nav.modals.surfaces.is_empty() || crate::popover::host::held_ceiling().is_some()
-    }
-
-    /// Does the dispatcher carry work into its next iteration: a queued step, a parked structural
-    /// op or lifecycle step (one nav commit per iteration), a pending back? The frame dump holds a
-    /// virtual frame on it, so an input's whole effect lands within the frame it was pressed in
-    /// rather than on whichever later iteration the holds happened to leave.
-    pub fn work_carried(&self) -> bool {
-        !self.queue.is_empty() || !self.parked.is_empty() || !self.parked_life.is_empty() || self.pending_back
-    }
-
     /// Whether this frame may show the page as a frozen image at all: a freezing transition, a
     /// snapshot texture to hold it, and no video plane under it.
     fn page_image_possible(&self, video_plane: bool) -> bool {
@@ -840,9 +800,6 @@ where
             || !results.is_empty()
             || !self.parked.is_empty()
             || !self.parked_life.is_empty();
-
-        // 1. the first privileged call
-        rig.ls2_pump();
 
         // 2. ingest: external events, delivered to the input owner, AHEAD of everything queued
         //    (external_events_are_drained_before_effect_results).
@@ -1180,12 +1137,11 @@ where
         #[cfg(debug_assertions)]
         let hash_before_prepare = self.state_hash();
 
-        // 9. prepare (only if presenting), then opaque_route on EVERY frame. The activity table:
+        // 9. prepare (only if presenting). The activity table:
         //    the top page prepares unless its host fold is Cached or Replaced; every surface does.
         if will_present {
             plx_base::diag::spans::span("dprep", || self.prepare_pass(rig, tick));
         }
-        rig.opaque_route(self.present.video_plane());
         #[cfg(debug_assertions)]
         debug_assert_eq!(
             self.state_hash(),
@@ -1364,7 +1320,6 @@ where
         // page freeze is. Every framebuffer-sampling door is refused while it is up.
         let video_plane = self.video_plane_frame();
         let was_video_plane = plx_gfx::gfx::set_video_plane_frame(video_plane);
-        if !plx_gfx::gfx::blur_source_pass() { rig.clear_opaque_region(); }
         let parts = self.parts(tick);
         let source_pass = backdrop::source_walk() || plx_gfx::gfx::blur_source_pass();
         let eligible = pages && host_render == HostRender::Live
@@ -1451,10 +1406,9 @@ where
                     f.page_alpha = 0.0;
                     // Raw screen clears bypass Painter::recording; they must not erase
                     // the outgoing page while its destination only records text. The walk
-                    // measures ahead of any frame that draws the page, so it is speculative to
-                    // the recorder (`rec::speculative`).
+                    // measures ahead of any frame that draws the page.
                     plx_base::diag::spans::span("warm", || plx_gfx::gfx::without_frame_clear(|| {
-                        super::rec::speculative(|| super::record_walk(|| inst.screen.draw(&mut f)))
+                        super::record_walk(|| inst.screen.draw(&mut f))
                     }));
                 }
             }
@@ -1629,7 +1583,7 @@ where
                     drain_surface_text |= !s.motion.capture_frame();
                     capture_surface |= s.motion.capture_frame();
                     backdrop::draw_span("surf", || plx_gfx::gfx::without_frame_clear(|| {
-                        super::rec::speculative(|| super::record_walk(|| inst.screen.draw(&mut f)))
+                        super::record_walk(|| inst.screen.draw(&mut f))
                     }));
                 } else {
                     backdrop::draw_span("surf", || inst.screen.draw(&mut f));
@@ -2502,10 +2456,6 @@ where
         self.nav.prune(unmounted);
     }
 
-    pub fn frame_index(&self) -> u64 {
-        self.frame
-    }
-
     pub fn queued(&self) -> usize {
         self.queue.len()
     }
@@ -2951,9 +2901,6 @@ mod edge_back_tests {
         }
         fn log(&mut self, _line: &str) {}
         fn prepare(&mut self, _b: &mut Budget, _present: &mut Present) {}
-        fn ls2_pump(&mut self) {}
-        fn opaque_route(&mut self, _bound: bool) {}
-        fn clear_opaque_region(&mut self) {}
         fn now_us(&self) -> u64 {
             0
         }

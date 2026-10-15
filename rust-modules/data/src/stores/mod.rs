@@ -48,10 +48,6 @@ impl StoreId {
         StoreOrd(self as u32)
     }
 
-    pub fn from_ord(o: StoreOrd) -> Option<StoreId> {
-        StoreId::ALL.get(o.0 as usize).copied()
-    }
-
     pub fn name(self) -> &'static str {
         match self {
             StoreId::Metadata => "metadata",

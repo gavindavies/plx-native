@@ -215,13 +215,6 @@ pub fn install(src: &'static dyn Source) {
     SOURCE.with(|s| s.set(Some(src)));
 }
 
-/// The eviction-reversal scene uses a smaller REAL residency ceiling so it can
-/// evict textures while their source slots still exist; ordinary runs keep 44 MiB.
-#[cfg(feature = "devtriggers")]
-pub fn scene_residency_budget(bytes: usize) {
-    CACHE.with(|c| c.borrow_mut().bytes_max = bytes * render_area());
-}
-
 /// The product cache's LRU clock, for [`bytes_used_since`].
 #[cfg(feature = "devtriggers")]
 pub fn use_clock() -> u64 {
@@ -278,15 +271,6 @@ pub fn resident(key: PosterKey) -> bool {
     CACHE.with(|c| c.borrow().resident.contains_key(&key))
 }
 
-/// The prefetch twin of [`resolve_on`]: same arguments on purpose, so a screen warms EXACTLY the
-/// key it will later resolve.
-pub fn warm_on(srv: u16, path: &str, w: i32, h: i32, png: bool) -> Warm {
-    if path.is_empty() {
-        return Warm::Known;
-    }
-    with_source(|s| s.warm(srv, path, w, h, png), Warm::Known)
-}
-
 /// The most cards a screen may ask [`warm_ahead_on`] to keep resident at once. A source holds a
 /// bounded number of lookahead entries (strictly more than this), which is what lets a screen
 /// stop asking once its whole set is resident.
@@ -323,11 +307,6 @@ pub fn logo_failed(srv: u16, rk: &str) -> bool {
 
 pub fn logo_warm(srv: u16, rk: &str) -> Warm {
     with_source(|s| s.logo_warm(srv, rk), Warm::Known)
-}
-
-/// The prefetch gate: the source is quiet AND nothing is waiting for upload.
-pub fn source_idle() -> bool {
-    with_source(|s| s.idle(), true) && !CACHE.with(|c| c.borrow().has_pending())
 }
 
 /// The source's delivery: one decoded image (or a failure) for a key. Touches no GL.
@@ -716,10 +695,6 @@ impl<K: Copy + Eq + Hash> TexCache<K> {
             e.drawn_frame = frame;
             e.tex
         })
-    }
-
-    pub fn resolve_wh(&mut self, k: K) -> Option<(u16, u16)> {
-        self.resolve(k).map(|t| (t.w, t.h))
     }
 
     pub fn resident_count(&self) -> usize {

@@ -27,7 +27,7 @@
 //! See `machine.rs`'s doc on `FocusTarget::FirstInGroupAnimated` and the regression test
 //! `containers::tests::a_fresh_tab_mint_reports_a_deliberate_move_not_a_restore`.
 
-use plx_machine::machine::{EntryId, GroupId, Host};
+use plx_machine::machine::{GroupId, Host};
 use super::super::screen::{AxisMask, EdgeRule, ElemKind, GroupKind, GroupSpec, Seat};
 use super::super::Rect;
 use super::stack::NavStack;
@@ -96,11 +96,6 @@ impl<H: Host> TabContainer<H> {
             len: self.strip.len(),
             elem: ElemKind::Control,
         }
-    }
-
-    /// The entry the strip belongs to — the top page (the strip is chrome on the page).
-    pub fn strip_entry(&self) -> Option<EntryId> {
-        self.stack.top().map(|e| e.id)
     }
 
     /// Select a pill: `SelectTab(pill)` on the shared stack; the capsule moves on the press frame.

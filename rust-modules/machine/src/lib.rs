@@ -15,6 +15,4 @@
 pub mod machine; // the layer-neutral contract: Host, Machine, Effects, Fx, Canon, Tick (spec §3.1)
 pub mod present; // the present gate as a machine with an owner (spec §4.4)
 pub mod idle; // whole-FRAME present gating: a screen with nothing moving on it stops repainting
-pub mod landgate; // a replay delivers a landing on its RECORDED frame (spec §3.3 step 3)
-pub mod landing; // the bounded per-addressee result queue (spec §5.2)
 pub mod motion; // the spring integrators' own exp/sin_cos + the soft-float table (spec §4.2)

@@ -316,17 +316,6 @@ fn spawn_or_inline(
     }
 }
 
-/// [`spawn_small`], but handing back the handle so the caller can [`join`] it later. For work that
-/// is fire-and-forget *during* a session yet must still be allowed to finish before the process
-/// exits — the end-of-playback scrobble is the only such case, and losing it would lose the
-/// server-side resume point.
-pub fn spawn_small_keeping(
-    what: &str,
-    f: impl FnOnce() + Send + 'static,
-) -> Option<JoinHandle<()>> {
-    spawn_with(what, Some(SMALL_STACK), f)
-}
-
 /// A join this long parked the SDL loop for ~15 frames — the shortest stall a person reads as a
 /// freeze rather than a stutter.
 const STALL_MS: u64 = 250;

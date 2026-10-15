@@ -3,41 +3,16 @@ name = "plx_media"
 version = "0.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Media layer: demux (FFmpeg), the buffer-feed player engine, its GStreamer sink and the playback session."
-repository = "https://github.com/GLinnik21/plx-native"
+description = "PiTV media layer: the FFmpeg demuxer, the player engine and its GStreamer sink."
 publish = false
 
 [lib]
 name = "plx_media"
-# An rlib the application crate links, never an archive of its own: the one staticlib is the
-# application crate's (ci/test_no_host_staticlib.py holds that line for this crate too). It owns no
-# build script and links nothing -- the FFmpeg, libass and libcurl symbols are `dynlib!` tables
-# (dlopen at run time), the Starfish/ACB externs of `player::ffi` are resolved by the final link (the
-# Makefile's), and the two `#[no_mangle]` callbacks `src/starfish.c` calls (`sf_on_event`,
-# `acb_on_event`) ride the application's staticlib like `plx_telemetry`'s entry points. It reads no
-# `PLX_*` build variable.
 crate-type = ["rlib"]
 
 [features]
 default = []
-# Forwarded from the application crate, which is the only one that sets them. `devtriggers` is
-# behaviour here, not plumbing: the quality-override, track-name, playurl and forced-route triggers
-# read their files through `plx_base::devtrig`, which is compile-time `None` without it, and
-# 130-odd `cfg`s select the dev surface.
 devtriggers = ["plx_base/devtriggers", "plx_machine/devtriggers", "plx_platform/devtriggers", "plx_gfx/devtriggers", "plx_data/devtriggers"]
-# `player::ffi_host` (the simulator's `VideoSink`) and `player::sim_video` replace `player::ffi`
-# (Starfish/ACB) under it. `sim_video` is the one thing here that draws, so `plx_gfx` is a
-# dependency of this feature only.
-# The Linux build's real player: `player::gst_sink` decodes the fed access units with the system
-# GStreamer (video composited under the UI, audio decoded to PCM) instead of discarding them as the
-# simulator's clock sink does. Builds on `hostsim`, whose desktop window and GL compositing it uses.
-# Two `cfg_attr(not(feature = "lab-diagnostics"), allow(dead_code))` in `player`; the Cloud Lab bridge
-# that reads those items is the application crate's.
-# The `cfg(test)` seams other crates' tests use (`player::preview::reset_for_test`,
-# `player::restore_state_for_test`, `player::swap_state_for_test`, ...) plus the test-mode arms
-# `cfg(test)` alone cannot give a dependent (the stand-in sink, the stepped feed clock, the asset
-# directory, the settled route start). Enabled from the dependents' `[dev-dependencies]`; never in a
-# shipped build.
 test-support = ["plx_base/test-support", "plx_machine/test-support", "plx_platform/test-support", "plx_gfx/test-support", "plx_data/test-support"]
 
 [dependencies]
@@ -47,14 +22,11 @@ plx_platform = { path = "../platform" }
 plx_gfx = { path = "../gfx" }
 plx_data = { path = "../data" }
 libc = "0.2"
-serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc", "std"] }
 gstreamer = { version = "0.25" }
 gstreamer-app = { version = "0.25" }
 
 [dev-dependencies]
-# THE rule of the layer crates: dev-depend on ITSELF with `devtriggers`, so `cargo test -p plx_media`
-# alone builds the crate and every layer below it as the Makefile's suite does.
 plx_media = { path = ".", features = ["devtriggers"] }
 plx_base = { path = "../base", features = ["test-support"] }
 plx_machine = { path = "../machine", features = ["test-support"] }

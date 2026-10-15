@@ -421,7 +421,7 @@ fn fixture_font() -> Arc<[u8]> {
 
 #[test]
 #[ignore = "requires the pinned native host libass artifact and packaged fonts"]
-fn native_script_font_revision_and_cjk_fallback_use_real_glyphs() {
+fn native_script_font_revision_uses_real_glyphs() {
     let plain = script(
         "Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,{\\fnPLX73\\pos(20,40)}Attachment\n",
     );
@@ -446,14 +446,6 @@ fn native_script_font_revision_and_cjk_fallback_use_real_glyphs() {
     assert_ne!(
         rendered.rects, fallback.rects,
         "a late attached font replaces fallback even when the source identity is unchanged"
-    );
-    let korean = script("Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,{\\pos(20,40)}한\n");
-    let chinese = script("Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,{\\pos(20,40)}中\n");
-    let a = render(&mut engine, &korean, 100);
-    let b = render(&mut engine, &chinese, 100);
-    assert_ne!(
-        a.rects, b.rects,
-        "the bundled CJK fallback yields distinct glyphs, not identical missing-glyph boxes"
     );
 }
 

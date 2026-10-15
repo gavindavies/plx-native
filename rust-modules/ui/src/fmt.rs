@@ -2,19 +2,6 @@
 //! can't render differently across screens (the "2 hr 15 min" vs "2h 15m" vs "0 hr 45 min"
 //! drift this replaces).
 
-pub fn converts_on_server() -> &'static str { plx_platform::i18n::msg::core_converts_on_server() }
-
-/// Compact duration for meta lines — "2h 15m" / "45m" (Info card tags, player HUD context).
-pub fn dur_short(ms: i64) -> String {
-    let mins = (ms / 60_000).max(0);
-    let (h, m) = (mins / 60, mins % 60);
-    if h > 0 {
-        plx_platform::i18n::msg::core_duration_short_hours(h, m)
-    } else {
-        plx_platform::i18n::msg::core_duration_short_minutes(m)
-    }
-}
-
 /// **Seconds-scale duration** — "4.5 s" / "12 s". The two formatters above are minute-scale and
 /// round a fifteen-second interval to "0m", which is a read-out saying nothing; this is for the
 /// short spans the diagnostics panel reports (an Original shortfall's elapsed time, N13).
@@ -76,76 +63,10 @@ pub fn clock(ms: i64) -> String {
     }
 }
 
-/// An episode's ADDRESS inside its show — `"S2, E3"`, with no title. The detail page's hero meta
-/// line draws it bare (the title band above it already IS the episode's name, so repeating it there
-/// would be the one line on the page that says nothing new), and [`episode_kicker`] is this plus the
-/// title. It lives here rather than as a `format!` beside its one caller because the two spellings
-/// have to stay one vocabulary: a page that said "S2, E3" while the HUD said "S2E3" for the same
-/// leaf is exactly the drift this module exists to prevent, and nothing but shared code enforces it.
-/// **An episode's ADDRESS — `S1 · E3`** — the identifier printed inside a still's artwork.
-///
-/// `Library Screens.dc.html` E is why it is the printed line rather than the episode's name: "four
-/// tiles of one show differ only by number, so the number cannot be the thing behind focus. The
-/// episode's *name* can: it distinguishes nothing until you have already picked a tile."
-///
-/// **Both parts are optional and the separator comes from what is PRESENT**, because a server that
-/// sent no season or episode index is an ordinary answer here rather than a broken one — a specials
-/// folder, a date-numbered series, an item mid-scan. With neither it is empty and the caller draws
-/// nothing, not a line of leftover dots.
-///
-/// The MIDDOT is what separates this from [`episode_ordinal`]'s `S1, E3`, and the two are kept
-/// apart deliberately: this one is a printed mark on artwork, sized and inked as its own line,
-/// while the ordinal is a run inside sentences elsewhere in the app.
-pub fn episode_address(season: i64, index: i64) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    if season > 0 {
-        parts.push(plx_platform::i18n::msg::core_season(season));
-    }
-    if index > 0 {
-        parts.push(plx_platform::i18n::msg::core_episode(index));
-    }
-    parts.join(" \u{b7} ")
-}
-
 /// A collection's size — `"1 item"`, `"12 items"`. ONE formatter for the collection page's meta
 /// line and every collection tile's caption, so the two cannot count one collection two ways.
 pub fn item_count(n: i64) -> String {
     plx_platform::i18n::msg::browse_search_items(n)
-}
-
-pub fn episode_ordinal(season: i64, index: i64) -> String {
-    plx_platform::i18n::msg::core_episode_ordinal(index, season)
-}
-
-/// The source attribution — `"Shared by friend"` — or `None` when there is nobody to credit.
-///
-/// **This is the WORDS and not the RULE.** `handle` arrives already decided:
-/// `plex::servers::owner_credit` is the one place that says whether a server is credited to
-/// anybody, `plex::ServerFacts::handle` is where its answer rests, and every caller here reads
-/// that field. So an empty handle does not mean "an owned server" — it means *our own server, or
-/// the household's server whichever Plex Home profile is watching, or a share plex.tv has not
-/// named* — and this function must never grow a second opinion about which of those it is. The
-/// field it reads used to be plex.tv's raw `sourceTitle`, which is how the app came to tell a
-/// managed user that their own house's library was "Shared by" the person who pays for it.
-///
-/// `None` rather than an empty `String`, because ABSENCE is what the design specifies: no
-/// separator, no empty run, no draw call. Both call sites were hand-rolling that guard.
-///
-/// ONE formatter for the same reason [`episode_kicker`] is one: this phrase is drawn by the hero's
-/// meta line, the detail page's facts row and (with a sentence after it) the Library's failure
-/// read-out. It was written twice with two different empty-handle behaviours and interpolated a
-/// third time inline — exactly the drift this module exists to prevent.
-pub fn shared_by(handle: &str) -> Option<String> {
-    (!handle.is_empty()).then(|| plx_platform::i18n::msg::core_shared_by(handle))
-}
-
-/// The episode kicker — `"S2, E3 · Laura"`, the [`episode_ordinal`] with the episode's title after
-/// it. ONE formatter, because this string is drawn by the transport HUD (the now-playing item), the
-/// route's pre-roll ctx line and the Up Next caption, and the whole point of the last two is that
-/// they read identically to the first. It was three separate literals before, with nothing keeping
-/// them in step.
-pub fn episode_kicker(season: i64, index: i64, title: &str) -> String {
-    format!("{} \u{b7} {title}", episode_ordinal(season, index))
 }
 
 /// The media badge for a video version — `"4K"` / `"1080p"` / `"SD"`, or None when the item has no
@@ -227,53 +148,6 @@ mod tests {
     }
 }
 
-/// A calendar date from a Plex `YYYY-MM-DD` — `"1 Feb 1921"`. ONE spelling, because the same value
-/// is now drawn by two screens: detail's episode air dates and the person page's Born/Died line.
-/// `year` is the fallback when the item carries only a year (an episode with no `originallyAvailableAt`);
-/// pass 0 when there is none, and an unparseable date yields the empty string rather than a
-/// half-formatted one — every caller draws a date line only when it is non-empty.
-pub fn pretty_date(iso: &str, year: i64) -> String {
-    let parts: Vec<&str> = iso.split('-').collect();
-    if parts.len() == 3 {
-        if let (Ok(y), Ok(mo), Ok(da)) = (
-            parts[0].parse::<i64>(),
-            parts[1].parse::<usize>(),
-            parts[2].parse::<i64>(),
-        ) {
-            if let (Ok(y), Ok(m), Ok(d)) = (i32::try_from(y), u8::try_from(mo), u8::try_from(da)) {
-                if let Some(date) = plx_platform::i18n::current().date(y, m, d) { return date; }
-            }
-        }
-    }
-    if year > 0 {
-        year.to_string()
-    } else {
-        String::new()
-    }
-}
-
-/// The units a review score is quoted in — the one thing about a provider the formatters need.
-/// The caller maps its own notion of a provider onto this (`screens::detail` maps
-/// `metadata::RatingArt`), so the library names no provider and no application type.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum RatingScale {
-    /// Out of ten, one decimal, with a trailing "/10" — IMDb ("7.4").
-    OutOfTen,
-    /// A whole percentage — Rotten Tomatoes and TMDB ("91%").
-    Percent,
-}
-
-/// A review score, in the shape its own provider publishes it. PMS normalises every provider onto
-/// one 0–10 scale, which is not how any of them are quoted: Rotten Tomatoes and TMDB are
-/// PERCENTAGES (9.1 → "91%") and IMDb is out of ten ("7.4"). Printing the raw 9.1 beside a tomato
-/// would read as a 9.1% score, so the badge's number is put back into the provider's own units here.
-pub fn rating_score(scale: RatingScale, value: f64) -> String {
-    match scale {
-        RatingScale::OutOfTen => plx_platform::i18n::current().decimal((value * 10.0).round() as i64, 1),
-        RatingScale::Percent => percent((value * 10.0).round().clamp(0.0, 100.0) as i64),
-    }
-}
-
 /// A whole percentage in the UI locale: the catalog pattern owns the sign's placement (Spanish and
 /// Belarusian set it off with a no-break space; English does not).
 pub fn percent(value: i64) -> String {
@@ -284,28 +158,6 @@ pub fn percent(value: i64) -> String {
 pub fn decimal(value: f64, scale: i16) -> String {
     let factor = 10i64.pow(u32::try_from(scale).unwrap_or(0)) as f64;
     plx_platform::i18n::current().decimal((value * factor).round() as i64, scale)
-}
-
-/// [`decimal`] that always carries a sign, as a delta is written (`+0.4`, `-1.2`).
-pub fn signed_decimal(value: f64, scale: i16) -> String {
-    let factor = 10i64.pow(u32::try_from(scale).unwrap_or(0)) as f64;
-    let scaled = (value * factor).round() as i64;
-    let digits = plx_platform::i18n::current().decimal(scaled, scale);
-    if scaled >= 0 {
-        format!("+{digits}")
-    } else {
-        digits
-    }
-}
-
-/// A bitrate given in kbps: `28.9 Mbps` from a megabit up, otherwise whole `640 kbps`, in the UI
-/// locale's numerals and unit spelling.
-pub fn bitrate(kbps: i64) -> String {
-    if kbps >= 1000 {
-        plx_platform::i18n::msg::widgets_tracks_mbps(&decimal(kbps as f64 / 1000.0, 1))
-    } else {
-        plx_platform::i18n::msg::widgets_tracks_kbps(&plx_platform::i18n::current().number(kbps))
-    }
 }
 
 /// A byte count in binary units with the UI locale's numerals — `2.50 GB`, `12.3 MB`, `640 kB`.
@@ -323,18 +175,6 @@ pub fn bytes(bytes: i64, scales: (i16, i16, i16)) -> String {
         msg::core_unit_kb(&decimal(b / K, scales.2))
     } else {
         msg::core_unit_b(&plx_platform::i18n::current().number(bytes))
-    }
-}
-
-/// The unit that trails a score, set a rung down in tertiary ink — see `widgets::RatingCell`.
-///
-/// Only an out-of-ten score (IMDb's) has one. A percentage carries its `%` inside [`rating_score`] because there the sign
-/// is part of the number, whereas "/10" is a note about the SCALE: it is what stops an 8.1 being
-/// read against the 69% beside it, and it is the reason the two can share a row at all.
-pub fn rating_suffix(scale: RatingScale) -> &'static str {
-    match scale {
-        RatingScale::OutOfTen => "/10",
-        RatingScale::Percent => "",
     }
 }
 

@@ -15,7 +15,7 @@ use std::ops::Deref;
 
 use super::frame::{Budget, RenderReport};
 use plx_machine::machine::{
-    Cx, Effects, EntryId, FocusKey, GroupId, Host, InstanceId, Leave, LogicalState, Machine,
+    Cx, Effects, EntryId, FocusKey, GroupId, Host, InstanceId, LogicalState, Machine,
     PartId, PressRead,
 };
 // The screen vocabulary the machine runtime itself names (`Host::Arg: ScreenArg`,
@@ -302,8 +302,6 @@ pub struct ReturnState<K, M = ()> {
     /// and `scroll` alone cannot say (spec §6.1; e.g. Detail's season/column/sub-row `Spot`).
     pub memory: M,
 }
-
-pub const RETURN_STATE_SHAPE: &str = "ReturnState{focus:Option<(EntryId,H::Elem)>,remembered:[(GroupId,H::Elem)],scroll:f32,memory:H::Memory}";
 
 impl<K, M: Default> Default for ReturnState<K, M> {
     fn default() -> Self {
@@ -751,12 +749,11 @@ pub struct NavPresentation {
     pub page_alpha: f32,
     pub chrome_alpha: f32,
     pub view_tab: Option<u32>,
-    pub blur_amount: f32,
 }
 
 impl Default for NavPresentation {
     fn default() -> Self {
-        Self { page_alpha: 1.0, chrome_alpha: 1.0, view_tab: None, blur_amount: 0.0 }
+        Self { page_alpha: 1.0, chrome_alpha: 1.0, view_tab: None }
     }
 }
 
@@ -769,7 +766,6 @@ pub struct DrawFrame<'a, 'views, H: Host> {
     pub page_alpha: f32,
     pub chrome_alpha: f32,
     pub view_tab: Option<u32>,
-    pub blur_amount: f32,
     /// The ROUTE-level nav dip's page alpha this frame was built with (spec §14 phase 8) — what
     /// `ui::nav::page_alpha()` answered at the one per-frame read the application made, carried
     /// alongside `page_alpha` rather than folded only into it. A container (a `RouteSurface`'s
@@ -813,22 +809,6 @@ const fn stops_in_recording_walk() -> bool {
     false
 }
 
-/// **Run `f` so a recording walk ALSO registers its stops** (test only). A host test has no GL
-/// context, so it can only run a screen's real `draw` through a recording painter, which places no
-/// stop (`DrawFrame::records_stops`); inside this scope the stops are placed exactly as the visible
-/// walk would place them, and nothing is painted. Per thread, restored on unwind.
-#[cfg(any(test, feature = "test-support"))]
-pub fn record_stops_while_recording<R>(f: impl FnOnce() -> R) -> R {
-    struct Restore(bool);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            STOPS_IN_RECORDING_WALK.with(|v| v.set(self.0));
-        }
-    }
-    let _restore = Restore(STOPS_IN_RECORDING_WALK.with(|v| v.replace(true)));
-    f()
-}
-
 impl<'a, 'views, H: Host> DrawFrame<'a, 'views, H> {
     pub fn new(cx: &'a Cx<'views, H>, painter: Painter) -> Self {
         Self::with_navigation(cx, painter, NavPresentation::default())
@@ -841,7 +821,6 @@ impl<'a, 'views, H: Host> DrawFrame<'a, 'views, H> {
             page_alpha: nav.page_alpha,
             chrome_alpha: nav.chrome_alpha,
             view_tab: nav.view_tab,
-            blur_amount: nav.blur_amount,
             nav_page_alpha: nav.page_alpha,
             press: cx.press,
             underlay: None,
@@ -863,7 +842,6 @@ impl<'a, 'views, H: Host> DrawFrame<'a, 'views, H> {
             page_alpha: self.page_alpha,
             chrome_alpha: self.chrome_alpha,
             view_tab: self.view_tab,
-            blur_amount: self.blur_amount,
         }
     }
 
@@ -1165,7 +1143,6 @@ mod draw_frame_tests {
             page_alpha: 0.42,
             chrome_alpha: 1.0,
             view_tab: None,
-            blur_amount: 0.0,
         };
         let mut f = DrawFrame::with_navigation(&cx, Painter::root(), navigation);
         assert_eq!(f.nav_page_alpha, 0.42);
@@ -1255,34 +1232,3 @@ mod composed_owner_tests {
     }
 }
 
-/// Lifecycle-sequence helper (§3.4): the events a Push delivers, in order, as `(entry, event)`.
-/// Kept as data so the dispatcher's tables are testable without a container.
-pub fn push_sequence<H: Host>(
-    old_top: Option<EntryId>,
-    new: EntryId,
-    focus: FocusTarget<H::Elem>,
-) -> Vec<(EntryId, ScreenEvent<H>)> {
-    let mut v = Vec::new();
-    if let Some(old) = old_top {
-        v.push((old, ScreenEvent::WillLeave(Leave::Deeper)));
-    }
-    v.push((new, ScreenEvent::Mount));
-    v.push((new, ScreenEvent::Enter(Enter::Fresh { focus })));
-    if let Some(old) = old_top {
-        v.push((old, ScreenEvent::Cover));
-    }
-    v
-}
-
-/// The events a Pop delivers, in order (§3.4).
-pub fn pop_sequence<H: Host>(top: EntryId, under: Option<EntryId>) -> Vec<(EntryId, ScreenEvent<H>)> {
-    let mut v = vec![
-        (top, ScreenEvent::WillLeave(Leave::ForGood)),
-        (top, ScreenEvent::Unmount),
-    ];
-    if let Some(u) = under {
-        v.push((u, ScreenEvent::Uncover));
-        v.push((u, ScreenEvent::Enter(Enter::Restored)));
-    }
-    v
-}

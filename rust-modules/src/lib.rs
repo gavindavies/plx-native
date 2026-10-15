@@ -1,58 +1,32 @@
-//! PlxNative — an unofficial native Plex client for LG webOS.
-//! Copyright © 2026 Gleb Linnik. Licensed under GPL-3.0-or-later; see LICENSE at the repository
-//! root, and THIRD-PARTY-NOTICES.md for the components this links or redistributes.
-//! Not affiliated with, endorsed by, or sponsored by Plex GmbH or LG Electronics.
+//! PiTV — a lightweight 4K video player for a Raspberry Pi 5: the files in local folders and
+//! mounted SMB shares, played with GStreamer.
+//! Licensed under GPL-3.0-or-later; see LICENSE at the repository root, and THIRD-PARTY-NOTICES.md
+//! for the components this links or redistributes.
 //!
-//! plxnative-modules — the Rust app core, built as a staticlib and linked into the C
-//! boot shim. The crate's C surface is tiny: C calls `plex_run` (port.rs), writes the fallback
-//! image marker through `plx_crash_write_image_marker`, re-enters the native-crash spool through
-//! `plx_sentry_spool_external`, and forwards the two Starfish callbacks (`sf_on_event`/
-//! `acb_on_event`, `plx_media`'s player/mod.rs). Everything else is Rust-internal (the per-module `repr(C)`
-//! shapes are migration legacy, not ABI).
-mod app; // run_application — the Rust app core / event loop (the entry inverted from main.c; port.rs's `plex_run` hands over to it)
-mod dev; // the /tmp/pitv-* trigger surface, behind one `devtriggers` feature — read it before adding a trigger
-// Pure RELEASE_LINE-parsing helpers, `include!`d verbatim by build.rs so `cargo test --lib`
-// actually runs their unit tests (see the module for why). Nothing in the app itself calls
-// them at runtime — the version rule they implement is applied once, at compile time, by
-// build.rs — so they exist in THIS crate only for the test build; `#[cfg(test)]` here, not on
-// the functions themselves, because build.rs's own separate compilation is never built with
-// `--test` and needs them unconditionally.
-mod remote; // dev/testing remote-control channel: a FIFO the loop drains into synthetic SDL keys
-mod shot; // simulator screenshots: read the frame back and write a PNG (see the module doc)
-mod system;
+//! plxnative-modules — the application crate: the event loop (`app`), the headless test harness
+//! (`remote`, `shot`) and the dev trigger surface (`dev`). `src/bin/pitv.rs` is the binary.
+mod app; // run_application — the app core / event loop
+mod dev; // the runtime-dir trigger surface, behind one `devtriggers` feature — read it before adding a trigger
+mod remote; // the remote-control channel: a FIFO the loop drains into synthetic SDL keys
+mod shot; // screenshots: read the frame back and write a PNG (see the module doc)
 
-
-/// The instance root, for the simulator binary.
-///
-/// `src/bin/sim.rs` is a separate crate and cannot see `pub(crate)` items, but it must create the
-/// directory and truncate the event log inside it before the app starts. Exposing the resolver
-/// keeps ONE definition of where that is — a second `env::var` read in the binary would be a
-/// second answer waiting to drift from this one.
 /// Play `path` once the app is running — `pitv <file>` (see `app::local_launch`).
 pub fn set_launch_file(path: std::path::PathBuf) {
     app::local_launch::set(path);
 }
 
-pub fn sim_runtime_dir() -> std::path::PathBuf {
+/// The instance root (`PITV_RUNTIME_DIR`): the binary creates it and truncates the event log
+/// inside it before the app starts.
+pub fn runtime_dir() -> std::path::PathBuf {
     plx_base::paths::runtime_dir().to_path_buf()
 }
 
 /// The event log's path, built by the ONE expression [`plx_base::eventlog::log`] uses.
-///
-/// `src/bin/sim.rs` truncates this file at startup. Spelling the name a second time over there
-/// would mean a rename could leave the binary truncating a file the app never appends to — the
-/// simulator's log would silently start non-empty, which is exactly the state `tests/run.py` dates
-/// its first line from.
-pub fn sim_events_log() -> std::path::PathBuf {
+pub fn events_log() -> std::path::PathBuf {
     plx_base::eventlog::events_log()
 }
 
-/// The port holds `plex_run`, the C entry the simulator binary calls too. It is reached by path
-/// (`plxnative_modules::port::plex_run`) so the SAME entry the C shim calls is the one called, with
-/// the compiler checking the signature. It previously re-declared `plex_run` in its own `extern "C"`
-/// block, which meant the one binary whose whole premise is "cannot drift from the shipped boot
-/// path" was the one place a signature change would become a silent ABI mismatch instead of a
-/// compile error. There is deliberately no `pub use` here: a re-export would be a reference from
-/// the crate root into the port.
-pub mod port;
-
+/// Run the application until it quits; the process exit code.
+pub fn run() -> std::os::raw::c_int {
+    app::run_application()
+}

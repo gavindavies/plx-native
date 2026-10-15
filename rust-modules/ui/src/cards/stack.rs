@@ -354,11 +354,6 @@ impl<K: Copy + Eq> Stack<K> {
         }
     }
 
-    /// Whether the hold hint ([`hold_hint`](Self::hold_hint)) is on screen.
-    pub fn hint_visible(&self) -> bool {
-        self.hint.as_ref().is_some_and(|h| h.visible())
-    }
-
     pub fn scroll(&self) -> f32 {
         self.scroll.pos
     }
@@ -437,11 +432,6 @@ impl<K: Copy + Eq> Stack<K> {
         }
     }
 
-    /// Where shelf `k`'s tiles sit now.
-    pub fn shelf_frame<H: Host, P: StackPage<H, Key = K>>(&self, p: &P, cx: &Cx<'_, H>, k: K) -> Option<SectionFrame> {
-        Some(self.frame(p, cx, self.index(k)?))
-    }
-
     /// The focus group the page named section `k` (`None` while the layout has no such section).
     pub fn group(&self, k: K) -> Option<GroupId> {
         self.index(k).map(|i| self.specs[i].group)
@@ -453,16 +443,6 @@ impl<K: Copy + Eq> Stack<K> {
 
     fn index(&self, k: K) -> Option<usize> {
         self.specs.iter().position(|s| s.key == k)
-    }
-
-    /// The cards of grid section `k` the scroll can show, out of its `len`: what the grid draws and
-    /// registers stops for this frame, by the grid's own rule. A page that keeps keys for only some
-    /// of its cards projects these (`None` before the first pass has laid the section out, or
-    /// when `k` is not a grid).
-    pub fn grid_window<H: Host, P: StackPage<H, Key = K>>(&self, p: &P, cx: &Cx<'_, H>, k: K) -> Option<std::ops::Range<usize>> {
-        let i = self.index(k)?;
-        let Body::Grid(g) = &self.bodies[i] else { return None };
-        Some(g.window(self.len_of(p, cx, i)))
     }
 
     pub fn memory(&self) -> StackMemory<K> {

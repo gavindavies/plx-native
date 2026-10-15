@@ -69,7 +69,7 @@ pub fn offset_seconds_in(ms: i64, signed: bool, locale: &plx_platform::i18n::Loc
         _ => "",
     };
     let tenths = (ms.unsigned_abs() / 100) as i64;
-    plx_platform::i18n::msg::core_seconds_in(locale, &format!("{sign}{}", locale.decimal(tenths, 1)))
+    plx_platform::i18n::msg::core_seconds(&format!("{sign}{}", locale.decimal(tenths, 1)))
 }
 
 /// The capsule's sentence for `offset_ms` in `locale` — catalog text, with the magnitude from
@@ -77,13 +77,13 @@ pub fn offset_seconds_in(ms: i64, signed: bool, locale: &plx_platform::i18n::Loc
 fn text_in(offset_ms: i64, locale: &plx_platform::i18n::LocaleContext) -> String {
     use plx_platform::i18n::msg;
     if offset_ms == 0 {
-        return msg::widgets_tracks_capsule_original_in(locale).to_string();
+        return msg::widgets_tracks_capsule_original().to_string();
     }
     let duration = offset_seconds_in(offset_ms, false, locale);
     if offset_ms > 0 {
-        msg::widgets_tracks_capsule_later_in(locale, &duration)
+        msg::widgets_tracks_capsule_later(&duration)
     } else {
-        msg::widgets_tracks_capsule_earlier_in(locale, &duration)
+        msg::widgets_tracks_capsule_earlier(&duration)
     }
 }
 
@@ -383,15 +383,15 @@ mod tests {
         assert_eq!(c.key(Key::Right { alt: false }, Edge::Repeat, 700), Some(CapsuleOut::Step(200)));
     }
 
-    /// The sentence is catalog text with the locale's decimal and seconds unit.
+    /// The sentence is catalog text with the format locale's decimal.
     #[test]
-    fn the_text_is_localized() {
-        use plx_platform::i18n::{LocaleContext, Preference};
-        let es = LocaleContext::resolve(Preference::Es, None, Some("es-ES"), None, None);
-        let be = LocaleContext::resolve(Preference::Be, None, Some("be-BY"), None, None);
-        assert_eq!(text_in(300, &es), "Subtítulos 0,3 s más tarde");
-        assert_eq!(text_in(-300, &be), "Субцітры на 0,3 с раней");
-        assert_eq!(text_in(0, &es), "Sincronización original");
+    fn the_text_uses_the_format_locales_decimal() {
+        use plx_platform::i18n::LocaleContext;
+        let us = LocaleContext::resolve(Some("en-US"), None);
+        let de = LocaleContext::resolve(Some("de-DE"), None);
+        assert_eq!(text_in(300, &us), "Subtitles 0.3 s later");
+        assert_eq!(text_in(-300, &de), "Subtitles 0,3 s earlier");
+        assert_eq!(text_in(0, &us), "Original timing");
     }
 
     /// **The capsule's sentence fits its fixed [`CAPSULE_TEXT_W`] block in every shipped
@@ -401,16 +401,16 @@ mod tests {
     fn the_capsule_sentence_fits_its_block_in_every_language() {
         use plx_base::fontcov::advances::ShippedMeasure;
         use plx_ui::fit::HEADROOM;
-        use plx_platform::i18n::{LocaleContext, Preference};
+        use plx_platform::i18n::LocaleContext;
         use plx_machine::machine::Measure;
         let mut out = Vec::new();
-        for (language, region) in [(Preference::En, "en-US"), (Preference::Es, "es-ES"), (Preference::Be, "be-BY")] {
-            let locale = LocaleContext::resolve(language, None, Some(region), None, None);
+        for region in ["en-US", "de-DE"] {
+            let locale = LocaleContext::resolve(Some(region), None);
             for ms in [-60_000, 60_000, 0] {
                 let t = text_in(ms, &locale);
                 let w = ShippedMeasure.width_str(&t, theme::size::TITLE, true);
                 if w > CAPSULE_TEXT_W * HEADROOM {
-                    out.push(format!("{}: {t:?} is {w:.0}px in {CAPSULE_TEXT_W:.0}px", language.tag()));
+                    out.push(format!("{region}: {t:?} is {w:.0}px in {CAPSULE_TEXT_W:.0}px"));
                 }
             }
         }

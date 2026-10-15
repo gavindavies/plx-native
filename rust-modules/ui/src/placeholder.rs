@@ -526,13 +526,6 @@ pub fn ink(p: Painter, reason: Reason, key: &str, col: [f32; 4]) -> (Painter, [f
     }
 }
 
-/// **The stale strip's cover**: in the sentinel build a flat sentinel rect over `r` (the strip the
-/// cascade dimmed to `STALE_ALPHA`, whose real art cannot be an exact colour); nothing otherwise.
-#[inline]
-pub fn stale_cover(p: Painter, r: Rect, rad: f32) {
-    let _ = sentinel_fill(p, r, rad);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -689,7 +682,6 @@ mod tests {
         assert_eq!(theme::CARD_ABSENT, theme::CARD_PLACEHOLDER);
         assert!(!SENTINEL);
     }
-
 
     #[test]
     fn the_sentinel_is_opaque_and_matches_its_byte_code() {

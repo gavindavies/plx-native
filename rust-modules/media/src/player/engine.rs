@@ -78,16 +78,6 @@ static ATOT: AtomicI64 = AtomicI64::new(0);
 static VATT: AtomicI64 = AtomicI64::new(0);
 static AATT: AtomicI64 = AtomicI64::new(0);
 
-/// AUs fed to the Starfish pipeline this SESSION, video and audio.
-///
-/// Zeroed by `start_bufferfeed`, not cumulative since boot: the diagnostics read-out has to answer
-/// "is this playback feeding?", and a number carried over from the last item answers a question
-/// nobody asked. The log's `v <= 4 || v % 100 == 0` cadence restarting per session is the behaviour
-/// that was wanted there too.
-pub fn fed_totals() -> (i64, i64) {
-    (VTOT.load(Ordering::Relaxed), ATOT.load(Ordering::Relaxed))
-}
-
 /// The AU queues' BASE byte caps — the denominators the read-out shows `dg_aq_*` against, so a viewer
 /// can see backpressure (a video lane pinned at its cap is the demuxer outrunning the decoder;
 /// both lanes empty while Stage is Playing is the opposite).
@@ -543,19 +533,6 @@ impl LoadVideo {
     }
 }
 
-/// True when the Load must be refused: an AV1 or VP9 stream on a set whose table lists no such
-/// decoder. Only reachable when a server ignores the profile we sent, so the refusal is a refusal
-/// to declare a codec the set may not have, never a fallback to H.264 for another bitstream.
-// The Linux build asks GStreamer instead (`gst_sink::decodes_video`); the tests still grade this.
-#[allow(dead_code)]
-pub(crate) fn load_video_refused(lv: LoadVideo, caps: &plx_platform::devcaps::Caps) -> bool {
-    match lv {
-        LoadVideo::Av1 => !caps.av1,
-        LoadVideo::Vp9 => !caps.vp9,
-        LoadVideo::H264 | LoadVideo::H265 => false,
-    }
-}
-
 /// **The sink envelope for this session, and the rule is deliberately narrow.** Until 2026-09-03
 /// the streamed A/V Load declared `ENVELOPE_UHD60` for every codec and every source, and on
 /// webOS 10.3.1 that refuses EVERY H.264 Load — i.e. every server transcode — with `type=18
@@ -572,11 +549,6 @@ pub(crate) fn load_video_refused(lv: LoadVideo, caps: &plx_platform::devcaps::Ca
 ///   or every 1080p file would be promoted to the 4K declaration it was meant to escape.
 /// * **Unknown raster (0 on an axis) means 4K60**, today's value: "nobody said" must not
 ///   under-declare a file that might be 4K.
-/// * **The device's own table clamps, per codec, only when it was actually READ.** On the dev set
-///   and on 10.3.1 both rows claim ≥4K@60 and nothing changes; a set whose HEVC row says
-///   1920x1088 (a Full HD panel — issue #63's hypothesis) gets FHD60 for HEVC too. The assumed
-///   fallback is never a clamp. A clamped 1088 is normalised to 1080 for the same reason as
-///   above, and `fps` is never raised above 60 by the table (120 is a claim nobody has tested).
 ///
 /// `maxFrameRate`: **H.264 declares the stream's own rate class** (24/25/30/50/60, never below
 /// the stream; 60 when the rate is unknown) — see the measurement inside; HEVC stays at 60, the
@@ -590,8 +562,6 @@ fn sink_envelope(
     video: LoadVideo,
     max_raster: (u16, u16),
     stream_fps: f64,
-    caps: &plx_platform::devcaps::Caps,
-    measured: bool,
 ) -> SinkEnvelope {
     let fits_fhd = |w: u32, h: u32| w > 0 && h > 0 && w <= 1920 && h <= 1088;
     let (mw, mh) = (u32::from(max_raster.0), u32::from(max_raster.1));
@@ -613,21 +583,6 @@ fn sink_envelope(
     // the declaration a ceiling the stream fits under.
     if video == LoadVideo::H264 && stream_fps > 0.0 && stream_fps.is_finite() {
         env.fps = fps_class(stream_fps);
-    }
-    if measured {
-        let (rw, rh, rf) = match video {
-            LoadVideo::H264 => caps.h264_row,
-            LoadVideo::H265 => caps.hevc_row,
-            LoadVideo::Av1 => caps.av1_row,
-            LoadVideo::Vp9 => caps.vp9_row,
-        };
-        let clamp = |v: u32, bound: u32| if bound == 0 { v } else { v.min(bound) };
-        env.w = clamp(env.w, rw);
-        env.h = clamp(env.h, rh);
-        env.fps = clamp(env.fps, rf);
-        if env.h == 1088 {
-            env.h = 1080;
-        }
     }
     env
 }
@@ -682,8 +637,6 @@ fn sink_envelope_now(ps: &crate::playback::PlaybackSession, video: LoadVideo) ->
         video,
         crate::playback::sink_max_raster(ps),
         crate::playback::stream_fps(ps),
-        plx_platform::devcaps::caps(),
-        plx_platform::devcaps::measured(),
     )
 }
 
@@ -1165,38 +1118,10 @@ fn start_bufferfeed_inner(
         stream_th,
         load_th,
     };
-    // Re-arm the in-place-seek probe for this session. `feed_stream` clears it when
-    // `sf_send_segment` can't reach the pipeline, and that is a fact about the StarfishMediaAPIs
-    // object — which `sf_load` constructs and teardown's `sf_destroy` destructs, once per session
-    // — not about the TV (see the SCOPE note on INPLACE_SEEK_OK in mod.rs). Left latched for the
-    // process, one teardown-window race silently turned every subsequent seek, of every
-    // subsequent item, into a full reload for the rest of the app's life. Placed HERE rather than
-    // at the top of this function on purpose: the `engine_is_live` no-op return above must NOT
-    // re-arm, or a stray PLAY landing mid-session would cancel a fallback that is still needed.
-    //
-    // NOT re-armed on webOS 5+. In-place seek reaches the pipeline through two decompile-derived
-    // offsets into LG-private C++ objects — `StarfishMediaAPIs::player` at object+0x4c, then
-    // `AbstractPlayer::pipeline` at +0x04 (src/starfish.c's sf_pipeline), plus
-    // MEDIA_CUSTOM_CONTENT_INFO's ptsToDecode at +0x28. Every one of those was read off a
-    // webOS 4.5 binary with a disassembler, and nothing in a symbol table can confirm them on
-    // another firmware: a field added to StarfishMediaAPIs by any 5.x build moves +0x4c and the
-    // very next seek dereferences whatever now lives there. The reload fallback is slower but is
-    // built out of Load/Play alone and assumes no layout at all. Re-enable per release only once
-    // somebody has re-derived the offsets on that firmware.
-    //
-    // NOR when the library is the pre-C++11 build (`inplace_layout_known`): its StarfishMediaAPIs
-    // is a different object from the 4.5 one, and the first fast-forward on a 3.4.0 set crashed
-    // through these offsets. The old-ABI Feed (`sf_feed_abi_is_cow`) is the direct evidence, and
-    // it covers 3.9.x too. A KNOWN release below 4 is refused as well; an UNKNOWN one
-    // (`major == 0`, os_info unreadable) with the C++11 Feed keeps in-place seek, as before
-    // #578, because that Feed says the library is 4.x or later and the VP_EXPORTED exclusion
-    // below already handles 5+.
-    let layout_known = inplace_layout_known(
-        plx_platform::tv::device::info().major,
-        sink().feed_abi_is_cow(),
-    );
+    // Re-arm the in-place-seek probe for this session (see INPLACE_SEEK_OK in mod.rs). A sink
+    // with an exported video window (the GStreamer sink) seeks by reload instead.
     super::INPLACE_SEEK_OK.store(
-        layout_known && sink().window_mode() != super::VP_EXPORTED,
+        !sink().feed_abi_is_cow() && sink().window_mode() != super::VP_EXPORTED,
         Ordering::Relaxed,
     );
     pa.install(eng);
@@ -2284,14 +2209,6 @@ fn feed_audio_lane(mt: &MainThread, eng: &mut Engine) {
         eng.pending_audio = None;
         fed += 1;
     }
-}
-
-/// Whether the decompiled StarfishMediaAPIs offsets (see the NOR comment in `start_bufferfeed_inner`)
-/// may be trusted for in-place seek. The old-ABI `Feed` is the primary gate: it proves
-/// libplayerAPIs is the pre-C++11 build, so 3.9.x is excluded without listing releases. A known
-/// release below 4 is refused too; `major == 0` (release unknown) defers to the Feed evidence.
-fn inplace_layout_known(major: u32, feed_abi_is_cow: bool) -> bool {
-    !feed_abi_is_cow && (major == 0 || major >= 4)
 }
 
 #[cfg(test)]
@@ -4249,12 +4166,6 @@ mod load_in_flight_tests {
 mod sink_envelope_tests {
     use super::*;
 
-    fn caps(h264: (u32, u32, u32), hevc: (u32, u32, u32)) -> plx_platform::devcaps::Caps {
-        let mut c = plx_platform::devcaps::Caps::assumed();
-        c.h264_row = h264;
-        c.hevc_row = hevc;
-        c
-    }
     #[test]
     fn audio_payload_names_dts_and_refuses_unsupported_formats() {
         assert_eq!(audio_payload_codec("dts"), Some(("DTS", 4)));
@@ -4271,12 +4182,8 @@ mod sink_envelope_tests {
         assert!(payload.contains(r#""audio":"DTS""#));
     }
 
-    const DEV_SET: ((u32, u32, u32), (u32, u32, u32)) = ((4096, 2304, 60), (4096, 2176, 60));
-    const FHD_SET: ((u32, u32, u32), (u32, u32, u32)) = ((1920, 1088, 60), (1920, 1088, 60));
-
     #[test]
     fn h264_declares_fhd_only_when_the_widest_raster_fits_fhd() {
-        let c = caps(DEV_SET.0, DEV_SET.1);
         for (raster, want) in [
             ((720, 480), ENVELOPE_FHD60),
             ((1280, 720), ENVELOPE_FHD60),
@@ -4288,52 +4195,26 @@ mod sink_envelope_tests {
             ((0, 0), ENVELOPE_UHD60),  // nobody said: today's value
             ((1920, 0), ENVELOPE_UHD60),
         ] {
-            assert_eq!(sink_envelope(LoadVideo::H264, raster, 0.0, &c, true), want, "h264 {raster:?}");
-            assert_eq!(
-                sink_envelope(LoadVideo::H264, raster, 0.0, &c, false),
-                want,
-                "h264 {raster:?} unmeasured"
-            );
+            assert_eq!(sink_envelope(LoadVideo::H264, raster, 0.0), want, "h264 {raster:?}");
         }
     }
 
     #[test]
     fn hevc_keeps_the_verified_4k60_on_a_4k_set_whatever_the_source() {
-        let c = caps(DEV_SET.0, DEV_SET.1);
         for raster in [(720, 480), (1920, 1080), (3840, 2160), (0, 0)] {
-            assert_eq!(sink_envelope(LoadVideo::H265, raster, 0.0, &c, true), ENVELOPE_UHD60, "{raster:?}");
-            assert_eq!(sink_envelope(LoadVideo::H265, raster, 0.0, &c, false), ENVELOPE_UHD60, "{raster:?}");
+            assert_eq!(sink_envelope(LoadVideo::H265, raster, 0.0), ENVELOPE_UHD60, "{raster:?}");
         }
-    }
-
-    #[test]
-    fn a_measured_full_hd_table_clamps_both_codecs_and_the_assumed_table_clamps_nothing() {
-        let c = caps(FHD_SET.0, FHD_SET.1);
-        assert_eq!(sink_envelope(LoadVideo::H265, (3840, 2160), 0.0, &c, true), ENVELOPE_FHD60);
-        assert_eq!(sink_envelope(LoadVideo::H264, (3840, 2160), 0.0, &c, true), ENVELOPE_FHD60);
-        assert_eq!(sink_envelope(LoadVideo::H265, (0, 0), 0.0, &c, true), ENVELOPE_FHD60);
-        // the same rows, not measured: never a clamp
-        assert_eq!(sink_envelope(LoadVideo::H265, (3840, 2160), 0.0, &c, false), ENVELOPE_UHD60);
-        assert_eq!(sink_envelope(LoadVideo::H265, (0, 0), 0.0, &plx_platform::devcaps::Caps::assumed(), true), ENVELOPE_UHD60);
-        // a table stating a lower frame rate clamps it; a higher one never raises it
-        let slow = caps((3840, 2160, 30), (3840, 2160, 120));
-        assert_eq!(sink_envelope(LoadVideo::H264, (3840, 2160), 0.0, &slow, true).fps, 30);
-        assert_eq!(sink_envelope(LoadVideo::H265, (3840, 2160), 0.0, &slow, true).fps, 60);
     }
 
     /// The device measurement behind the rate rule: 4K H.264 declared at 60 is re-announced at
     /// 30 by the pipeline; at its own class it is not. HEVC and an unknown rate keep 60.
     #[test]
     fn h264_declares_the_streams_rate_class_and_hevc_keeps_60() {
-        let c = caps(DEV_SET.0, DEV_SET.1);
-        for (fps, want) in [(24.0, 24), (23.976, 24), (25.0, 25), (29.97, 30), (30.0, 30), (50.0, 50), (59.94, 60), (60.0, 60), (120.0, 60), (0.0, 60)] {
-            assert_eq!(sink_envelope(LoadVideo::H264, (3840, 2160), fps, &c, true).fps, want, "h264 {fps}");
-            assert_eq!(sink_envelope(LoadVideo::H264, (1920, 1080), fps, &c, true).fps, want, "h264 fhd {fps}");
-            assert_eq!(sink_envelope(LoadVideo::H265, (3840, 2160), fps, &c, true).fps, 60, "hevc {fps}");
+        for (fps, want) in [(24.0, 24), (23.976, 24), (25.0, 25), (29.97, 30), (30.0, 30), (50.0, 50), (59.94, 60), (60.0, 60), (120.0, 120), (0.0, 60)] {
+            assert_eq!(sink_envelope(LoadVideo::H264, (3840, 2160), fps).fps, want, "h264 {fps}");
+            assert_eq!(sink_envelope(LoadVideo::H264, (1920, 1080), fps).fps, want, "h264 fhd {fps}");
+            assert_eq!(sink_envelope(LoadVideo::H265, (3840, 2160), fps).fps, 60, "hevc {fps}");
         }
-        // the table still clamps a class from above
-        let slow = caps((3840, 2160, 25), (3840, 2160, 60));
-        assert_eq!(sink_envelope(LoadVideo::H264, (3840, 2160), 30.0, &slow, true).fps, 25);
     }
 
     #[test]
@@ -4394,34 +4275,6 @@ mod sink_envelope_tests {
     }
 
     #[test]
-    fn vp9_envelope_follows_hevc_and_its_own_row() {
-        let mut c = caps(DEV_SET.0, DEV_SET.1);
-        c.vp9 = true;
-        c.vp9_row = (3840, 2160, 30);
-        assert_eq!(sink_envelope(LoadVideo::Vp9, (1920, 1080), 23.976, &c, false), ENVELOPE_UHD60);
-        assert_eq!(
-            sink_envelope(LoadVideo::Vp9, (1920, 1080), 23.976, &c, true),
-            SinkEnvelope { w: 3840, h: 2160, fps: 30 }
-        );
-        c.vp9_row = (0, 0, 0);
-        assert_eq!(sink_envelope(LoadVideo::Vp9, (1920, 1080), 23.976, &c, true), ENVELOPE_UHD60);
-    }
-
-    #[test]
-    fn av1_envelope_follows_hevc_and_its_own_row() {
-        let mut c = caps(DEV_SET.0, DEV_SET.1);
-        c.av1 = true;
-        c.av1_row = (3840, 2160, 30);
-        assert_eq!(sink_envelope(LoadVideo::Av1, (1920, 1080), 23.976, &c, false), ENVELOPE_UHD60);
-        assert_eq!(
-            sink_envelope(LoadVideo::Av1, (1920, 1080), 23.976, &c, true),
-            SinkEnvelope { w: 3840, h: 2160, fps: 30 }
-        );
-        c.av1_row = (0, 0, 0);
-        assert_eq!(sink_envelope(LoadVideo::Av1, (1920, 1080), 23.976, &c, true), ENVELOPE_UHD60);
-    }
-
-    #[test]
     fn static_envelope_av1_and_vp9_are_uhd60() {
         assert_eq!(static_envelope(LoadVideo::Av1), ENVELOPE_UHD60);
         assert_eq!(static_envelope(LoadVideo::Vp9), ENVELOPE_UHD60);
@@ -4438,26 +4291,6 @@ mod sink_envelope_tests {
             assert!(!p.contains("H265"), "{p}");
             assert!(p.contains(r#""maxWidth":3840"#) && p.contains(r#""maxHeight":2160"#), "{p}");
         }
-    }
-
-    #[test]
-    fn load_video_refused_only_for_av1_and_vp9_without_their_rows() {
-        let assumed = plx_platform::devcaps::Caps::assumed();
-        assert!(load_video_refused(LoadVideo::Av1, &assumed));
-        assert!(load_video_refused(LoadVideo::Vp9, &assumed));
-        assert!(!load_video_refused(LoadVideo::H264, &assumed));
-        assert!(!load_video_refused(LoadVideo::H265, &assumed));
-        let with_row = plx_platform::devcaps::Caps {
-            av1: true,
-            vp9: true,
-            ..plx_platform::devcaps::Caps::assumed()
-        };
-        for video in [LoadVideo::H264, LoadVideo::H265, LoadVideo::Av1, LoadVideo::Vp9] {
-            assert!(!load_video_refused(video, &with_row), "{video:?}");
-        }
-        // one row never admits the other codec
-        let av1_only = plx_platform::devcaps::Caps { av1: true, ..plx_platform::devcaps::Caps::assumed() };
-        assert!(load_video_refused(LoadVideo::Vp9, &av1_only));
     }
 
 }
@@ -4529,20 +4362,6 @@ mod load_refusal_tests {
 }
 
 #[cfg(test)]
-mod inplace_layout_tests {
-    use super::inplace_layout_known;
-
-    #[test]
-    fn in_place_seek_needs_the_cxx11_feed_and_a_release_that_is_unknown_or_4_plus() {
-        assert!(inplace_layout_known(4, false));
-        assert!(inplace_layout_known(0, false));
-        assert!(inplace_layout_known(11, false));
-        assert!(!inplace_layout_known(3, false));
-        assert!(!inplace_layout_known(3, true));
-        assert!(!inplace_layout_known(4, true));
-        assert!(!inplace_layout_known(0, true));
-    }
-}
 
 #[cfg(test)]
 mod audio_lead_in_tests {

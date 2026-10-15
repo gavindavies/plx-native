@@ -185,27 +185,6 @@ impl PlayerScreen {
         plx_media::player::TX.scrub_ns.store(self.scrub.ns, Relaxed);
     }
 
-    /// **A teardown or an engine reload has retired the transport's mailboxes.**
-    ///
-    /// `Transport::reset`/`reset_for_reload` used to clear `hud_until`/`scrub_ns` themselves, which
-    /// is a write to another owner's state (§2.3). They no longer touch either; `player::teardown`
-    /// runs on the main thread and the loop delivers this instead, so the screen clears its own
-    /// copy and the next [`publish`](Self::publish) republishes it.
-    ///
-    /// `for_reload` is the same distinction the transport draws: a reload is the SAME playback at a
-    /// new position (a seek, a quality pick, an app-switch resume), so only the in-flight gesture
-    /// is retired; a real stop ends the session, so the HUD's timer and its dismissal go with it.
-    pub fn transport_reset(&mut self, for_reload: bool) {
-        self.scrub.ns = -1;
-        self.scrub.disengage();
-        self.scrub.commit_at = 0;
-        if !for_reload {
-            self.hud.until = 0;
-            self.hud.dismissed = false;
-        }
-        self.publish();
-    }
-
     /// Draw the image-subtitle display set — the render half this screen owns.
     pub fn draw_subtitle_bitmap(&mut self, hud_up: bool) {
         plx_appkit::player_hud::draw_subtitle_bitmap(&mut self.render.subs, hud_up);
@@ -423,7 +402,6 @@ impl PlayerScreen {
 const GROUP_SCRUB: GroupId = GroupId(0);
 const GROUP_ROW: GroupId = GroupId(1);
 const GROUP_FAILURE: GroupId = GroupId(3);
-
 
 impl<H: PlayerLike + crate::registry::MetadataLike> Machine<H> for PlayerScreen {
     type Ev = ScreenEvent<H>;

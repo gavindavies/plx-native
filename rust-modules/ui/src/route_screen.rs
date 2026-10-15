@@ -234,28 +234,12 @@ impl RouteGround {
         self.field.draw(p, Rect::FULL, Role::Ground, 1.0);
     }
 
-    /// Draw the pre-Home atmosphere captured at construction. Ordinary Settings samples its
-    /// rendered host through draw_host instead. No application reads or writes happen in draw.
-    pub fn draw_home(&mut self, p: Painter) {
-        self.draw_default(p);
-    }
-
     /// The latch half of [`Self::draw_default`] — see [`Self::latch_host`] for why this is split
     /// out from the draw call rather than inlined.
     fn latch_default(&mut self) {
         if !self.field.is_latched() {
             self.field.latch_from_corners(Self::fallback_corners(), Grade::Dim);
         }
-    }
-
-    /// Draw a pre-content route on the product's authored fallback atmosphere.
-    ///
-    /// Login and the profile ceremony have no Home frame and no media item to sample.  They still
-    /// belong to the same route family, so they take the same broad graphite/amber envelope as an
-    /// artwork-less first-run screen instead of inventing another flat background locally.
-    pub fn draw_default(&mut self, p: Painter) {
-        self.latch_default();
-        self.field.draw(p, Rect::FULL, Role::Ground, 1.0);
     }
 
     /// **The ground's own colour at one screen point.** Every `draw_*` above paints the field over
@@ -364,27 +348,6 @@ impl RoutePush {
             self.progress.pos = target;
             self.progress.vel = 0.0;
         }
-    }
-
-    /// Seed this push's spring — position AND velocity, not just [`amount`](Self::amount)'s
-    /// clamped read-out — from ANOTHER push's current state. For a screen that gets its OWN
-    /// dedicated `RoutePush` split out of a shared one so a sibling's fade cannot bleed into it
-    /// (`settings::HOME_PUSH` off `settings::CHILD`, 2026-09-04), a caller that starts the new
-    /// push cold at rest whenever it starts driving it is right in the ordinary case — both begin
-    /// at 0 together — but wrong the moment the shared push is NOT at rest, because a sibling
-    /// (Privacy/Legal) was open a moment ago and is still reversing out of it: the shared root
-    /// would resume mid-fade while the freshly-opened child painted itself from a cold zero,
-    /// which is two supposedly-complementary halves of one crossfade disagreeing about how far it
-    /// has travelled (Codex review, 2026-09-04). Call this once, on the RISING EDGE of the new
-    /// push starting to drive toward open — detected from that flag's own transition, never from
-    /// `self.amount() == 0.0`: this type's spring only APPROACHES its target (see [`amount`]'s
-    /// own doc), so a settled-closed push sits at some tiny positive residual, not exactly zero,
-    /// and an equality guard reads as "already synced" forever after the first open (Codex review,
-    /// 2026-09-04, round 3 — the first version of this call site's guard made exactly that
-    /// mistake). Unconditional on the edge is deliberately simpler than gating on `other` being
-    /// away from rest: when `other` already IS at rest the copy is a harmless no-op.
-    pub fn sync_to(&mut self, other: &RoutePush) {
-        self.progress = other.progress;
     }
 
     /// **Is the push parked at the endpoint `open` names?** Rule 11's timing guard.
@@ -790,27 +753,6 @@ impl RouteLayout {
         Self::screen_with_copy_w(preferred_copy_w.max(longest_word).max(title_width).ceil().min(max_copy_w))
     }
 
-    /// Keep a complete disclosure above its peer actions, reclaiming unused narrative width
-    /// before requiring scrolling. The other column keeps its measured minimum width. `fits`
-    /// uses the same title/body flow as drawing; the returned columns serve focus and paint.
-    pub fn screen_for_reading(
-        min_action_w: f32,
-        min_content_w: f32,
-        fits: impl Fn(Self) -> bool,
-    ) -> Self {
-        let max_copy_w = (SAFE.w - COLUMN_GAP - min_content_w).max(NARRATIVE_W);
-        let mut width = NARRATIVE_W.max(min_action_w).min(max_copy_w);
-        loop {
-            let mut layout = Self::screen_with_copy_w(width);
-            // The answer row can use the inter-column whitespace without narrowing either
-            // reading column. Keep one control gap before the related-link column.
-            let action_limit = layout.content.x - layout.action.x - crate::widgets::CONTROL_GAP;
-            layout.action.w = layout.action.w.max(min_action_w.min(action_limit));
-            if fits(layout) || width >= max_copy_w { return layout; }
-            width = (width + theme::space::MD).min(max_copy_w);
-        }
-    }
-
     /// Frame for a table whose first section has a label.
     ///
     /// [`TableView`](crate::table::TableView) owns internal breathing room above that label.
@@ -1089,18 +1031,14 @@ mod tests {
         }
         let measure = TitleMeasure;
         let min_content = RouteLayout::screen().content.w;
-        for preference in [plx_platform::i18n::Preference::En, plx_platform::i18n::Preference::Es, plx_platform::i18n::Preference::Be] {
-            let locale = plx_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
-            let title = plx_platform::i18n::msg::browse_person_filmography_in(&locale);
+        {
+            let title = plx_platform::i18n::msg::browse_person_filmography();
             let layout = RouteLayout::screen_for_title(480.0, min_content, title, &measure);
             let full_width = measure.width_str(title, theme::size::HERO, true);
             assert!(layout.narrative.w >= full_width, "route label must fit in full: {title}");
             assert!(layout.content.w >= min_content);
             assert!(inside_safe(layout.content));
             assert!(inside_safe(layout.narrative));
-            if preference == plx_platform::i18n::Preference::Be {
-                assert!(layout.narrative.w > 480.0, "exercise the clipped screenshot's narrow column");
-            }
         }
         // Expansion beyond available width must wrap, never steal the content column.
         let title = "ФільмаграфіяФільмаграфія";
@@ -1151,10 +1089,9 @@ mod tests {
         }
         let measure = QuestionMeasure;
         let layout = RouteLayout::screen();
-        for preference in [plx_platform::i18n::Preference::En, plx_platform::i18n::Preference::Es, plx_platform::i18n::Preference::Be] {
-            let locale = plx_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
-            for question in [plx_platform::i18n::msg::settings_consent_crash_title_in(&locale),
-                plx_platform::i18n::msg::settings_consent_product_title_in(&locale)] {
+        {
+            for question in [plx_platform::i18n::msg::settings_consent_crash_title(),
+                plx_platform::i18n::msg::settings_consent_product_title()] {
                 let title = RouteLayout::narrative_title(question).with_measure(&measure);
                 assert!(!title.truncates(layout.narrative.w), "question was elided: {question}");
                 let height = title.measure_h(layout.narrative.w);

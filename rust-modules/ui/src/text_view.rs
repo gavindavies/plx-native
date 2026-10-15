@@ -490,15 +490,6 @@ impl<'a> TextView<'a> {
         top + drawn_h - self.line_h()
     }
 
-    /// Reserve [`fade_last`](Self::fade_last) room for a right-pinned [`more_mark`] at this
-    /// block's own size, plus `gap` of air before it — the clamped-prose idiom of the Person bio
-    /// and the Collection summary. Needs [`with_measure`](Self::with_measure) first; without a
-    /// measure only the gap is reserved.
-    pub fn fade_for_more(self, gap: f32) -> Self {
-        let mark = self.measure.map_or(0.0, |m| m.width(more_mark(), self.sz, true));
-        self.fade_last(mark + gap)
-    }
-
     /// Declare that the mark [`fade_last`](Self::fade_last) reserves room for is pinned on the last
     /// line UNCONDITIONALLY (the About card's MORE opens the card whatever the synopsis' length), so
     /// an untruncated last line that reaches into the reserved zone dissolves too instead of
@@ -507,15 +498,6 @@ impl<'a> TextView<'a> {
     pub fn mark_always(mut self) -> Self {
         self.mark_always = true;
         self
-    }
-
-    /// Draw the [`more_mark`] pinned right on the last line of this block, drawn at `x`/`top` in a
-    /// `w`-wide column to `drawn_h`: `TEXT_SECONDARY` while `marked` (the block holds a pressed
-    /// focus), `TEXT_TERTIARY` otherwise. The pair to [`fade_for_more`](Self::fade_for_more).
-    pub fn draw_more(&self, p: Painter, x: f32, top: f32, w: f32, drawn_h: f32, marked: bool) {
-        let ink = if marked { crate::theme::TEXT_SECONDARY } else { crate::theme::TEXT_TERTIARY };
-        Label::new(more_mark().as_ptr(), self.sz, ink).bold().h(HAlign::Right).v(VAlign::CapTop)
-            .draw(p, Rect::new(x, self.last_line_cap_y(top, drawn_h), w, 0.0));
     }
 
     /// Does [`draw`](Self::draw) dissolve the LAST line at wrap width `width` into the
@@ -723,10 +705,9 @@ mod tests {
     /// literal, so a future edit that lowers the case fails HERE, citing the rule, rather than
     /// silently drifting one screen away from every other.
     #[test]
-    fn the_more_mark_is_uppercase_in_supported_locales() {
-        for preference in [plx_platform::i18n::Preference::En, plx_platform::i18n::Preference::Es, plx_platform::i18n::Preference::Be] {
-        let locale = plx_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
-        let s = plx_platform::i18n::msg::browse_action_more_in(&locale);
+    fn the_more_mark_is_uppercase() {
+        {
+        let s = plx_platform::i18n::msg::browse_action_more();
         assert_eq!(
             s,
             s.to_uppercase(),
@@ -762,11 +743,6 @@ mod tests {
             assert_eq!(lines.lines, live.lines);
             assert_eq!(lines.truncated, live.truncated);
             assert!(Rc::ptr_eq(&lines, &measured.wrap(180.0)), "reuse belongs to this view");
-            let missing = crate::rec::TableMeasure::new(Default::default());
-            let _ = build().with_measure(&missing).wrap(180.0);
-            assert!(missing.take_miss().is_some(), "neither live nor another owner's memo may mask a missing table");
-            let _ = measured.with_measure(&missing).wrap(180.0);
-            assert!(missing.take_miss().is_some(), "changing capability must invalidate this view's memo too");
         }
         plx_gfx::text::take_measure_fault();
     }

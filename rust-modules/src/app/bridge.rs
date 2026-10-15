@@ -112,13 +112,9 @@ pub(crate) struct Bridge {
     playback: plx_media::playback::PlaybackSession,
     /// Was the publication above refreshed on the last frame?
     playback_live: bool,
-    /// **Is the video plane bound?** `Player::video_plane_bound`, published here by the loop on its
-    /// edges — the rig's own copy of the one bit, for the call at draw entry
-    /// (`clear_opaque_region`), which the `Rig` trait gives no argument.
-    video_plane: bool,
     /// **Erased, so the host suite can supply one that does not need a font.** The app's own
     /// measure is `text::TtfMeasure`, which reads the fonts `init_text` opened at boot.
-    measure: plx_ui::rec::Measurements,
+    measure: &'static dyn Measure,
     content_reqs: Vec<(MachineId, ContentReq, ReturnState<u32, PageMemory>)>,
     /// What the player's overlay surfaces asked of the loop this frame — drained by
     /// `playback::player_requests`, which holds the `MainThread` token they cannot.
@@ -153,8 +149,7 @@ impl Bridge {
             mounter: AppMounter::default(),
             playback: plx_media::playback::PlaybackSession::IDLE,
             playback_live: false,
-            video_plane: false,
-            measure: plx_ui::rec::Measurements::Live(measure),
+            measure,
             content_reqs: Vec::new(),
             player_reqs: Vec::new(),
             item_menu_reqs: Vec::new(),
@@ -167,7 +162,7 @@ impl Bridge {
 
     /// Publish the tab bar for this frame (`app::tabs`), before the dispatcher runs.
     pub(crate) fn publish_tabs(&mut self, d: &mut Dispatcher<AppHost>, dt: f32) {
-        let measure: &dyn Measure = &self.measure;
+        let measure: &dyn Measure = self.measure;
         self.tabs.publish(d, measure, dt);
     }
 
@@ -207,7 +202,7 @@ impl Bridge {
             focus: plx_machine::machine::FocusRead { current: ret.focus, ..Default::default() },
             owner: plx_machine::machine::InputOwner::Entry(entry),
         };
-        let cx = parts.cx::<AppHost>(self.views(), &self.measure);
+        let cx = parts.cx::<AppHost>(self.views(), self.measure);
         let rect = real.focused_card_rect(&cx, ret.focus, At::Drawn);
         Some(plx_screens::registry::ItemMenuArg {
             path: path.to_string_lossy().into_owned(),
@@ -237,7 +232,7 @@ impl Bridge {
             focus: plx_machine::machine::FocusRead { current: ret.focus, ..Default::default() },
             owner: plx_machine::machine::InputOwner::Entry(entry),
         };
-        let cx = parts.cx::<AppHost>(self.views(), &self.measure);
+        let cx = parts.cx::<AppHost>(self.views(), self.measure);
         let rect = real.focused_card_rect(&cx, ret.focus, At::Drawn);
         Some(plx_screens::registry::ItemMenuArg { path, kind: menu, host: entry, focus: ret.focus, anchor: anchor_bits(rect) })
     }
@@ -262,7 +257,7 @@ impl Bridge {
         // above that quad, like Popover::scrim_lifting's legacy callback scope.
         let _live = plx_ui::popover::host::live();
         let parts = opener_parts(d, entry, focus);
-        let cx = parts.cx::<AppHost>(self.views(), &self.measure);
+        let cx = parts.cx::<AppHost>(self.views(), self.measure);
         let mut frame = DrawFrame::with_navigation(&cx, plx_ui::Painter::root(), self.navigation_presentation());
         screen.redraw_focused(&mut frame, focus);
     }
@@ -330,11 +325,6 @@ impl Bridge {
         self.stores.metadata_view()
     }
 
-    /// The video plane's EDGE, from `Player::set_video_plane_bound` and from nowhere else.
-    pub(crate) fn publish_video_plane(&mut self, bound: bool) {
-        self.video_plane = bound;
-    }
-
     /// **Publish this frame's playback session** — see `AppViews::session`. Called once per
     /// iteration by the loop, BEFORE the dispatcher frame and the tree draw, so every screen in one
     /// frame reads one consistent picture of the playback. Off the player the publication is
@@ -385,7 +375,6 @@ impl Rig<AppHost> for Bridge {
             page_alpha: plx_ui::nav::page_alpha(),
             chrome_alpha: plx_ui::nav::chrome_alpha(),
             view_tab: u32::try_from(plx_ui::nav::view_tab(-1)).ok(),
-            blur_amount: plx_ui::nav::blur_amount(),
         }
     }
     fn surface_scope(&mut self) -> Option<plx_ui::popover::host::Live> {
@@ -398,7 +387,7 @@ impl Rig<AppHost> for Bridge {
                 metadata: self.stores.metadata_view(),
                 session: &self.playback,
             },
-            measure: &self.measure,
+            measure: self.measure,
         }
     }
     fn deliver(&mut self, to: MachineId, msg: &AppMsg, parts: &CxParts<u32>, fx: &mut Effects<'_, AppHost>) -> Handled {
@@ -419,17 +408,6 @@ impl Rig<AppHost> for Bridge {
     /// The render cache's upload step is the loop's (`adapters::poster::prepare`, in the window
     /// between its present decision and the draw), so this hook is empty.
     fn prepare(&mut self, _b: &mut Budget, _present: &mut Present) {}
-    fn ls2_pump(&mut self) {}
-    fn opaque_route(&mut self, video_plane_bound: bool) {
-        super::run::rig_opaque_route(video_plane_bound);
-    }
-    /// At draw entry, and conditional on the video-plane bit: clearing the opaque region on a frame
-    /// with no plane under it would silently retract the claim `opaque_route` had just made.
-    fn clear_opaque_region(&mut self) {
-        if self.video_plane {
-            super::run::rig_clear_opaque_region();
-        }
-    }
     fn now_us(&self) -> u64 {
         (self.now_us)()
     }
@@ -460,7 +438,6 @@ pub(crate) fn frame_with_tap(
     tap: &mut dyn plx_ui::dispatch::Tap<AppHost>,
 ) -> (&'static str, FrameReport) {
     let _frame_scope = plx_base::task::FrameScope::enter();
-    plx_base::storage_worker::pump_retained();
     for (id, gen) in rig.stores.take_notices() {
         d.store_changed(id.ord(), gen);
     }

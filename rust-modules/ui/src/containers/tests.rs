@@ -1070,7 +1070,6 @@ fn one_navigation_snapshot_reaches_draw_frames_without_mutating_logical_state() 
     rig.page_alpha = 0.21;
     rig.chrome_alpha = 0.37;
     rig.view_tab = Some(2);
-    rig.blur_amount = 0.63;
     let before = d.state_hash();
     let reads = rig.navigation_reads.get();
     d.draw(&mut rig, true);
@@ -1078,7 +1077,6 @@ fn one_navigation_snapshot_reaches_draw_frames_without_mutating_logical_state() 
         .downcast_ref::<crate::fixture::FixtureModal>().unwrap();
     assert_eq!(modal.last_navigation.chrome_alpha, 0.37);
     assert_eq!(modal.last_navigation.view_tab, Some(2));
-    assert_eq!(modal.last_navigation.blur_amount, 0.63);
     assert_eq!(rig.navigation_reads.get(), reads + 1, "one snapshot, not live reads per screen");
     assert_eq!(d.state_hash(), before, "presentation is render state, not a logical mutation");
 }
@@ -2119,8 +2117,6 @@ fn a_held_page_has_its_text_resident_before_its_replacement_capture() {
     let screen = |d: &Dispatcher<FixtureHost>| {
         let s = d.top_screen().unwrap().as_any().unwrap()
             .downcast_ref::<crate::fixture::FixtureScreen>().unwrap();
-        assert_eq!(s.speculative_draws, s.recorded_draws,
-            "every text walk is speculative to the recorder: a replay must not refuse on what it warms");
         (s.draw_at, s.recorded_draws)
     };
     let (floor_draw, recorded) = screen(&d);

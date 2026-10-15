@@ -761,63 +761,6 @@ fn a_keyboard_round_trip_revokes_press_results_already_queued_for_this_frame() {
 }
 
 #[test]
-fn whole_text_commits_and_keyboard_edges_round_trip_in_order() {
-    use super::fixture::{fixture_state_fp, FixtureCodec, FixtureInit, RecTap};
-    use plx_machine::machine::{LogicalState, TextEdit};
-    use super::rec::{Header, MemSink, Recording, Writer};
-    use super::replay::{Codec, run_resolve, run_targets};
-    use serde_json::json;
-    let long = "synthetic whole commit longer than an SDL text array 🙂";
-    let edits = [
-        TextEdit::Commit("с".into()), TextEdit::Commit("у".into()),
-        TextEdit::Commit("б".into()), TextEdit::Commit("суббота ".into()),
-        TextEdit::Left, TextEdit::Right, TextEdit::Backspace, TextEdit::Clear,
-        TextEdit::Commit(long.into()),
-    ];
-    let mut inputs = vec![ev(InputKind::SystemKeyboard(true), tick(16))];
-    inputs.extend(edits.iter().cloned().map(|edit| ev(InputKind::Text(edit), tick(16))));
-    inputs.push(ev(InputKind::SystemKeyboard(false), tick(16)));
-    let sink = MemSink::default();
-    let segments = sink.segments.clone();
-    let init = FixtureInit { seed: 1 };
-    let header = Header::new(fixture_state_fp(), &init);
-    let mut tap = RecTap { w: Writer::open(Box::new(sink), &header, 0).unwrap() };
-    let mut d = Dispatcher::<FixtureHost>::new();
-    let mut rig = FixtureRig::new();
-    d.request(MachineId::Nav, NavOp::Root(FixtureArg::Page(801)));
-    d.frame(&mut rig, tick(0), vec![], vec![], &mut tap);
-    d.frame(&mut rig, tick(16), inputs, vec![], &mut tap);
-    assert_eq!(events_of(&d, 0).matches("\"system_owner\"").count(), edits.len() + 1);
-    tap.w.finish().unwrap();
-    let manifest = json!({"schema": super::rec::SCHEMA, "state_fp": fixture_state_fp(),
-        "init": {"probe": "seed=1", "hash": init.hash()}}).to_string();
-    let segments = segments.borrow();
-    let slices: Vec<&[u8]> = segments.iter().map(Vec::as_slice).collect();
-    let rec = Recording::parse(&manifest, &slices, fixture_state_fp()).unwrap();
-    let decoded: Vec<_> = rec.frames[1].inputs.iter()
-        .map(|v| FixtureCodec.decode_input(v).unwrap()).collect();
-    assert_eq!(decoded.len(), edits.len() + 2, "one record per whole input, never per character");
-    assert!(matches!(decoded.first().unwrap().kind, InputKind::SystemKeyboard(true)));
-    assert!(matches!(decoded.last().unwrap().kind, InputKind::SystemKeyboard(false)));
-    let mut buffer = super::text_buffer::TextBuffer::new(String::new(), 0);
-    for (input, expected) in decoded[1..decoded.len()-1].iter().zip(&edits) {
-        let InputKind::Text(edit) = &input.kind else { panic!("text event changed kind") };
-        assert_eq!(edit, expected, "commit bytes and edit boundaries survive recording");
-        buffer.edit(edit);
-    }
-    assert_eq!(buffer.text(), long);
-    assert_eq!(buffer.caret(), long.len());
-    for resolve in [false, true] {
-        let mut d = Dispatcher::<FixtureHost>::new();
-        let mut rig = FixtureRig::new();
-        d.request(MachineId::Nav, NavOp::Root(FixtureArg::Page(801)));
-        let report = if resolve { run_resolve(&rec, &FixtureCodec, &mut d, &mut rig, &|| None) }
-            else { run_targets(&rec, &FixtureCodec, &mut d, &mut rig, &|| None) };
-        assert!(report.is_clean(), "{:?}", report.safe_lines());
-    }
-}
-
-#[test]
 fn pending_input_hash_distinguishes_text_and_ownership_edges_not_arc_addresses() {
     use plx_machine::machine::{Delivery, Fx, TextEdit};
     let hash = |kind| {
@@ -870,70 +813,6 @@ fn a_legacy_page_never_consults_the_map_or_the_engine() {
     d.frame(&mut rig, tick(48), vec![click(1800.0, 1000.0, tick(48))], vec![], &mut NoTap);
     assert_eq!(d.nav.modals.top().unwrap().phase, super::containers::modal::Phase::Opening, "not dismissed by a miss the map never saw");
     assert!(d.input.arm.is_none());
-}
-
-/// §5.5 `--resolve`: a recording whose focus record was tampered at one frame produces exactly
-/// one focus divergence, and replay continues FROM THE RECORDING (the tampered key is what the
-/// next frame starts from); `--targets` takes the same recording silently.
-#[test]
-fn resolve_mode_reports_every_mismatch_and_continues_from_the_recording() {
-    use super::fixture::{fixture_state_fp, FixtureCodec, FixtureInit, RecTap};
-    use plx_machine::machine::LogicalState;
-    use super::rec::{Header, MemSink, Recording, Writer};
-    use super::replay::{run_resolve, run_targets};
-    use serde_json::json;
-
-    // record: boot, RIGHT, RIGHT on Home (the engine walks the row 0 → 1 → 2)
-    let sink = MemSink::default();
-    let segs = sink.segments.clone();
-    let header = Header::new(fixture_state_fp(), &FixtureInit { seed: 1 });
-    let w = Writer::open(Box::new(sink), &header, 0).unwrap();
-    let mut tap = RecTap { w };
-    let mut d: Dispatcher<FixtureHost> = Dispatcher::new();
-    let mut rig = FixtureRig::new();
-    d.request(MachineId::Nav, NavOp::Root(FixtureArg::Home));
-    d.frame(&mut rig, tick(0), vec![], vec![], &mut tap);
-    d.frame(&mut rig, tick(16), vec![key(Key::Right, tick(16))], vec![], &mut tap);
-    d.frame(&mut rig, tick(32), vec![key(Key::Right, tick(32))], vec![], &mut tap);
-    d.frame(&mut rig, tick(48), vec![], vec![], &mut tap);
-    assert_eq!(elem(&d), Some(2));
-    tap.w.finish().unwrap();
-    let manifest = serde_json::to_string(&json!({
-        "schema": super::rec::SCHEMA, "state_fp": fixture_state_fp(),
-        "init": {"probe": "seed=1", "hash": FixtureInit { seed: 1 }.hash()}
-    }))
-    .unwrap();
-    let s = segs.borrow();
-    let refs: Vec<&[u8]> = s.iter().map(|v| v.as_slice()).collect();
-    let mut rec = Recording::parse(&manifest, &refs, fixture_state_fp()).unwrap();
-    assert_eq!(rec.frames[2].focus, Some(Some((1, 2, Some(1)))), "the recording carries the engine's answer");
-
-    // a clean replay in both modes
-    let replay = |rec: &Recording, resolve: bool| {
-        let mut d: Dispatcher<FixtureHost> = Dispatcher::new();
-        let mut rig = FixtureRig::new();
-        d.request(MachineId::Nav, NavOp::Root(FixtureArg::Home));
-        if resolve {
-            run_resolve(rec, &FixtureCodec, &mut d, &mut rig, &|| None)
-        } else {
-            run_targets(rec, &FixtureCodec, &mut d, &mut rig, &|| None)
-        }
-    };
-    assert!(replay(&rec, true).is_clean());
-    assert!(replay(&rec, false).is_clean());
-
-    // tamper frame 2's resolution: the engine says 1, the recording now says 0
-    rec.frames[1].focus = Some(Some((1, 0, Some(1))));
-    let report = replay(&rec, true);
-    // frame 2: the engine's 1 against the recorded 0 — one line, and replay CONTINUES FROM THE
-    // RECORDING; frame 3: from the recorded 0 the engine's RIGHT lands on 1, the recording says
-    // 2 — a second pointwise line; frame 4 (no input) agrees again. Never an avalanche.
-    let frames: Vec<u64> = report.focus_diffs.iter().map(|d| d.0).collect();
-    assert_eq!(frames, vec![2, 3], "{:?}", report.safe_lines());
-    assert_eq!(report.frames, rec.frames.len() as u64, "replay continued");
-    assert!(report.safe_lines().iter().any(|l| l.starts_with("focus f=2 recorded=Some((1, 0")), "{:?}", report.safe_lines());
-    let silent = replay(&rec, false);
-    assert!(silent.focus_diffs.is_empty(), "targets mode does not grade the engine");
 }
 
 /// §7.4 "navigation cancels the press": OK down on a card, then a direction key (before `LONG_MS`)

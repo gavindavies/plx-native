@@ -101,15 +101,8 @@ pub(crate) fn loop_tick(iters_ct: &mut i32, loop_t: &mut u32, loop_shown: &mut i
 /// `mt`, THE main-thread token, MOVES into `App.adapters.player` here, from where a
 /// `&mut PlayerAdapter` is the proof it is still held.
 pub(crate) unsafe fn boot(
-    _pms_host: *const c_char,
-    _pms_port: c_int,
     mt: plx_base::task::MainThread,
 ) -> Result<App, c_int> {
-    // The dev frame probe's clock is `platform`'s, which `gfx` does not depend on.
-    plx_gfx::gfx::install_clear_probe(
-        plx_platform::tv::window::frame_probe_waiting,
-        plx_platform::tv::window::frame_probe_acquired,
-    );
     SDL_SetMainReady();
     SDL_SetHint(c"SDL_VIDEO_ALLOW_SCREENSAVER".as_ptr(), c"0".as_ptr());
     if SDL_Init(SDL_INIT_VIDEO) != 0 {
@@ -198,9 +191,6 @@ pub(crate) unsafe fn boot(
     // What EGL this context has — one boot-time read, logged. The probe asks EGL nothing unless
     // an EGL context is current on this thread, which is what makes it safe on GLX.
     plx_gfx::egl::probe();
-    plx_platform::tv::window::bind_window(win);
-    plx_platform::tv::window::grab(win);
-    plx_platform::tv::window::arm_opaque_region();
     plx_gfx::gfx::init_gl();
     plx_gfx::text::init_text();
     plx_gfx::gfx::init_image();
@@ -209,7 +199,7 @@ pub(crate) unsafe fn boot(
     // The player preferences (`settings.json`), before anything can draw a subtitle.
     plx_data::settings::load();
     #[cfg(not(test))]
-    plx_platform::i18n::initialize(plx_platform::i18n::Preference::System, false);
+    plx_platform::i18n::initialize();
     let bridge = super::bridge::Bridge::new(plx_base::diag::heartbeat::now_us);
     let pages = plx_ui::dispatch::Dispatcher::with_transition(Box::new(
         plx_ui::containers::transition::PageDip::new(),
@@ -220,7 +210,6 @@ pub(crate) unsafe fn boot(
     plx_media::player::acb_init(&mt);
     plx_media::ff::boot();
     let glass = plx_ui::frame::glass::GlassPlan::new();
-    plx_ui::testpat::boot();
     plx_media::player::seed_dev_track_names();
     // dev: /tmp/pitv-framedrop — the FRAME-DROP DETECTOR. Each frame is timed (pump / draw /
     // swap, no glFinish) and any frame whose total exceeds a threshold (ms; the file's content

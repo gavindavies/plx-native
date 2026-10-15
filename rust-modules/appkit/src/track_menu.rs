@@ -97,7 +97,6 @@ use plx_ui::theme;
 use plx_ui::{Painter, Rect};
 use std::os::raw::c_int;
 
-
 /// **What a focusable row of either tab IS** — the identity the [`FormTable`] resolves a press, a
 /// focus move and a rebuild's landing by, never a position. The Audio tab's track rows, the two Plex
 /// Pass DSP toggles and the Subtitles tab's rows (root, Style page and pickers) share one alphabet
@@ -255,7 +254,6 @@ impl FormId for TrackRow {
 /// Nav row opens.
 type TrackForm = Form<TrackRow, (), TrackPage>;
 type TrackTable = FormTable<TrackRow, (), TrackPage>;
-
 
 /// The panel's top edge: under the transport's top menu, with the menu's own air.
 const PANEL_TOP: f32 = crate::player_hud::MENU_BOTTOM + 16.0;
@@ -495,7 +493,6 @@ pub fn new(
         s
     }
 
-
     /// The highlighted row, for the focus probe (`crate::focusprobe`) — a READ of the cursor the
     /// key ladder moves, and the reason it exists: `app.rs`'s UP/DOWN arm for this panel changes
     /// nothing else, so without this the fingerprint records the panel opening and closing and
@@ -515,18 +512,11 @@ pub fn new(
         c.u32(self.form.key_at(self.form.table.sel.max(0) as usize).map_or(u32::MAX, |k| k.0));
     }
 
-    /// What the `submenuosc` trigger needs to choose its next key: the tab (0 Audio, 1 Subtitles),
-    /// how many pages are pushed above the root, and whether the root offers Other languages.
-    pub fn osc_probe(&self) -> (c_int, usize, bool) {
-        (self.tab, self.pages.len(), self.form.index_of(&TrackRow::OpenOther).is_some())
-    }
-
     /// The pages pushed above the Subtitles root, outermost first, for tests and probes.
     #[cfg(any(test, feature = "test-support"))]
     pub fn page_path(&self) -> Vec<TrackPage> {
         self.pages.iter().map(|s| s.page).collect()
     }
-
 
     /// The highlighted row's id (`None` on a note or an empty list).
     #[cfg(any(test, feature = "test-support"))]
@@ -579,14 +569,6 @@ pub fn new(
     /// -1 = subtitles off, else index into the playing item's subs list
     pub fn active_sub(&self) -> c_int {
         self.active_sub
-    }
-    /// Plex stream id of the chosen audio track (for &audioStreamID), or 0
-    pub fn audio_stream_id(&self, meta: metadata::MetadataView<'_>) -> i64 {
-        let i = self.active_audio();
-        tracks(meta)
-            .and_then(|t| t.audio.get(i.max(0) as usize))
-            .map(|s| s.id)
-            .unwrap_or(0)
     }
     /// Plex stream id of the chosen subtitle track (for &subtitleStreamID), or 0 if Off
     pub fn sub_stream_id(&self, meta: metadata::MetadataView<'_>) -> i64 {
@@ -642,7 +624,6 @@ pub fn new(
         self.active_audio = audio;
         self.active_sub = sub;
     }
-
 
     /// The Subtitles tab's half of the live poll `Self::update` runs every tick, mirroring the
     /// Audio tab's own `enh_state` poll just above it. Issue #309's field report: a subtitle pick
@@ -791,7 +772,6 @@ pub fn new(
             }
         }
     }
-
 
     /// Resolve a NAMED Subtitles-tab target to a TRACK, for the `/tmp/pitv-menupick` trigger:
     /// `"track:N"` is the N-th (0-based) track in PAGE ORDER — the root's track rows first, then the
@@ -1000,17 +980,6 @@ pub fn new(
         Form::new().section(sec)
     }
 
-
-
-
-
-
-
-
-
-
-
-
     /// The Style page: one drill-in per field, each reading out its current value. Under an image
     /// or styled subtitle Size and Position are disabled (dim, focusable, inert) and one note names
     /// why; Color is live under every renderer — the subtitle ink tints bitmaps and ASS alike.
@@ -1140,8 +1109,6 @@ pub fn new(
         }
     }
 
-
-
     /// The Audio tab as a form: the track list. Mirrors [`Self::layout`] for the Subtitles tab.
     fn audio_form(&self, meta: metadata::MetadataView<'_>) -> TrackForm {
         let mut sec = FormSection::new(plx_platform::i18n::msg::widgets_tracks_audio());
@@ -1183,7 +1150,6 @@ pub fn new(
         Form::new().section(sec)
     }
 
-
     /// Build the Subtitles root's form from the CURRENT state — the one place the model
     /// (`metadata::sub_layout::sub_sections`) is asked, so what a row IS can never disagree with
     /// what was drawn. Also stores the [`SubSig`] and renderer the root is built from, for the
@@ -1223,7 +1189,6 @@ pub fn new(
         let names = plx_media::player::SHARED.track_names.lock().unwrap();
         sub_layout::sub_sections(subs, &offered, &names, &self.yours, show_timing)
     }
-
 
     fn rebuild(&mut self, meta: metadata::MetadataView<'_>, tab: c_int, slide: bool) {
         if tab == 0 {
@@ -1357,10 +1322,8 @@ pub fn new(
         {
             return;
         }
-        // The whole recording part is speculative to the recorder (spec §5): the form's layout
-        // asks the measure about a page no frame draws, and a replay must answer 0.0 for a key
-        // its recording lacks instead of refusing on it.
-        let owner = plx_ui::rec::speculative(|| {
+        // The form's layout asks the measure about a page no frame draws.
+        let owner = {
             let form = if self.tab == 0 {
                 self.sub_root_form(meta).0
             } else {
@@ -1371,7 +1334,7 @@ pub fn new(
             other.set(form, None);
             let natural = table_natural(&other.table, measure);
             PanelMotion::prewarm_background_text(natural, &other.table, measure)
-        });
+        };
         self.background_owner = Some(owner);
     }
 
@@ -1552,7 +1515,6 @@ fn format_offset(ms: i64) -> String {
 use plx_data::metadata::friendly_codec; // the ONE codec→display-name map (shared with the Info card)
 use plx_data::metadata::track_label::Kind;
 
-
 /// "AC-3 5.1", "Dolby TrueHD 7.1", "DTS 5.1" — a compact codec + channel-layout descriptor. Public
 /// for the title page's audio picker (`screens::local_detail`), which names a track the way this
 /// menu does.
@@ -1575,9 +1537,7 @@ pub fn audio_descriptor(s: &metadata::Stream) -> String {
     }
 }
 
-
 // ---- Subtitles-tab sections (the model is `metadata::sub_layout`, plan §3) ------------------
-
 
 fn row_badge(b: &RowBadge) -> Badge {
     match b {
@@ -1906,13 +1866,12 @@ mod tests {
         assert!(!row.checked, "no active track behind it");
     }
 
-    /// **Every Subtitles-panel row fits the panel in every shipped language** — the grouped
+    /// **Every Subtitles-panel row fits the panel** — the grouped
     /// layout's section words, the kind fallbacks, the "Track N" ordinal and a region name beside
     /// each badge, against [`MENU_MAX_W`](plx_ui::table::MENU_MAX_W), measured with the device's whole-pixel advances. (A source is
     /// server text and may elide; the fixture's sources are short so only app text is judged.)
     #[test]
-    fn every_subtitles_row_fits_the_panel_in_every_language() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+    fn every_subtitles_row_fits_the_panel() {
         let mut subs = vec![
             stream(1, 0, "Russian", "rus", "forced, DVD R5"),
             stream(2, 1, "Russian", "rus", "Netflix"),
@@ -1928,68 +1887,17 @@ mod tests {
         let offered: Vec<usize> = (0..subs.len()).collect();
         let names = TrackNames::new();
         let mut out = Vec::new();
-        for language in SHIPPED {
-            let _guard = language_on_this_thread_for_test(language);
+        {
+            let tag = "en";
             let (sections, _) =
                 sub_layout(&subs, &offered, &names, &["rus"], 1, true, -60_000);
             let mut table = TableView::new();
             table.set_sections(sections, 0, false);
-            out.extend(table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, language.tag()));
-            out.extend(table.app_fit_failures(plx_ui::table::MENU_MAX_W, language.tag()));
-            out.extend(table.app_fit_failures_hugged(language.tag()));
+            out.extend(table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, tag));
+            out.extend(table.app_fit_failures(plx_ui::table::MENU_MAX_W, tag));
+            out.extend(table.app_fit_failures_hugged(tag));
         }
         plx_ui::table::assert_no_fit_failures(&out);
-    }
-
-    /// **The pseudo-locale sweep of the grouped Subtitles panel**: every header, accessory, label,
-    /// detail, value and badge it builds is catalog text (the pseudo-locale's `[!!` marker or its
-    /// accented vowels), the fixture's own server values, or letter-free.
-    #[test]
-    fn every_app_owned_subtitles_string_comes_from_the_catalog() {
-        let _pseudo = plx_platform::i18n::pseudo_on_this_thread_for_test();
-        // a title's own "Commentary" stays its source (the mock strips no commentary word), so it
-        // is server text here like the rest
-        let server = ["Russian", "Spanish", "Portuguese", "Netflix", "DVD R5", "Commentary"];
-        let mut subs = vec![
-            stream(1, 0, "Russian", "rus", "Netflix"),
-            stream(2, 1, "Russian", "rus", ""),
-            stream(3, 2, "Russian", "rus", ""),
-            stream(4, 3, "Russian", "rus", "forced"),
-            stream(5, 4, "Russian", "rus", "SDH"),
-            stream(6, 5, "Russian", "rus", "Commentary"),
-            stream(7, 6, "Spanish", "spa", ""),
-            stream(8, 7, "Portuguese", "por", "DVD R5"),
-            stream(9, 8, "", "", ""),
-        ];
-        subs[6].language_tag = "es-419".into();
-        subs[7].external = true;
-        let offered: Vec<usize> = (0..subs.len()).collect();
-        let (sections, _) =
-            sub_layout(&subs, &offered, &TrackNames::new(), &["rus"], 1, true, 300);
-        let mut runs: Vec<String> = Vec::new();
-        for sec in &sections {
-            runs.push(sec.header.clone());
-            runs.push(sec.accessory.clone());
-            for row in &sec.rows {
-                runs.push(row.label.clone());
-                runs.push(row.detail.clone());
-                runs.extend(row.value.clone());
-                runs.extend(row.badges.iter().map(|b| b.text().to_string()));
-            }
-        }
-        let pseudo = |run: &str| run.contains("[!!") || run.contains(['á', 'ë', 'ï', 'ö', 'ü']);
-        let stray: Vec<&String> = runs
-            .iter()
-            .filter(|run| !pseudo(run))
-            .filter(|run| {
-                let mut rest = run.replace('\u{b7}', " ");
-                for value in server {
-                    rest = rest.replace(value, "");
-                }
-                rest.chars().any(char::is_alphabetic)
-            })
-            .collect();
-        assert!(stray.is_empty(), "text drawn without the catalog: {stray:?}");
     }
 
     // ---- sub_layout: Timing absent under transcode, dim while Off -----------------------------
@@ -2099,7 +2007,6 @@ mod tests {
     }
 
     // ---- track_menu: sidecar, tone and Timing rows dispatch to their own outcomes -------------
-
 
     // ---- track_menu: Timing returns OpenTiming, and is inert while Off ------------------------
 
@@ -2331,7 +2238,6 @@ mod focus_tests {
         })
     }
 
-
     /// **UP/DOWN step by one row and clamp at both ends**, matching
     /// [`TrackMenuState::move_focus`]'s own clamp.
     #[test]
@@ -2478,13 +2384,12 @@ mod focus_tests {
 mod localized_offset_tests {
     #[test]
     fn subtitle_timing_uses_locale_decimal_and_unit_without_changing_offset_sign() {
-        use plx_platform::i18n::{LocaleContext, Preference};
-        for (preference, region, negative, positive) in [
-            (Preference::En, "en-US", "-0.1 s", "+1.3 s"),
-            (Preference::Es, "es-ES", "-0,1 s", "+1,3 s"),
-            (Preference::Be, "be-BY", "-0,1 с", "+1,3 с"),
+        use plx_platform::i18n::LocaleContext;
+        for (region, negative, positive) in [
+            ("en-US", "-0.1 s", "+1.3 s"),
+            ("de-DE", "-0,1 s", "+1,3 s"),
         ] {
-            let locale = LocaleContext::resolve(preference, None, Some(region), None, None);
+            let locale = LocaleContext::resolve(Some(region), None);
             assert_eq!(crate::timing_capsule::offset_seconds_in(-100, true, &locale), negative);
             assert_eq!(crate::timing_capsule::offset_seconds_in(1300, true, &locale), positive);
         }
@@ -2518,7 +2423,6 @@ mod keyed_form_tests {
             assert!(!keys[n + 1..].contains(a), "duplicate key {a:#x}");
         }
     }
-
 
     /// **Adding a subtitle track to the offered list moves no other row's key**, even though the
     /// added track sorts above them on screen (its key is its subs-list index, not its position).
@@ -2622,8 +2526,6 @@ mod style_page_tests {
         reset_player_control_for_test(ps);
     }
 
-
-
     fn focus_id(menu: &mut TrackMenuState, id: TrackRow) {
         let i = menu.form.index_of(&id).unwrap_or_else(|| panic!("{id:?} is not on this page"));
         menu.focus_row(i as c_int);
@@ -2681,7 +2583,6 @@ mod style_page_tests {
         teardown(&ps);
     }
 
-
     /// Picking a rung commits it live, keeps the panel and page open and moves the checkmark; the
     /// already-checked rung is inert.
     #[test]
@@ -2724,12 +2625,6 @@ mod style_page_tests {
         }
         teardown(&ps);
     }
-
-
-
-
-
-
 
     /// The title band is a pointer-only stop: its key is recognised, no row owns it.
     #[test]
@@ -3107,7 +3002,6 @@ mod language_page_tests {
         teardown(&ps);
     }
 
-
     /// **Finding 3: a language page is its language, not a list position.** Two earlier tracks
     /// leave while French's page is open and Dutch now starts where French used to; the page must
     /// stay French (it must never show Dutch under a French stack).
@@ -3231,16 +3125,14 @@ mod language_page_tests {
     /// judged by the same gates as the rest of the menu.
     #[test]
     fn the_language_pages_fit_the_panel_in_every_language() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, Preference};
         let mut out = Vec::new();
-        for language in [Preference::En, Preference::Es, Preference::Be] {
+        for language in ["en"] {
             let _g = plx_base::testlock::serial();
-            let _guard = language_on_this_thread_for_test(language);
             let (mut menu, ps, store) = open(subs_with_vobsub());
             let judge = |menu: &TrackMenuState, out: &mut Vec<_>| {
-                out.extend(menu.form.table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, language.tag()));
-                out.extend(menu.form.table.app_fit_failures(plx_ui::table::MENU_MAX_W, language.tag()));
-                out.extend(menu.form.table.app_fit_failures_hugged(language.tag()));
+                out.extend(menu.form.table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, language));
+                out.extend(menu.form.table.app_fit_failures(plx_ui::table::MENU_MAX_W, language));
+                out.extend(menu.form.table.app_fit_failures_hugged(language));
             };
             judge(&menu, &mut out);
             for active in [-1, 2] {
