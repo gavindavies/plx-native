@@ -16,7 +16,8 @@ pub mod local; // the Linux build's folder browser: one folder of the local libr
 pub mod local_detail; // one local video's title page: its artwork, description and how to play it
 pub mod home; // Home: the newest title, Continue Watching and Recently Added, under the tab bar
 pub mod titles; // a local title in one line: its facts, a bare file's, its watch mark (shared, not a screen)
-pub mod tabs; // the tab bar's destinations: Home, then the library's folders
+pub mod tabs; // the tab bar's destinations: Home, the library's folders, then Settings
+pub mod settings; // Settings: subtitle style, playback, cache and About, the tab bar's last pill
 pub mod item_menu;
 pub mod player;
 pub mod registry;

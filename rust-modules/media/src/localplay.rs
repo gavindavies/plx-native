@@ -268,6 +268,28 @@ pub fn starting_audio(item: &plx_data::metadata::PlayingItem, probe: &crate::ff:
     Some(crate::playback::CarriedAudio::from_stream(&item.audio[i], plx_data::metadata::audio_ordinal(&item.audio, i)))
 }
 
+/// The first audio track in the viewer's preferred language (Settings > Playback) that the sink
+/// decodes, or None when no language is set or no track matches — the file's default then plays.
+pub fn preferred_audio(item: &plx_data::metadata::PlayingItem, lang: &str) -> Option<usize> {
+    if lang.is_empty() {
+        return None;
+    }
+    item.audio.iter().position(|s| {
+        plx_data::metadata::lang_matches(&s.lang_code, lang)
+            && crate::player::engine::audio_payload_codec(&s.codec).is_some()
+    })
+}
+
+/// The subtitle to show in the viewer's preferred language: its full track rather than a
+/// forced-only one, a forced track when that is all the file has, None when no language is set.
+pub fn preferred_subtitle(item: &plx_data::metadata::PlayingItem, lang: &str) -> Option<usize> {
+    if lang.is_empty() {
+        return None;
+    }
+    let matches = |s: &plx_data::metadata::Stream| plx_data::metadata::lang_matches(&s.lang_code, lang);
+    item.subs.iter().position(|s| matches(s) && !s.forced).or_else(|| item.subs.iter().position(matches))
+}
+
 /// Audio stream ids for a local file, from 500 (any non-zero id names a track).
 const AUDIO_ID: i64 = 500;
 
@@ -380,5 +402,22 @@ mod tests {
     fn the_title_is_the_file_name_without_its_extension() {
         assert_eq!(title_of(Path::new("/m/Films/Alien (1979).mkv")), "Alien (1979)");
         assert_eq!(title_of(Path::new("/m/noext")), "noext");
+    }
+
+    #[test]
+    fn preferred_tracks_follow_the_language_setting() {
+        use plx_data::metadata::{PlayingItem, Stream};
+        let st = |code: &str, lang: &str, forced: bool| Stream { codec: code.into(), lang_code: lang.into(), forced, ..Default::default() };
+        let mut item = PlayingItem::with_subs(vec![st("srt", "fr", true), st("srt", "eng", false), st("srt", "fra", false)]);
+        item.audio = vec![st("aac", "eng", false), st("aac", "fre", false)];
+        assert_eq!(preferred_audio(&item, ""), None);
+        assert_eq!(preferred_audio(&item, "fr"), Some(1));
+        assert_eq!(preferred_audio(&item, "de"), None);
+        // the full French track, not the forced one before it
+        assert_eq!(preferred_subtitle(&item, "fr"), Some(2));
+        assert_eq!(preferred_subtitle(&item, "en"), Some(1));
+        assert_eq!(preferred_subtitle(&item, ""), None);
+        let forced_only = PlayingItem::with_subs(vec![st("srt", "fr", true)]);
+        assert_eq!(preferred_subtitle(&forced_only, "fr"), Some(0));
     }
 }

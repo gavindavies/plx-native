@@ -56,8 +56,8 @@
     "description": "Settings, account, onboarding or privacy UI: settings.trailers.detail"
   },
   "settings.about.title": {
-    "value": "About PlxNative",
-    "description": "Settings, account, onboarding or privacy UI: settings.about.title"
+    "value": "About PiTV",
+    "description": "Settings: the About section title."
   },
   "settings.about.section": {
     "value": "About",
@@ -68,8 +68,8 @@
     "description": "Settings, account, onboarding or privacy UI: settings.about.detail"
   },
   "settings.root.copy": {
-    "value": "Manage this television and your Plex profile. Audio and subtitle language preferences sync with your Plex account; playback defaults and the app language apply to this television.",
-    "description": "Settings, account, onboarding or privacy UI: settings.root.copy"
+    "value": "How this player shows subtitles, plays files and reads them from your shares. Changes apply at once; a playing film picks up the cache settings from its next seek.",
+    "description": "The Settings page's explanatory copy under its title."
   },
   "settings.libraries.count": {
     "value": {
@@ -1190,5 +1190,99 @@
   "settings.consent.placeholder.webos_codename_short": {
     "value": "webOS codename",
     "description": "Placeholder shown inside angle brackets in the data preview, standing for the TV software's release codename."
+  },
+  "settings.subtitles.section": {
+    "value": "Subtitles",
+    "description": "Settings section header: subtitle style."
+  },
+  "settings.subtitles.color.copy": {
+    "value": "How bright subtitle text is. A dimmer tone is easier on the eyes over a bright HDR picture.",
+    "description": "Settings: the subtitle colour picker's explanation."
+  },
+  "settings.subtitles.preview": {
+    "value": "Subtitles look like this.",
+    "description": "Settings: the sample caption the subtitle preview shows; short enough that Extra Large fits the card."
+  },
+  "settings.language.file_default": {
+    "value": "As the file sets it",
+    "description": "Settings: default audio language option meaning the file's own first track."
+  },
+  "settings.audio.language.copy": {
+    "value": "The audio a file starts in when you have not picked one for it. A file without that language plays its own first track.",
+    "description": "Settings: the preferred audio language picker's explanation."
+  },
+  "settings.audio.subtitle_language.copy": {
+    "value": "The subtitles a file starts with when you have not picked any for it. A file without that language plays without subtitles.",
+    "description": "Settings: the default subtitle language picker's explanation."
+  },
+  "settings.cache.section": {
+    "value": "Cache",
+    "description": "Settings section header: the player's read-ahead cache."
+  },
+  "settings.cache.read_ahead": {
+    "value": "Read ahead",
+    "description": "Settings row: which files the player reads ahead of the picture."
+  },
+  "settings.cache.read_ahead.off": {
+    "value": "Off",
+    "description": "Settings option: no read-ahead."
+  },
+  "settings.cache.read_ahead.network": {
+    "value": "Network shares",
+    "description": "Settings option: read ahead only for files on network shares."
+  },
+  "settings.cache.read_ahead.all": {
+    "value": "All files",
+    "description": "Settings option: read ahead for every file."
+  },
+  "settings.cache.read_ahead.copy": {
+    "value": "Reads the film ahead of the picture so a busy network cannot stall a high-bitrate remux. Network shares is enough unless a local disk is slow.",
+    "description": "Settings: the read-ahead picker's explanation."
+  },
+  "settings.cache.size": {
+    "value": "Buffer size",
+    "description": "Settings row: how much the read-ahead cache holds."
+  },
+  "settings.cache.size.mb": {
+    "value": "{count} MB",
+    "description": "Settings option and read-out: a buffer size in megabytes.",
+    "args": {
+      "count": "i64"
+    }
+  },
+  "settings.cache.size.copy": {
+    "value": "How much of the film is read ahead. A larger buffer rides out longer network dips; it is memory the player keeps while it plays.",
+    "description": "Settings: the buffer size picker's explanation."
+  },
+  "settings.cache.factor": {
+    "value": "Read speed",
+    "description": "Settings row: how fast the read-ahead fills, as a multiple of the bitrate."
+  },
+  "settings.cache.factor.times": {
+    "value": "{count}× bitrate",
+    "description": "Settings option and read-out: the fill speed as a multiple of the film's bitrate.",
+    "args": {
+      "count": "i64"
+    }
+  },
+  "settings.cache.factor.unlimited": {
+    "value": "Unlimited",
+    "description": "Settings option: fill the read-ahead as fast as the share answers."
+  },
+  "settings.cache.factor.copy": {
+    "value": "How fast the buffer fills, as a multiple of the film's bitrate. Faster refills sooner after a seek; slower leaves the network free for others.",
+    "description": "Settings: the read speed picker's explanation."
+  },
+  "settings.about.version": {
+    "value": "Version",
+    "description": "Settings About row: the app version."
+  },
+  "settings.about.ffmpeg": {
+    "value": "FFmpeg",
+    "description": "Settings About row: the bundled FFmpeg version."
+  },
+  "settings.about.gstreamer": {
+    "value": "GStreamer",
+    "description": "Settings About row: the system GStreamer version."
   }
 }

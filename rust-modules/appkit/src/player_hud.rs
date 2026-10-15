@@ -158,7 +158,7 @@ pub fn caption_page(pager: &CaptionPager, hud_up: bool) -> u32 {
 }
 
 /// Shared caption placement for plain text and a styled-renderer failure message. Text size and
-/// vertical placement follow the viewer's Settings > Playback picks (`route::subtitle_size`,
+/// vertical placement follow the viewer's Settings › Subtitles picks (`route::subtitle_size`,
 /// `route::subtitle_position`) — native ASS/SSA keeps its authored style instead
 /// (`docs/ass-subtitles.md`). The message is a short fixed string, so it is never paged: a block
 /// taller than the area is drawn whole at the smallest step.
@@ -377,6 +377,31 @@ fn caption_fit(lines: usize, scale: f32, baseline: f32, floor: f32) -> (CaptionL
     (lay, fits)
 }
 
+/// How much larger than a true miniature the preview's caption is drawn.
+const PREVIEW_MAGNIFY: f32 = 2.0;
+
+/// **A sample caption in `card`, as the player would draw it now** — the viewer's tone, size and
+/// position (Settings › Subtitles' live preview). The card is the screen in miniature: the
+/// position lift shrinks by the card's share of the screen's height, and the face by twice that
+/// ([`PREVIEW_MAGNIFY`]) so the sample stays readable while each size keeps its step over the
+/// last. The sample line must be short enough that Extra Large still fits the card.
+pub fn draw_caption_preview(p: Painter, card: Rect, text: &str) {
+    // the player's caption face (see `caption_fit`), a carve-out from theme::size like it
+    let scale = subtitle_size_scale(plx_data::settings::subtitle_size()) * card.h / SCR_H * PREVIEW_MAGNIFY;
+    let face = (36.0 * scale).round() as i32;
+    let pitch = CAPTION_LINE_PITCH * scale;
+    let lift = subtitle_position_lift(plx_data::settings::subtitle_position()) * card.h / SCR_H;
+    let foot = card.y + card.h - (SCR_H - SUB_BASE_Y) * card.h / SCR_H - lift;
+    let Ok(cs) = CString::new(text) else { return };
+    let (ink, outline) = (subtitle_ink(), theme::scrim_black(0.85));
+    let (cx, top) = (card.x + card.w * 0.5, foot - pitch);
+    let o = (2.0 * scale).max(1.0);
+    for (dx, dy) in [(-o, 0.0), (o, 0.0), (0.0, -o), (0.0, o)] {
+        p.text(cs.as_ptr(), cx + dx, top + 4.0 + dy, face, outline, 1, 1);
+    }
+    p.text(cs.as_ptr(), cx, top + 4.0, face, ink, 1, 1);
+}
+
 /// The ink both subtitle draws use this frame: the viewer's tone ([`plx_media::player::subtitle_tone`])
 /// resolved on [`theme::SUBTITLE_INKS`]. A rung the table does not have is white, never a
 /// neighbour.
@@ -391,7 +416,7 @@ fn subtitle_ink_for(tone: plx_data::settings::SubtitleTone) -> [f32; 4] {
         .unwrap_or(theme::SUBTITLE_INKS[0])
 }
 
-/// The face-size multiplier for the viewer's Settings > Playback pick, applied to the plain-text
+/// The face-size multiplier for the viewer's Settings › Subtitles pick, applied to the plain-text
 /// caption's 36 px base face ([`draw_subtitle_message`]) and its line pitch/wrap width together,
 /// so a larger caption still wraps before it runs off either edge.
 fn subtitle_size_scale(size: plx_data::settings::SubtitleSize) -> f32 {
@@ -1597,6 +1622,9 @@ pub struct Playbar {
     pub mark: TransportMark,
     /// drives the inline spinner's rotation
     pub now: u32,
+    /// How far the read-ahead cache has read, `(byte offset, file size)` — the buffered band.
+    /// `None` when nothing reads ahead (the cache is off, or does not cover this file).
+    pub buffered: Option<(i64, i64)>,
 }
 
 impl Playbar {
@@ -1637,17 +1665,27 @@ impl Playbar {
             knob,
             mark: transport_mark(paused, busy, scrub >= 0, dispos, livepos, since_play_ms),
             now,
+            buffered: plx_media::readahead::buffered_until(),
         }
     }
+}
+
+/// The buffered band's width on a bar `sw` wide, `None` when there is no band to draw: no cache,
+/// or a cache that has not reached past the playhead (`frac`).
+fn buffered_w(buffered: Option<(i64, i64)>, frac: f64, sw: f32) -> Option<f32> {
+    let (until, size) = buffered.filter(|&(_, size)| size > 0)?;
+    let reach = (until as f64 / size as f64).clamp(0.0, 1.0);
+    (reach > frac).then(|| (sw as f64 * reach) as f32)
 }
 
 /// The playbar: the 12 px bar, the playhead line, the elapsed and remaining clocks under its two
 /// ends and the state read-out. The player HUD and the detail page's full-trailer transport both
 /// draw it, so the two cannot drift.
 ///
-/// The design's *buffered* band (white .28 between the fill and the read-ahead) is not drawn: the
-/// pipeline publishes no buffered position, and what it reads ahead of the playhead is seconds of
-/// a film, under a pixel of a 1728 px bar.
+/// The *buffered* band (white .28, between the fill and how far the read-ahead cache has read) is
+/// drawn while a cache reads ahead. The cache knows bytes and the bar is time, so the band places
+/// the cache's reach at the same fraction of the file's length: exact for a constant bitrate and
+/// close for a film's, which is what a fill indicator needs to say.
 pub fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn plx_machine::machine::Measure) {
     let e = hud_env();
     let white = theme::TEXT_PRIMARY;
@@ -1665,6 +1703,9 @@ pub fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn plx_machine::machine
         0.0
     };
     p.rrect(Rect::new(sx, sy, sw, sh), sh * 0.5, sh * 0.5, theme::RAIL_TRACK);
+    if let Some(bw) = buffered_w(bar.buffered, frac, sw) {
+        p.rrect(Rect::new(sx, sy, bw, sh), sh * 0.5, sh * 0.5, theme::RAIL_BUFFERED);
+    }
     let fw = (sw as f64 * frac) as f32;
     if fw > 0.0 {
         let rad = (fw * 0.5).min(sh * 0.5);
@@ -2094,6 +2135,17 @@ mod tests {
             }
             assert_eq!(menu_item_rect(rects.len() as i32, has_chapters, &m), None);
         }
+    }
+
+    /// The buffered band reaches the cache's share of the file, and is not drawn short of the
+    /// playhead or with no cache.
+    #[test]
+    fn the_buffered_band_reaches_the_caches_share_of_the_file() {
+        assert_eq!(buffered_w(None, 0.2, 1000.0), None);
+        assert_eq!(buffered_w(Some((500, 1000)), 0.2, 1000.0), Some(500.0));
+        assert_eq!(buffered_w(Some((100, 1000)), 0.2, 1000.0), None, "behind the playhead");
+        assert_eq!(buffered_w(Some((5000, 1000)), 0.2, 1000.0), Some(1000.0), "clamped to the bar");
+        assert_eq!(buffered_w(Some((10, 0)), 0.0, 1000.0), None);
     }
 
     /// Chapters is offered only for an item that has some, and every item's index finds it back.

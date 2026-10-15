@@ -4,19 +4,24 @@
 //! heal or wake. Teardown needs no transport-specific interrupt either: a local read returns in
 //! milliseconds, and the demuxer re-checks the AU lane's abort flag around every one.
 //!
+//! A file on a network share can be read through the player's read-ahead cache
+//! ([`LocalFile::with_read_ahead`], `crate::readahead`), which Settings › Cache configures.
+//!
 //! A location is a `file://` URL (`file:///srv/media/Film%20(2001).mkv`), percent-encoded so it
 //! can travel through the same `String` the player already carries for a part URL. [`file_url`]
 //! builds one and [`path_of`] reads one back; nothing else is accepted, so an http part URL can
 //! never be mistaken for a path.
 
 use std::fs::File;
-use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// One open media file. Owned by the demux thread, like the `AvioState` that holds it.
 pub struct LocalFile {
-    file: File,
+    file: Arc<File>,
     size: i64,
+    /// The read-ahead cache, when the settings put one in front of this file.
+    ahead: Option<crate::readahead::ReadAhead>,
 }
 
 impl LocalFile {
@@ -27,7 +32,35 @@ impl LocalFile {
         if !meta.is_file() {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file"));
         }
-        Ok(LocalFile { file, size: i64::try_from(meta.len()).unwrap_or(i64::MAX) })
+        Ok(LocalFile { file: Arc::new(file), size: i64::try_from(meta.len()).unwrap_or(i64::MAX), ahead: None })
+    }
+
+    /// Put the read-ahead cache in front of this file when the settings ask for it here: always,
+    /// or (the default) when `path` is on a network share.
+    pub fn with_read_ahead(mut self, path: &Path) -> LocalFile {
+        use plx_data::settings::{self, ReadAhead};
+        let on = match settings::read_ahead() {
+            ReadAhead::Off => false,
+            ReadAhead::NetworkShares => crate::readahead::on_network(path),
+            ReadAhead::AllFiles => true,
+        };
+        if on {
+            let limit = usize::try_from(settings::cache_size().bytes()).unwrap_or(usize::MAX);
+            self.ahead = crate::readahead::ReadAhead::start(self.file.clone(), self.size, limit, settings::read_factor().multiple());
+        }
+        self
+    }
+
+    /// Whether reads go through the read-ahead cache.
+    pub fn reads_ahead(&self) -> bool {
+        self.ahead.is_some()
+    }
+
+    /// The file's running time, once the demuxer knows it: what paces the read-ahead.
+    pub fn set_duration(&self, duration_ns: i64) {
+        if let Some(ahead) = &self.ahead {
+            ahead.set_duration(duration_ns);
+        }
     }
 
     pub fn size(&self) -> i64 {
@@ -41,13 +74,9 @@ impl LocalFile {
         if dst.is_empty() || offset < 0 {
             return 0;
         }
-        let len = dst.len().min(i32::MAX as usize);
-        loop {
-            match self.file.read_at(&mut dst[..len], offset as u64) {
-                Ok(n) => return n as i32,
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => return -e.raw_os_error().unwrap_or(libc::EIO),
-            }
+        match &self.ahead {
+            Some(ahead) => ahead.read_at(dst, offset),
+            None => crate::readahead::direct(&self.file, dst, offset),
         }
     }
 }

@@ -14,6 +14,8 @@
 use std::os::raw::c_int;
 
 fn main() {
+    // first act: the version the log and Settings > About report
+    plx_base::identity::set_version(env!("PLX_VERSION"));
     if let Some(arg) = std::env::args().nth(1) {
         let path = std::path::Path::new(&arg);
         if !path.is_file() {

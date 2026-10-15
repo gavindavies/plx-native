@@ -180,7 +180,7 @@ impl StyleField {
         match self {
             Self::Size => subtitle_size_label(SubtitleSize::from_index(i as u8)),
             Self::Position => subtitle_position_label(SubtitlePosition::from_index(i as u8)),
-            Self::Color => tone_label(SubtitleTone::from_index(i as u8)),
+            Self::Color => subtitle_tone_label(SubtitleTone::from_index(i as u8)),
         }
     }
 }
@@ -1472,7 +1472,8 @@ fn visible_subs(meta: metadata::MetadataView<'_>) -> Vec<usize> {
 }
 
 /// Resolve the typed tone at the UI boundary; persisted values and technical logs stay stable.
-fn tone_label(tone: SubtitleTone) -> &'static str {
+/// Shared with Settings › Subtitles, like [`subtitle_size_label`].
+pub fn subtitle_tone_label(tone: SubtitleTone) -> &'static str {
     match tone {
         SubtitleTone::White => plx_platform::i18n::msg::widgets_tracks_tone_white(),
         SubtitleTone::Silver => plx_platform::i18n::msg::widgets_tracks_tone_silver(),
@@ -1484,7 +1485,7 @@ fn tone_label(tone: SubtitleTone) -> &'static str {
 }
 
 /// The localized name of a caption size rung — the one place both the player's Style pages and
-/// Settings' Playback read it.
+/// Settings › Subtitles read it.
 pub fn subtitle_size_label(size: SubtitleSize) -> &'static str {
     use plx_platform::i18n::msg;
     match size {

@@ -26,7 +26,7 @@ crate names only crates below it:
 | `plx_data` | `data/` | the local library, `.nfo` metadata, watch progress, player settings |
 | `plx_media` | `media/` | FFmpeg demuxer (`ff.rs`), the player engine and its GStreamer sink, thumbnails |
 | `plx_appkit` | `appkit/` | widgets several screens share: player HUD, track menus, info card |
-| `plx_screens` | `screens/` | the screens: Home, folder pages, title page, item menu, player |
+| `plx_screens` | `screens/` | the screens: Home, folder pages, title page, item menu, player, Settings |
 | `plxnative-modules` | `src/` | the app: event loop (`app/`), remote FIFO and screenshots; binary `src/bin/pitv.rs` |
 
 Outside it: `src/ass.c` + `include/ass.h` (the libass facade), `vendor/nanosvg`, `locales/en`,

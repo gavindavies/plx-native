@@ -739,6 +739,9 @@ pub const fn dim(c: [f32; 4], k: f32) -> [f32; 4] {
 pub const RAIL_TRACK: [f32; 4] = with_a(WHITE, 0.20);
 /// Played/filled portion of a rail.
 pub const RAIL_FILL: [f32; 4] = with_a(WHITE, 0.95);
+/// The scrubber's buffered band: how far the player's read-ahead cache has read, between the
+/// played fill and the empty track (`PiTV Redesign.dc.html` 1d's `.28`).
+pub const RAIL_BUFFERED: [f32; 4] = with_a(WHITE, 0.28);
 /// An intro/credits SEGMENT on the player scrubber — a band lit a step above the track, drawn
 /// between the track and the fill so the played part of a segment reads as played. Stays inside the
 /// rail's monochrome language on purpose: a hue here would compete with the amber resume fill for

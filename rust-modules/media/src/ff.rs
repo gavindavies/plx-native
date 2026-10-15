@@ -887,6 +887,17 @@ pub fn majors() -> (u32, u32, u32) {
     }
 }
 
+/// The bundled libavformat's version as boot read it (`major << 16 | minor << 8 | micro`), 0 before
+/// boot or without the libraries.
+static AVFORMAT_VERSION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The bundled FFmpeg, as Settings › About names it: `libavformat 63.1.100`. `None` when the
+/// libraries did not load.
+pub fn library_version() -> Option<String> {
+    let v = AVFORMAT_VERSION.load(Ordering::Relaxed);
+    (v != 0).then(|| format!("libavformat {}", ver(v)))
+}
+
 /// Boot smoke test + optional ABI probe. Called once at startup.
 pub fn boot() {
     if !load_libraries() {
@@ -896,6 +907,7 @@ pub fn boot() {
     }
     unsafe {
         let (fmt, cod, utl) = (avformat_version(), avcodec_version(), avutil_version());
+        AVFORMAT_VERSION.store(fmt, Ordering::Relaxed);
         crate::player::log(&format!(
             "ff: avformat={} avcodec={} avutil={}",
             ver(fmt),
@@ -2251,9 +2263,10 @@ pub fn demux(
                         break;
                     }
                 };
+                let file = file.with_read_ahead(&path);
                 let size = file.size();
                 SHARED.file_size.store(size, Ordering::Release);
-                crate::player::log(&format!("ff: open local size={size}"));
+                crate::player::log(&format!("ff: open local size={size} read-ahead={}", file.reads_ahead()));
                 let mut state = Box::new(AvioState {
                     file: Box::new(file),
                     aq: aq_p,
@@ -2425,6 +2438,7 @@ pub fn demux(
                     SHARED
                         .duration_ns
                         .store(dur.saturating_mul(1000), Ordering::Relaxed);
+                    state.file.set_duration(dur.saturating_mul(1000));
                 }
                 // The NAME as well as the id, and the name is what anything downstream should grade.
                 // A raw AV_CODEC_ID is an FFmpeg enum, and that enum RENUMBERS between majors — H264
