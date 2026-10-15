@@ -4,7 +4,8 @@
 //! it, not about one film, so these are one value each for the whole install; what the viewer
 //! chooses per FILE (the audio track, the subtitle and its timing) is `local_progress`'s.
 //!
-//! Each setting is held in memory in one atomic the player reads every frame, read from one JSON
+//! Each setting is held in memory in one atomic the player reads every frame (the two default
+//! languages in one mutex), read from one JSON
 //! file under the persistent state root (`settings.json`) once at boot ([`load`], blocking) and
 //! rewritten whole on a worker after every change ([`set_subtitle_tone`] and its siblings): the
 //! new value is live at once and the write follows it, so a pick is never held up by the disk.

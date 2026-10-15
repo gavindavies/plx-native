@@ -56,7 +56,7 @@ fn choose(roots: &[PathBuf], listing: Option<&Listing>) -> Vec<(String, String)>
     vec![(name(root), String::new())]
 }
 
-/// Whether `arg` is a page the tab bar stands over: Home, or a library pill's folder.
+/// Whether `arg` is a page the tab bar stands over: Home, Settings, or a library pill's folder.
 pub fn is_tab_page(arg: &AppArg) -> bool {
     match arg {
         AppArg::Home | AppArg::Settings => true,

@@ -158,7 +158,7 @@ pub fn caption_page(pager: &CaptionPager, hud_up: bool) -> u32 {
 }
 
 /// Shared caption placement for plain text and a styled-renderer failure message. Text size and
-/// vertical placement follow the viewer's Settings > Playback picks (`route::subtitle_size`,
+/// vertical placement follow the viewer's Settings › Subtitles picks (`route::subtitle_size`,
 /// `route::subtitle_position`) — native ASS/SSA keeps its authored style instead
 /// (`docs/ass-subtitles.md`). The message is a short fixed string, so it is never paged: a block
 /// taller than the area is drawn whole at the smallest step.
@@ -416,7 +416,7 @@ fn subtitle_ink_for(tone: plx_data::settings::SubtitleTone) -> [f32; 4] {
         .unwrap_or(theme::SUBTITLE_INKS[0])
 }
 
-/// The face-size multiplier for the viewer's Settings > Playback pick, applied to the plain-text
+/// The face-size multiplier for the viewer's Settings › Subtitles pick, applied to the plain-text
 /// caption's 36 px base face ([`draw_subtitle_message`]) and its line pitch/wrap width together,
 /// so a larger caption still wraps before it runs off either edge.
 fn subtitle_size_scale(size: plx_data::settings::SubtitleSize) -> f32 {

@@ -1485,7 +1485,7 @@ pub fn subtitle_tone_label(tone: SubtitleTone) -> &'static str {
 }
 
 /// The localized name of a caption size rung — the one place both the player's Style pages and
-/// Settings' Playback read it.
+/// Settings › Subtitles read it.
 pub fn subtitle_size_label(size: SubtitleSize) -> &'static str {
     use plx_platform::i18n::msg;
     match size {

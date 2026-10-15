@@ -5,7 +5,7 @@
 //! travelling capsules (`ui::widgets::StripRender`). What the application supplies is the
 //! vocabulary and the geometry, every frame, before the dispatcher runs:
 //!
-//! - the pills (`plx_screens::tabs::destinations`: Home, then the library's folders), as the
+//! - the pills (`plx_screens::tabs::destinations`: Home, the library's folders, then Settings), as the
 //!   arguments `NavOp::SelectTab` selects, keyed `STRIP_BASE + position`;
 //! - the strip's members, from the same measured widths the paint lays out — only while the page on
 //!   top wears the bar (`Chrome::TabBar`), so focus can never climb into a bar nobody can see;

@@ -9,7 +9,8 @@ Every `Screen` the dispatcher mounts, steps, focuses and draws lives here (crate
 | `local_detail.rs` | one local title's page: artwork, description, how to play it |
 | `item_menu.rs` | the hold menu on a card (play from the start, mark watched, ...) |
 | `player/` | the player screen, its HUD overlay and its track/chapter panels |
-| `tabs.rs` | the tab bar's destinations: Home, then the library's folders |
+| `settings.rs` | Settings: subtitle style, playback languages, the read-ahead cache, About |
+| `tabs.rs` | the tab bar's destinations: Home, the library's folders, then Settings |
 | `titles.rs` | a local title in one line (shared helper, not a screen) |
 | `registry.rs` | the application bundle: `AppArg`, the screen ids and the one `mount` match |
 
