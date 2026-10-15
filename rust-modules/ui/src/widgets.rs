@@ -147,7 +147,7 @@ pub fn panel_ground(
     field: Option<&crate::underlay::UnderlayField>,
 ) {
     let boost = theme::GLASS_RIM_LIGHT[3] - theme::GLASS_RIM[3];
-    let weight = panel_tint_sweep().unwrap_or(theme::underlay::PANEL_TINT);
+    let weight = theme::underlay::PANEL_TINT;
     let drew = {
         field.is_some_and(|f| f.draw_panel(p, r, radius, weight))
     };
@@ -161,19 +161,6 @@ pub fn panel_ground(
     };
 }
 
-#[cfg(feature = "devtriggers")]
-fn panel_tint_sweep() -> Option<f32> {
-    static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("paneltint")?.trim().parse::<f32>().ok()?;
-        plx_base::eventlog::log(&format!("panel: field tint swept to {v}"));
-        Some(v.clamp(0.0, 1.0))
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn panel_tint_sweep() -> Option<f32> {
-    None
-}
 
 /// **What a popover is made of — both halves, from one name.** See [`theme::Material`].
 ///
@@ -191,44 +178,18 @@ fn panel_tint_sweep() -> Option<f32> {
 /// `/tmp/pitv-material=<ultrathin|thin|regular|thick|ultrathick>` swaps the whole material,
 /// and `/tmp/pitv-panelfrost=<a>` still overrides the density alone for a finer sweep.
 fn panel_material() -> theme::Material {
-    material_sweep().unwrap_or(theme::PANEL_MATERIAL)
+    theme::PANEL_MATERIAL
 }
 
 fn panel_frost() -> ([f32; 4], [f32; 4]) {
-    let a = frost_sweep().unwrap_or(panel_material().frost());
+    let a = panel_material().frost();
     (
         theme::with_a(theme::PANEL_FROST_TOP, a),
         theme::with_a(theme::PANEL_FROST_BOT, a),
     )
 }
 
-#[cfg(feature = "devtriggers")]
-fn material_sweep() -> Option<theme::Material> {
-    static SEEN: std::sync::OnceLock<Option<theme::Material>> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let m = theme::Material::parse(&plx_base::devtrig::read("material")?)?;
-        plx_base::eventlog::log(&format!("glass: panel material swept to {m:?}"));
-        Some(m)
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn material_sweep() -> Option<theme::Material> {
-    None
-}
 
-#[cfg(feature = "devtriggers")]
-fn frost_sweep() -> Option<f32> {
-    static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("panelfrost")?.trim().parse::<f32>().ok()?;
-        plx_base::eventlog::log(&format!("glass: panel frost swept to {v}"));
-        Some(v.clamp(0.0, 1.0))
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn frost_sweep() -> Option<f32> {
-    None
-}
 
 /// Build the transcode key on the stack and resolve it to a GL texture AND its decoded pixel
 /// size — `(0, 0.0, 0.0)` until it is ready. The size is the store's own answer about the slot it
@@ -5432,7 +5393,7 @@ fn track_density_step(dt: f32, d: &mut TrackDensity) {
 /// On the near-black grounds this touches there is a great deal of room and the clamp does not bind
 /// — it is here so the rule can be stated as a rule.
 fn track_lift(ground: [f32; 3], a: f32) -> f32 {
-    let floor = lift_floor();
+    let floor = theme::TAB_GLASS_LIFT_FLOOR;
     // The ground as one level. `sample_ground` has already taken the WORST tap across the bar, so
     // this is the bright end of what the bar sits on — the right end to size a floor against.
     let lum = (ground[0] + ground[1] + ground[2]) / 3.0;
@@ -5460,31 +5421,11 @@ fn track_lift(ground: [f32; 3], a: f32) -> f32 {
 ///
 /// `0` is the material as it was before the floor existed, which is what makes an A/B one launch
 /// rather than one build. Read once per process, like every other material sweep here.
-#[cfg(feature = "devtriggers")]
-fn lift_floor() -> f32 {
-    static SEEN: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let Some(v) = plx_base::devtrig::read("tracklift").and_then(|v| v.trim().parse::<f32>().ok())
-        else {
-            return theme::TAB_GLASS_LIFT_FLOOR;
-        };
-        plx_base::eventlog::log(&format!("glass: track lift swept to floor={v}"));
-        v.clamp(0.0, 1.0)
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn lift_floor() -> f32 {
-    theme::TAB_GLASS_LIFT_FLOOR
-}
-
 fn tab_glass_stops(ground: [f32; 3], density: &mut TrackDensity) -> ([f32; 4], [f32; 4]) {
     let lo = theme::TAB_GLASS_TOP[3];
-    let hi = density_max_sweep().unwrap_or(theme::TAB_TRACK_A_TOP);
+    let hi = theme::TAB_TRACK_A_TOP;
     let spread = theme::TAB_GLASS_BOT[3] - lo;
-    let a = match tab_glass_dim_sweep() {
-        Some(a) => a,
-        None => track_density(ground, density),
-    };
+    let a = track_density(ground, density);
     // **THE SPREAD TAPERS AS THE SOLVE RISES, and it did not until a judging panel checked the
     // arithmetic.** The bottom stop is `a + spread` and nothing bounded it: the solve is sized so the
     // labels clear their contrast against the TOP stop, which is the lightest, and the bottom was
@@ -5550,9 +5491,7 @@ const TRACK_INK_CONTRAST: f32 = 4.0;
 /// a saturated blue and a neutral grey the same ground.
 fn track_alpha_for(ground: [f32; 3]) -> f32 {
     let lo = theme::TAB_GLASS_TOP[3];
-    let hi = density_max_sweep()
-        .unwrap_or(theme::TAB_TRACK_A_TOP)
-        .max(lo);
+    let hi = theme::TAB_TRACK_A_TOP.max(lo);
     let steps = 24;
     for i in 0..=steps {
         let a = lo + (hi - lo) * (i as f32 / steps as f32);
@@ -5565,66 +5504,7 @@ fn track_alpha_for(ground: [f32; 3]) -> f32 {
     hi
 }
 
-/// `/tmp/pitv-trackmax=<a>` — the density CEILING, swept.
-///
-/// The ceiling is what decides how dark this bar is allowed to get over bright artwork, and it is
-/// the one remaining number between our material and the reference. Measured on a stripe ground:
-/// the macOS 26 tab bar's face sits at 89 against a page of 127 (−27% Weber) and, over four
-/// different grounds, its face barely moves at all — 92, 94, 92, 96 — while ours swings 47…84 and
-/// reaches −60%. Their material has ONE density and converges every backdrop toward a fixed grey;
-/// ours re-solves per frame against [`TRACK_INK_CONTRAST`] and, over a bright hero, spends the
-/// whole span to get there.
-///
-/// **This is the continuous lever, and it is here instead of the obvious one.** The obvious one is
-/// a second, LIGHT polarity with flipped ink — Apple's own answer — and this repo had it and
-/// deleted it: `theme.rs`'s note where that polarity's tokens used to stand records four bugs in one week
-/// from a discrete state that has to be re-decided every time the ground moves, and a judging panel
-/// that measured the light material landing 34.9 L\* off the local ground on the median MIXED hero
-/// where the dark one lands 3.4. Do not re-add it from this note. Lowering a ceiling adds no state,
-/// no hysteresis and no decision — it only changes how far one existing solve may travel.
-///
-/// What it COSTS is stated plainly, because it is the whole trade: below the ceiling the solve
-/// needs, the idle labels stop clearing [`TRACK_INK_CONTRAST`] over the brightest grounds. That is
-/// also exactly the trade the reference makes, and the criticism it takes for it.
-/// The fixed-weight leg's density, read ONCE at boot like every other sweep here.
-///
-/// It was `plx_base::devtrig::read("tabglassdim")` inline in [`tab_glass_stops`], i.e. a `read_to_string`
-/// of a `/tmp` path on **every drawn frame** of every screen that wears the bar — a syscall on the
-/// 60 fps path, in every dev and harness build, which is what the fps scenes measure.
-///
-/// **No `#[cfg]` pair**, unlike the sweeps around it: `devtrig::read` is already `None` at COMPILE time
-/// without the `devtriggers` feature, so a second gate here only re-derives what the one door
-/// guarantees — and a hand-written pair is how this file broke the `RELEASE=1` build once already,
-/// by swallowing a neighbour's attribute when a new function was spliced between them.
-fn tab_glass_dim_sweep() -> Option<f32> {
-    static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("tabglassdim")?
-            .trim()
-            .parse::<f32>()
-            .ok()?;
-        if !(0.0..=1.0).contains(&v) {
-            plx_base::eventlog::log("glass: tabglassdim ignored (want 0..1)");
-            return None;
-        }
-        plx_base::eventlog::log(&format!("glass: track density pinned to {v}"));
-        Some(v)
-    })
-}
 
-#[cfg(feature = "devtriggers")]
-fn density_max_sweep() -> Option<f32> {
-    static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("trackmax")?.trim().parse::<f32>().ok()?;
-        plx_base::eventlog::log(&format!("glass: density ceiling swept to {v}"));
-        Some(v.clamp(0.0, 1.0))
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn density_max_sweep() -> Option<f32> {
-    None
-}
 
 /// **The lit edge's weight for a bar already drawn at `density`.**
 ///
@@ -5644,9 +5524,9 @@ fn density_max_sweep() -> Option<f32> {
 /// Returns `(perimeter, lit)` — the ring and, over it, the edge facing the light.
 fn track_rim(density: f32) -> ([f32; 4], [f32; 4]) {
     let lo = theme::TAB_GLASS_TOP[3];
-    let hi = density_max_sweep().unwrap_or(theme::TAB_TRACK_A_TOP);
+    let hi = theme::TAB_TRACK_A_TOP;
     let k = ((density - lo) / (hi - lo).max(1e-4)).clamp(0.0, 1.0);
-    let ceil = rim_max_sweep().unwrap_or(theme::GLASS_RIM_MAX);
+    let ceil = theme::GLASS_RIM_MAX;
     // The ring travels: a white line runs out of room as the ground brightens, so it climbs the ramp
     // toward `GLASS_RIM_MAX`, and the highlight keeps exactly twice the perimeter's weight the whole
     // way — the one lamp does not move because the room got brighter.
@@ -5657,29 +5537,6 @@ fn track_rim(density: f32) -> ([f32; 4], [f32; 4]) {
     )
 }
 
-/// `/tmp/pitv-rimmax=<a>` — the ceiling that ramp climbs toward, swept.
-///
-/// It exists because the ramp's ceiling is the one number that decides whether the edge reads as a
-/// LIT EDGE or as a drawn white outline, and it had never been held against the reference. Measured
-/// on a stripe ground: how much of the ground's swing the top rim carries is 0.23 for us and 0.25
-/// for the macOS tab bar — i.e. ours is not flat and never was, which was the standing suspicion.
-/// What differs is the LEVEL. Their rim sits at 124 against a page of 127 and a face of 89; ours at
-/// 212 against a page of 124 and a face of 53. Relative to its own brightness their edge varies by
-/// 24% and ours by 10%, which is the whole of why theirs reads as the material catching a lamp and
-/// ours as a stroke drawn round a shape.
-#[cfg(feature = "devtriggers")]
-fn rim_max_sweep() -> Option<f32> {
-    static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("rimmax")?.trim().parse::<f32>().ok()?;
-        plx_base::eventlog::log(&format!("glass: rim ceiling swept to {v}"));
-        Some(v.clamp(0.0, 1.0))
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn rim_max_sweep() -> Option<f32> {
-    None
-}
 
 /// **Which way the standing track answers the contrast question, and how far along it is.**
 ///
@@ -5842,16 +5699,12 @@ const GLASS_TRACK_BUDGET_MAX: f32 = 2.0
 /// The track's geometry budget and the explicit flat-material experiment are the only material
 /// refusals. Occlusion and source eligibility are handled by the frame's layer walk.
 fn tab_glass_on(track_w: f32) -> bool {
-    !flat_tabs_armed() && track_w <= GLASS_TRACK_MAX
+    track_w <= GLASS_TRACK_MAX
 }
 
 /// Trigger probes are latched; paint must not perform a filesystem stat per surface.
 use plx_base::devtrig::latched_flag;
 
-latched_flag!(
-    /// `/tmp/pitv-flattabs` — the material off, for an A/B against the flat capsule.
-    fn flat_tabs_armed = "flattabs";
-);
 latched_flag!(
     /// `/tmp/pitv-groundlog` — what the sampler read and what density it chose.
     fn ground_log_armed = "groundlog";

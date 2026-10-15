@@ -760,7 +760,6 @@ name = "plx_gfx"
 version = "0.0.0"
 dependencies = [
  "image",
- "libc",
  "plx_base",
  "plx_machine",
 ]
@@ -785,7 +784,6 @@ dependencies = [
  "plx_machine",
  "plx_media",
  "plx_platform",
- "serde",
  "serde_json",
 ]
 
@@ -807,7 +805,6 @@ dependencies = [
 name = "plx_screens"
 version = "0.0.0"
 dependencies = [
- "libc",
  "plx_appkit",
  "plx_base",
  "plx_data",
@@ -817,14 +814,12 @@ dependencies = [
  "plx_platform",
  "plx_screens",
  "plx_ui",
- "serde_json",
 ]
 
 [[package]]
 name = "plx_ui"
 version = "0.0.0"
 dependencies = [
- "libc",
  "plx_base",
  "plx_gfx",
  "plx_machine",
@@ -846,8 +841,6 @@ dependencies = [
  "plx_platform",
  "plx_screens",
  "plx_ui",
- "serde",
- "serde_json",
 ]
 
 [[package]]

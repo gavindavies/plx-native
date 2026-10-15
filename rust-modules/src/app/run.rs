@@ -330,9 +330,6 @@ unsafe fn present_and_swap(
             SDL_GL_SwapWindow(app.win);
         }
         app.window_activity.presented();
-        // One increment, then nothing: re-ask EGL for the back buffer's AGE after real
-        // presents have happened. The boot reading is 0 by construction. See `egl.rs`.
-        plx_gfx::egl::late_probe();
         #[cfg(feature = "devtools")]
         {
             app.buffer_flip_count = (app.buffer_flip_count + 1) % 60;
@@ -1036,10 +1033,6 @@ pub(crate) fn update(fr: &Frame) {
 pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32) {
     #[cfg(feature = "threadcheck")]
     let _draw_scope = plx_base::task::watchdog::draw_scope();
-            // EXPERIMENT (`/tmp/pitv-egldamage`), no-op without the trigger. FIRST, before
-            // any GL command of this frame: `EGL_KHR_partial_update` only permits a damage
-            // region to be declared before rendering begins. See `egl.rs`.
-            plx_gfx::egl::frame_damage();
             // The authored canvas, scaled UNIFORMLY into the drawable and centred. The shaders
             // divide every coordinate by `u_screen` (which stays 1920x1080), so this one call
             // is the entire logical->physical mapping — nothing else in the renderer knows the

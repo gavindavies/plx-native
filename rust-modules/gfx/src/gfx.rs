@@ -3155,40 +3155,6 @@ const _: () = assert!(
 /// as an exact 2x2 box — a real property, and a smaller one than what it costs: the alignment buys
 /// a marginally cleaner kernel, and structure at the scale of a letterform is the entire effect.
 const BLUR_TAPS: [f32; 2] = [0.35, 0.75];
-/// `/tmp/pitv-blurtaps=<a>,<b>` — those offsets, swept.
-///
-/// The taps are now the WHOLE of "how much structure survives" that anyone gets to tune — the
-/// source scale is pinned to the direct path's, see [`BLUR_REDUCTIONS`] — and until this existed
-/// neither half could be moved without a rebuild, so a ladder of blur weights cost one
-/// cross-compile and one deploy per rung. That is why these were inherited rather than chosen for
-/// as long as they were. Read once at boot, like every other sweep here.
-///
-/// Widening is asserted by the chain's own shape test, so a rung that narrows the second tap past
-/// the first is refused rather than silently reordered.
-#[cfg(feature = "devtriggers")]
-fn blur_taps() -> [f32; 2] {
-    static SEEN: std::sync::OnceLock<[f32; 2]> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let Some(v) = plx_base::devtrig::read("blurtaps") else {
-            return BLUR_TAPS;
-        };
-        let mut it = v.split(',').map(|t| t.trim().parse::<f32>());
-        match (it.next(), it.next()) {
-            (Some(Ok(a)), Some(Ok(b))) if a > 0.0 && b > a => {
-                plx_base::eventlog::log(&format!("glass: blur taps swept to {a},{b}"));
-                [a, b]
-            }
-            _ => {
-                plx_base::eventlog::log("glass: blurtaps ignored (want <a>,<b> with 0 < a < b)");
-                BLUR_TAPS
-            }
-        }
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn blur_taps() -> [f32; 2] {
-    BLUR_TAPS
-}
 /// The UP pass's tap offset, in texels of the target it writes.
 ///
 /// **This pass is what stops the result looking like enlarged pixels rather than like blur**, and
@@ -3439,49 +3405,6 @@ const STANDING_SHARP: f32 = 0.0;
 /// fill. Shedding it at the edge costs the interior nothing — the ramp is zero where the bevel
 /// meets the flat middle, so the density the labels were solved against is untouched.
 const STANDING_RIMCLEAR: f32 = 0.6;
-/// `/tmp/pitv-rimclear=<w>` — that shed, swept. `0` is the uniform scrim.
-#[cfg(feature = "devtriggers")]
-fn rimclear_sweep() -> Option<f32> {
-    static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("rimclear")?.trim().parse::<f32>().ok()?;
-        plx_base::eventlog::log(&format!("glass: rim scrim shed swept to {v}"));
-        Some(v.clamp(0.0, 1.0))
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn rimclear_sweep() -> Option<f32> {
-    None
-}
-/// `/tmp/pitv-tracksharp=<w>` — that weight, swept. `0` is the single-source material.
-#[cfg(feature = "devtriggers")]
-fn sharp_sweep() -> Option<f32> {
-    static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("tracksharp")?.trim().parse::<f32>().ok()?;
-        plx_base::eventlog::log(&format!("glass: rim sharp source swept to {v}"));
-        Some(v.clamp(0.0, 1.0))
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn sharp_sweep() -> Option<f32> {
-    None
-}
-/// `/tmp/pitv-paneldeep=<px>` — the panel's extra sample radius, swept. `0` is the bar's own
-/// single-fetch material.
-#[cfg(feature = "devtriggers")]
-fn deep_sweep() -> Option<f32> {
-    static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("paneldeep")?.trim().parse::<f32>().ok()?;
-        plx_base::eventlog::log(&format!("glass: panel deep-sample radius swept to {v}"));
-        Some(v.max(0.0))
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn deep_sweep() -> Option<f32> {
-    None
-}
 
 /// The lit chamfer's colour. A weight on the overlay ramp rather than a hue, per the theme rule —
 /// it is white light, and its ALPHA is the only thing tuned.
@@ -3628,7 +3551,7 @@ impl GlassRim {
     fn sharp(self) -> f32 {
         match self {
             Self::Bevelled => 0.0,
-            Self::Standing => sharp_sweep().unwrap_or(STANDING_SHARP),
+            Self::Standing => STANDING_SHARP,
         }
     }
 
@@ -3638,7 +3561,7 @@ impl GlassRim {
     fn rimclear(self) -> f32 {
         match self {
             Self::Bevelled => 0.0,
-            Self::Standing => rimclear_sweep().unwrap_or(STANDING_RIMCLEAR),
+            Self::Standing => STANDING_RIMCLEAR,
         }
     }
 
@@ -3647,65 +3570,11 @@ impl GlassRim {
             Self::Bevelled => (GLASS_BEVEL, GLASS_LENS, GLASS_SPEC),
             Self::Standing => (STANDING_BEVEL, STANDING_LENS, [0.0, 0.0, 1.0, 0.0]),
         };
-        match self {
-            Self::Standing => standing_sweep().unwrap_or(base),
-            Self::Bevelled => base,
-        }
+        base
     }
 }
 
-/// **`/tmp/pitv-tracklens=<bevel>,<lens>,<spec>[,<edge_a>,<shade>]` — the container, swept.**
-///
-/// [`GlassRim::Standing`] was for a while the one material parameter in this app decided by an
-/// argument rather than by looking at a ladder: a 38px lens in a 2px band is a smear, so the lens
-/// was set to zero and the chamfer collapsed onto the perimeter. That is right about 38 and says
-/// nothing about 8, and the thing the container has to do — read as a slab with thickness rather
-/// than as a rectangle of darker picture — is exactly what a lens does and what a drawn line
-/// cannot.
-///
-/// So this exists for the same reason `ui::widgets::tab_glass_stops`'s density override
-/// does: the values are a judgement about a picture, and a judgement about a picture is made by
-/// putting the ladder side by side. Absent, the returned params are byte-identical to the variant's
-/// own. Read once per process, so a simulator instance is one capture of one rung —
-/// `tools/glass-patterns.py --lens "off:2,0,0 b:12,12,0 c:12,24,0"` launches one per rung and
-/// drives them in lockstep over the same grounds, which is how 12/24 was picked — over
-/// `checker:96`, `hbars:64` and `edge`, the three grounds coarse enough to survive the blur.
-#[cfg(feature = "devtriggers")]
-fn swept() -> Option<(f32, f32, [f32; 4], Option<f32>, Option<f32>)> {
-    static SEEN: std::sync::OnceLock<Option<(f32, f32, [f32; 4], Option<f32>, Option<f32>)>> =
-        std::sync::OnceLock::new();
-    *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("tracklens")?;
-        let mut it = v.split(',').map(|t| t.trim().parse::<f32>().ok());
-        let (b, l, w) = (it.next()??, it.next()??, it.next()??);
-        // The chamfer's two weights are OPTIONAL: three fields is the geometry alone, five adds the
-        // lighting, and a rung that omits them must be byte-identical to one written before they
-        // existed — the earlier sheets are still the comparison.
-        let (edge_a, shade) = (it.next().flatten(), it.next().flatten());
-        // The bevel divides in the shader and bounds its early-out, so zero is a division by zero on
-        // every glass fragment in the frame — the same floor the variant itself keeps.
-        let out = (
-            b.max(1.0),
-            l.max(0.0),
-            [GLASS_SPEC[0], GLASS_SPEC[1], GLASS_SPEC[2], w.max(0.0)],
-            edge_a.map(|v| v.clamp(0.0, 1.0)),
-            shade.map(|v| v.clamp(0.0, 1.0)),
-        );
-        plx_base::eventlog::log(&format!(
-            "glass: track swept to bevel={} lens={} spec={} edge={:?} shade={:?}",
-            out.0, out.1, w, out.3, out.4
-        ));
-        Some(out)
-    })
-}
-#[cfg(not(feature = "devtriggers"))]
-fn swept() -> Option<(f32, f32, [f32; 4], Option<f32>, Option<f32>)> {
-    None
-}
 
-fn standing_sweep() -> Option<(f32, f32, [f32; 4])> {
-    swept().map(|(b, l, s, _, _)| (b, l, s))
-}
 
 /// The chamfer's LIGHTING, as the shader is given it: `(u_edge, u_light)`.
 ///
@@ -3720,16 +3589,7 @@ fn standing_sweep() -> Option<(f32, f32, [f32; 4])> {
 /// the bottom chamfer multiplying down to .247 from .345 over 12px. The lens is the part that
 /// earns its keep; this is the part that might just be weight.
 fn chamfer() -> ([f32; 4], [f32; 3]) {
-    let (mut edge, mut light) = (GLASS_EDGE, GLASS_LIGHT);
-    if let Some((_, _, _, a, shade)) = swept() {
-        if let Some(a) = a {
-            edge[3] = a;
-        }
-        if let Some(s) = shade {
-            light[2] = s;
-        }
-    }
-    (edge, light)
+    (GLASS_EDGE, GLASS_LIGHT)
 }
 
 static mut GPROG: c_uint = 0;
@@ -4220,7 +4080,7 @@ fn blur_publish(
 /// further pass fusion can help. Use measured regions and end-to-end A/Bs; `design/specs/liquid-glass.md`
 /// records the current envelope.
 fn blur_snapshot(reg: [f32; 4]) {
-    let taps = blur_taps();
+    let taps = BLUR_TAPS;
     blur_snapshot_with_taps(reg, &taps);
 }
 
@@ -5427,7 +5287,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
         // look at quarter resolution have to shrink in proportion at any finer divisor. Without
         // this a scale sweep changes two variables at once and measures neither.
         let tap_k = 4.0 * plx_base::surface::render_scale() as f32 / scale as f32;
-        for (i, taps) in blur_taps().iter().enumerate() {
+        for (i, taps) in BLUR_TAPS.iter().enumerate() {
             {
                 glViewport(0, 0, tw, th);
                 let (fbo, src) = if i % 2 == 0 {
@@ -5736,11 +5596,7 @@ pub fn draw_blur_backdrop(
         // and the "softer material" was squashed. `GL_UVPX` two lines up already computes the pair;
         // this is the same expression, rectified. The shader reads the ON/OFF state off `.x` now,
         // which is why there is no flag component left to carry.
-        let dpx = if deep > 0.0 {
-            deep_sweep().unwrap_or(deep)
-        } else {
-            0.0
-        };
+        let dpx = if deep > 0.0 { deep } else { 0.0 };
         glUniform2f(
             GL_DEEP,
             dpx * (span[0] / c.reg[2]).abs(),

@@ -659,7 +659,7 @@ pub struct NativeFrame {
 }
 
 plx_base::dynlib! {
-    native_ass: ["libass-plx-host.so.0", "libass-plx.so.0", "libass-plx.0.dylib"] {
+    native_ass: ["libass-plx-host.so.0"] {
         fn plx_ass_abi_version() -> u32;
         fn plx_ass_create(default_font: *const c_char) -> *mut c_void;
         fn plx_ass_destroy(ctx: *mut c_void);

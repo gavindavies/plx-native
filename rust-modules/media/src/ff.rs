@@ -1,15 +1,8 @@
-//! FFmpeg FFI (libavformat / libavcodec / libavutil). The TV ships FFmpeg n3.3
-//! (SONAMEs libavformat.so.57 / libavcodec.so.57 / libavutil.so.55 = 57.71.100 /
-//! 57.89.100 / 55.58.100); we link stub `.so`s carrying those SONAMEs and the device
-//! loads the real libraries at runtime — the same stub trick as SDL/GLES/Starfish.
-//!
-//! This module is THE media demuxer: robust MKV/MP4/TS demux, HTTP input, and
-//! index-based seeking (av_seek_frame). Design record: docs/ffmpeg-demuxer-plan.md.
-//! It also owns the ONE encode path (`venc`, near the end of the file): the dev
-//! capture stream's MPEG1 + MPEG-TS muxer, kept here because every FFmpeg ABI
-//! detail — struct offsets, AVOption names, custom AVIO — belongs in one module.
-//! The struct layouts below are the FFmpeg n3.3 ABI, confirmed on-device by the
-//! Phase A probe (/tmp/pitv-ffprobe logs codec_id/width/height for a known title).
+//! The demuxer: the bundled FFmpeg (libavformat / libavcodec / libavutil, `-plx` builds of 9.0,
+//! `ci/build-ffmpeg.sh`), dlopened by absolute path from the app directory. MKV/MP4/TS demux over
+//! a custom AVIO on a local file, index-based seeking (`av_seek_frame`), Annex-B framing for the
+//! video sink, and the subtitle decoders. The struct offsets below are asserted against the
+//! bundled headers.
 use crate::aq::AuQueue;
 use crate::player::threads::SendPtr;
 use crate::player::SHARED;
@@ -30,11 +23,6 @@ static ABI_OK: AtomicBool = AtomicBool::new(false);
 /// cannot express — and which is the difference between a real end-of-file and the player sitting
 /// on "Buffering…" forever with no error.
 static PUSHED_ANY: AtomicBool = AtomicBool::new(false);
-/// Did libswscale load? It is the one FFmpeg library that is NOT required: `RELEASE=1` leaves it
-/// out of the package because only the dev capture stream's RGBA->YUV conversion uses it. `venc`
-/// checks this rather than relying on being feature-gated out, so the dependency is enforced
-/// where it exists instead of somewhere else.
-static SWS_OK: AtomicBool = AtomicBool::new(false);
 pub fn set_feed_audio(on: bool) {
     FEED_AUDIO.store(on, Ordering::Relaxed);
 }
@@ -412,12 +400,7 @@ pub struct AVSubtitleRect {
 // None branch on Darwin instead of by failing to link.
 plx_base::dynlib! {
     avformat: [
-        // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
-        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
-        // LIST rather than a `cfg`: `dynlib!` already tries each name and reports the ones
-        // it could not open, and only one of these two can ever exist in an app directory.
         "libavformat-plx.so.63",
-        "libavformat-plx.63.dylib",
     ] {
     // Declared beside libavformat's other entry points because that is the library that DEFINES
     // it. Under `#[link]` the final link resolved every name against every library at once and
@@ -454,27 +437,10 @@ plx_base::dynlib! {
         write_packet: Option<extern "C" fn(*mut c_void, *mut u8, c_int) -> c_int>,
         seek: Option<extern "C" fn(*mut c_void, i64, c_int) -> i64>,
     ) -> *mut AVIOContext;
-    // MPEG-TS mux (dev capture stream, venc section)
-    fn avformat_alloc_output_context2(
-        ctx: *mut *mut AVFormatContext,
-        oformat: *mut c_void,
-        format_name: *const c_char,
-        filename: *const c_char,
-    ) -> c_int;
-    fn avformat_new_stream(s: *mut AVFormatContext, c: *const AVCodec) -> *mut AVStream;
-    fn avformat_write_header(s: *mut AVFormatContext, options: *mut *mut AVDictionary) -> c_int;
-    fn av_write_frame(s: *mut AVFormatContext, pkt: *mut AVPacket) -> c_int;
-    fn avio_flush(s: *mut AVIOContext);
-    fn avformat_free_context(s: *mut AVFormatContext);
 }}
 plx_base::dynlib! {
     avcodec: [
-        // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
-        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
-        // LIST rather than a `cfg`: `dynlib!` already tries each name and reports the ones
-        // it could not open, and only one of these two can ever exist in an app directory.
         "libavcodec-plx.so.63",
-        "libavcodec-plx.63.dylib",
     ] {
     fn avcodec_version() -> c_uint;
     fn av_packet_alloc() -> *mut AVPacket;
@@ -503,36 +469,19 @@ plx_base::dynlib! {
     // .so links either way, so this is checked, not assumed.
     fn avcodec_parameters_alloc() -> *mut AVCodecParameters;
     fn avcodec_parameters_free(par: *mut *mut AVCodecParameters);
-    fn avcodec_find_encoder_by_name(name: *const c_char) -> *const AVCodec;
-    // MPEG1 encode (dev capture stream, venc section)
-    fn avcodec_send_frame(ctx: *mut AVCodecContext, frame: *const c_void) -> c_int;
-    fn avcodec_receive_packet(ctx: *mut AVCodecContext, pkt: *mut AVPacket) -> c_int;
     fn avcodec_parameters_from_context(par: *mut AVCodecParameters, ctx: *const AVCodecContext) -> c_int;
-    fn av_packet_rescale_ts(pkt: *mut AVPacket, tb_src: AVRational, tb_dst: AVRational);
 }}
 plx_base::dynlib! {
     // avformat_version lives in libavformat, not libavutil — but it was declared here and the
     // loader resolves by symbol, not by header, so it must move to the library that defines it or
     // the whole avutil table reports Incomplete on every device.
     avutil: [
-        // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
-        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
-        // LIST rather than a `cfg`: `dynlib!` already tries each name and reports the ones
-        // it could not open, and only one of these two can ever exist in an app directory.
         "libavutil-plx.so.61",
-        "libavutil-plx.61.dylib",
     ] {
     fn avutil_version() -> c_uint;
     fn av_malloc(size: usize) -> *mut c_void;
     fn av_freep(ptr: *mut c_void);
     fn av_rescale_q(a: i64, bq: AVRational, cq: AVRational) -> i64;
-    // MPEG1 encode input frames + option/pixfmt helpers (venc section)
-    fn av_frame_alloc() -> *mut c_void;
-    fn av_frame_free(frame: *mut *mut c_void);
-    fn av_frame_get_buffer(frame: *mut c_void, align: c_int) -> c_int;
-    fn av_frame_make_writable(frame: *mut c_void) -> c_int;
-    fn av_opt_set(obj: *mut c_void, name: *const c_char, val: *const c_char, search_flags: c_int) -> c_int;
-    fn av_get_pix_fmt(name: *const c_char) -> c_int;
     // Container tags. Borrowed, never freed: the entry belongs to the dictionary, which belongs to
     // the AVStream, which `avformat_close_input` frees — so every read must copy before the close.
     fn av_dict_get(
@@ -541,28 +490,6 @@ plx_base::dynlib! {
         prev: *const AVDictionaryEntry,
         flags: c_int,
     ) -> *const AVDictionaryEntry;
-}}
-plx_base::dynlib! {
-    swscale: [
-        // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
-        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
-        // LIST rather than a `cfg`: `dynlib!` already tries each name and reports the ones
-        // it could not open, and only one of these two can ever exist in an app directory.
-        "libswscale-plx.so.10",
-        "libswscale-plx.10.dylib",
-    ] {
-    fn sws_getContext(
-        src_w: c_int, src_h: c_int, src_fmt: c_int,
-        dst_w: c_int, dst_h: c_int, dst_fmt: c_int,
-        flags: c_int, src_filter: *mut c_void, dst_filter: *mut c_void, param: *const f64,
-    ) -> *mut c_void;
-    fn sws_scale(
-        c: *mut c_void,
-        src_slice: *const *const u8, src_stride: *const c_int,
-        src_slice_y: c_int, src_slice_h: c_int,
-        dst: *const *mut u8, dst_stride: *const c_int,
-    ) -> c_int;
-    fn sws_freeContext(c: *mut c_void);
 }}
 
 // ---- constants (n3.3) ----
@@ -818,50 +745,6 @@ unsafe fn nth_audio_stream(fmt: *mut AVFormatContext, n: i32) -> Option<c_int> {
     None
 }
 
-// ================================ venc =====================================
-// Dev capture stream MPEG1/TS encoder (used by capture.rs when a client's hello
-// asks for kind=mpegts): RGBA 960x540 -> sws_scale -> yuv420p AVFrame ->
-// mpeg1video (the TV build keeps this encoder) -> mpegts muxer -> custom AVIO
-// write callback -> the client socket, raw unframed TS (self-syncing 188B pkts).
-//
-// ABI strategy (workflow-verified 2026-07-24 against the DEVICE's own libs — the
-// AVOption tables inside libavcodec.so.57.89.100 carry the true field offsets):
-// every numeric encoder knob goes through av_opt_set ("b"/"g"/"bf"/"maxrate"/
-// "bufsize"/"dct"/"time_base"), pix fmts come from av_get_pix_fmt() at runtime
-// (AV_PIX_FMT_RGBA is 28 in THIS build — an FF_API_XVMC alias shifts the enum;
-// never hardcode it), and only width/height/pix_fmt (AVCodecContext) and
-// data/linesize/width/height/format/pts (AVFrame) are raw offset pokes below.
-// After avcodec_open2, avcodec_parameters_from_context round-trips the values
-// through the already-modeled AVCodecParameters as a runtime ABI self-check —
-// a mismatch latches the whole mpeg path off instead of corrupting memory.
-// mpeg1video only accepts the fixed MPEG1 frame-rate table: time_base stays
-// {1,30} regardless of the actual (jittery, <=30fps) capture cadence; jsmpeg in
-// streaming mode ignores timestamps and decodes as data arrives.
-
-// AVCodecContext width/height/pix_fmt USED to be poked here at 124/128/144, under a note claiming
-// they had no AVOption. That was wrong — `video_size` (an IMAGE_SIZE option writing width AND
-// height) and `pixel_format` are both in libavcodec's own option table — and Venc::open sets them
-// by name now, so the constants are gone with the last read of them. Which is the point: all three
-// move on webOS 5 (to 92/96/112), and a by-name setter does not care. `ci/ffabi-assert.c` still
-// asserts them per major, so if anyone ever needs to poke them again the proven numbers are there.
-// AVFrame (avutil 55, 32-bit ARM). pts sits at +104: a 4-byte pad at +100
-// 8-aligns the int64 on ARM EABI (the classic AVFrame-on-ARM quirk).
- // u8*[8] — the only one that does not move
-#[cfg(target_pointer_width = "32")]
-const OFF_FRAME_LINESIZE: usize = 32; // c_int[8]
-#[cfg(target_pointer_width = "32")]
-const OFF_FRAME_WIDTH: usize = 68;
-#[cfg(target_pointer_width = "32")]
-const OFF_FRAME_HEIGHT: usize = 72;
-#[cfg(target_pointer_width = "32")]
-const OFF_FRAME_FORMAT: usize = 80;
-#[cfg(target_pointer_width = "32")]
-const OFF_FRAME_PTS: usize = 96;
-// 64-bit: `data` is eight POINTERS rather than eight 32-bit ones, so `linesize` doubles and
-// everything after it follows. `pts` needs no pad here — it is already 8-aligned — which is the
-// ARM EABI quirk described above seen from the side where it does not bite.
-
-// All FFmpeg objects are owned and touched by the single capture-encoder thread.
 
 /// Copy the embedded ASS sources before FFmpeg can release them. The codec parameter and
 /// dictionary layouts are already compile-asserted against our bundled FFmpeg headers; the
@@ -970,20 +853,6 @@ fn load_libraries() -> bool {
                     "ff: {soname} is missing {n} symbol(s) we need — named above"
                 ));
             }
-        }
-    }
-    // swscale is NOT required, and treating it as required broke the RELEASE build entirely:
-    // `RELEASE=1` drops it from the package (only the dev capture stream's RGBA->YUV conversion
-    // uses it), so an all-or-nothing loop over four libraries would have found three, reported
-    // failure, and refused to play anything — in the configuration users actually receive, and in
-    // no configuration ever tested here.
-    match swscale::load(dir) {
-        plx_base::dynlib::Loaded::Ok(soname) => {
-            SWS_OK.store(true, Ordering::Relaxed);
-            plx_base::eventlog::log(&format!("ff: bound swscale -> {soname}"));
-        }
-        _ => {
-            plx_base::eventlog::log("ff: no swscale (expected in a RELEASE build) — dev capture JPEG/MPEG1 off")
         }
     }
     ok
