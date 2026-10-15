@@ -7,6 +7,7 @@
 //! `base`, `machine` and `platform` and nothing above them, so it names no screen, widget or
 //! application type.
 
+pub mod library; // where the library reads from: PITV_MEDIA_DIRS, else library.conf's folders and SMB shares
 pub mod local; // the library: folders of videos on this machine's disk, listed off the frame
 pub mod local_meta; // what a title says about itself: its Kodi-style .nfo, backdrop and logo beside it
 pub mod local_progress; // where each local file was left and whether it was finished, kept on disk

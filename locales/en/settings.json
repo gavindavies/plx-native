@@ -68,7 +68,7 @@
     "description": "Settings, account, onboarding or privacy UI: settings.about.detail"
   },
   "settings.root.copy": {
-    "value": "How this player shows subtitles, plays files and reads them from your shares. Changes apply at once; a playing film picks up the cache settings from its next seek.",
+    "value": "How this player finds your films, shows subtitles, plays files and reads them from your shares. Changes apply at once; a playing film picks up the cache settings from its next seek.",
     "description": "The Settings page's explanatory copy under its title."
   },
   "settings.libraries.count": {
@@ -1284,5 +1284,105 @@
   "settings.about.gstreamer": {
     "value": "GStreamer",
     "description": "Settings About row: the system GStreamer version."
+  },
+  "settings.library.section": {
+    "value": "Library",
+    "description": "Settings: the section listing the library's folders and SMB shares."
+  },
+  "settings.library.rescan": {
+    "value": "Rescan library",
+    "description": "Settings: the button that reads the library config again, reconnects shares and re-lists every folder."
+  },
+  "settings.library.note": {
+    "value": "Folders and shares are listed in {path}. Edit it, then choose Rescan library.",
+    "description": "Settings: the note under the Library section saying where the config file is.",
+    "args": {
+      "path": "str"
+    }
+  },
+  "settings.library.note.env": {
+    "value": "PITV_MEDIA_DIRS is set, so the library is its folders and {path} is not read.",
+    "description": "Settings: the Library note when the environment names the folders.",
+    "args": {
+      "path": "str"
+    }
+  },
+  "settings.library.note.default": {
+    "value": "No config file yet, so the library is ~/Videos. To add folders and SMB shares, create {path}.",
+    "description": "Settings: the Library note when there is no config file.",
+    "args": {
+      "path": "str"
+    }
+  },
+  "settings.library.problem": {
+    "value": "The config could not use {line}",
+    "description": "Settings: the first config line the library could not use, with its reason.",
+    "args": {
+      "line": "str"
+    }
+  },
+  "settings.library.status.checking": {
+    "value": "Checking…",
+    "description": "Settings: a library folder being looked for."
+  },
+  "settings.library.status.connecting": {
+    "value": "Connecting…",
+    "description": "Settings: an SMB share being mounted."
+  },
+  "settings.library.status.ready": {
+    "value": "Ready",
+    "description": "Settings: a library folder that is there."
+  },
+  "settings.library.status.connected": {
+    "value": "Connected",
+    "description": "Settings: an SMB share that is mounted."
+  },
+  "settings.library.status.missing": {
+    "value": "Not found",
+    "description": "Settings: a library folder that is not there."
+  },
+  "settings.library.status.failed": {
+    "value": "Not connected",
+    "description": "Settings: an SMB share that could not be mounted."
+  },
+  "settings.library.folder.copy": {
+    "value": "A folder on this machine. Its tab shows while the folder is there.",
+    "description": "Settings: the explanation on a library folder's page."
+  },
+  "settings.library.share.copy": {
+    "value": "An SMB share, mounted through gio when PiTV starts. Its tab shows once it is connected.",
+    "description": "Settings: the explanation on an SMB share's page."
+  },
+  "settings.library.location": {
+    "value": "Location",
+    "description": "Settings: a library source's folder or smb:// address."
+  },
+  "settings.library.user": {
+    "value": "User",
+    "description": "Settings: the user name an SMB share is mounted as."
+  },
+  "settings.library.user.anonymous": {
+    "value": "Anonymous",
+    "description": "Settings: an SMB share mounted with no user."
+  },
+  "settings.library.mounted_at": {
+    "value": "Mounted at",
+    "description": "Settings: the local folder an SMB share shows as."
+  },
+  "settings.library.status": {
+    "value": "Status",
+    "description": "Settings: whether a library source is there."
+  },
+  "settings.library.reason": {
+    "value": "Reason",
+    "description": "Settings: why an SMB share could not be mounted."
+  },
+  "settings.library.reconnect": {
+    "value": "Reconnect",
+    "description": "Settings: the button that mounts an SMB share again."
+  },
+  "settings.library.check": {
+    "value": "Check again",
+    "description": "Settings: the button that looks for a library folder again."
   }
 }

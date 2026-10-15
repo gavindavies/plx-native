@@ -1,13 +1,18 @@
-//! **Settings** — the tab bar's last pill: how the player shows subtitles, how it plays a file, how
-//! it reads ahead of the picture, and what it is.
+//! **Settings** — the tab bar's last pill: where the library reads from, how the player shows
+//! subtitles, how it plays a file, how it reads ahead of the picture, and what it is.
 //!
-//! One screen, two kinds of page, both a `ui::table_screen::TableScreen` (the title and copy in the
-//! narrative column, a `FormTable` in the content column):
+//! One screen, three kinds of page ([`Page`]), each a `ui::table_screen::TableScreen` (the title
+//! and copy in the narrative column, a `FormTable` in the content column):
 //!
-//! - **The root**: a section per area, each row a drill-in that reads out its current value.
+//! - **The root**: a section per area, each row a drill-in that reads out its current value. The
+//!   Library section lists every folder and share with its status (`plx_data::library`), a Rescan
+//!   button that reads the config file again, and a note saying where that file is — the library
+//!   is configured by editing it, never on screen.
 //! - **A picker** ([`Pick`]): one checked row per option. Choosing one applies it at once
 //!   (`plx_data::settings`, which saves on a worker) and returns to the root on the row it came
 //!   from; BACK or LEFT returns without changing anything.
+//! - **A source** ([`Page::Source`]): a folder's or share's facts, and a button that checks it
+//!   again (a share: mounts it again).
 //!
 //! While the root or a subtitle picker is up, the narrative column shows a sample caption drawn
 //! the way the player draws one now (`appkit::player_hud::draw_caption_preview`), so a tone, size or
@@ -18,6 +23,7 @@
 
 use std::borrow::Cow;
 
+use plx_data::library::{self, Origin, Place, SourceView, Status};
 use plx_data::settings::{self, CacheSize, ReadAhead, ReadFactor, SkipInterval, SubtitlePosition, SubtitleSize, SubtitleTone};
 use plx_machine::machine::{
     Canon, Cx, Delivery, Edge, Effects, Enter, EntryId, FocusKey, FocusTarget, Fx, GroupId, Handled, InputKind,
@@ -170,44 +176,145 @@ impl Pick {
     }
 }
 
-/// A row's identity: a drill-in, a picker's option, or an About fact.
+/// **A page of the screen** — the form's `Dest`: a drill-in pushes one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Page {
+    Pick(Pick),
+    /// The library source at this position in `library::sources`.
+    Source(u32),
+}
+
+/// A row's identity: a drill-in, a picker's option, a library row, or a fact.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SetRow {
     Open(Pick),
     Option(u32),
     About(u32),
+    Source(u32),
+    Rescan,
+    Fact(u32),
+    Reconnect,
 }
 
 impl FormId for SetRow {
     fn key(&self) -> RowKey {
         RowKey(match self {
+            SetRow::Rescan => 5,
+            SetRow::Reconnect => 6,
             SetRow::Open(p) => 10 + Pick::ALL.iter().position(|q| q == p).unwrap_or(0) as u32,
             SetRow::Option(i) => 100 + i,
             SetRow::About(i) => 200 + i,
+            SetRow::Source(i) => 300 + i,
+            SetRow::Fact(i) => 400 + i,
         })
     }
 }
 
-/// What pressing a row does: drill-ins push their [`Pick`] (the form's `Dest`), so an action is a
-/// choice or nothing at all.
+/// What pressing a row does: drill-ins push their [`Page`] (the form's `Dest`), so an action is a
+/// choice, a library command, or nothing at all.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Act {
     Choose(Pick, u32),
+    Rescan,
+    Reconnect(u32),
     Nothing,
 }
 
-type SettingsForm = Form<SetRow, Act, Pick>;
+type SettingsForm = Form<SetRow, Act, Page>;
+type SettingsSection = FormSection<SetRow, Act, Page>;
+
+/// A source's status, as its row reads it out.
+fn status_text(view: &SourceView) -> &'static str {
+    let share = matches!(view.source.place, Place::Share(_));
+    match (&view.status, share) {
+        (Status::Checking, false) => msg::settings_library_status_checking(),
+        (Status::Checking, true) => msg::settings_library_status_connecting(),
+        (Status::Ready(_), false) => msg::settings_library_status_ready(),
+        (Status::Ready(_), true) => msg::settings_library_status_connected(),
+        (Status::Missing, _) => msg::settings_library_status_missing(),
+        (Status::Failed(_), _) => msg::settings_library_status_failed(),
+    }
+}
+
+/// `path` with the home folder written `~`.
+fn tilde(path: &std::path::Path) -> String {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    match home.as_deref().and_then(|h| path.strip_prefix(h).ok()) {
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
+/// What the library is read from now: the Library section's notes.
+#[derive(Clone, Debug, Default)]
+struct LibraryNotes {
+    lines: Vec<String>,
+}
+
+impl LibraryNotes {
+    fn now() -> Self {
+        let origin = library::origin();
+        let path = tilde(origin.config_path());
+        let mut lines = vec![match origin {
+            Origin::Env(_) => msg::settings_library_note_env(&path),
+            Origin::File(_) => msg::settings_library_note(&path),
+            Origin::Default(_) => msg::settings_library_note_default(&path),
+        }];
+        if let Some(first) = library::problems().first() {
+            lines.push(msg::settings_library_problem(first));
+        }
+        Self { lines }
+    }
+}
+
+/// The Library section: a row per source, Rescan, and where the config is.
+fn library_section(sources: &[SourceView], notes: &LibraryNotes) -> SettingsSection {
+    let rows = sources.iter().enumerate().fold(SettingsSection::new(msg::settings_library_section()), |s, (i, v)| {
+        let i = i as u32;
+        s.item(SetRow::Source(i), RowKind::Nav(Page::Source(i)), Act::Nothing, Row::new(v.source.name.clone()).value(status_text(v)))
+    });
+    let rows = rows.item(SetRow::Rescan, RowKind::Button, Act::Rescan, Row::new(msg::settings_library_rescan()));
+    notes.lines.iter().fold(rows, |s, line| s.note(line.clone()))
+}
 
 /// The root: a section per area, each row reading out its value.
-fn root_form(about: &[(String, String)]) -> SettingsForm {
-    let open = |s: FormSection<SetRow, Act, Pick>, p: Pick| s.item(SetRow::Open(p), RowKind::Nav(p), Act::Nothing, Row::new(p.label()).value(p.value()));
+fn root_form(about: &[(String, String)], sources: &[SourceView], notes: &LibraryNotes) -> SettingsForm {
+    let open = |s: SettingsSection, p: Pick| s.item(SetRow::Open(p), RowKind::Nav(Page::Pick(p)), Act::Nothing, Row::new(p.label()).value(p.value()));
     let subtitles = [Pick::Tone, Pick::Size, Pick::Position].into_iter().fold(FormSection::new(msg::settings_subtitles_section()), open);
     let playback = [Pick::Skip, Pick::SubtitleLanguage, Pick::AudioLanguage].into_iter().fold(FormSection::new(msg::settings_playback_section()), open);
     let cache = [Pick::ReadAhead, Pick::CacheSize, Pick::ReadFactor].into_iter().fold(FormSection::new(msg::settings_cache_section()), open);
     let about = about.iter().enumerate().fold(FormSection::new(msg::settings_about_section()), |s, (i, (label, value))| {
         s.item(SetRow::About(i as u32), RowKind::Button, Act::Nothing, Row::new(label.clone()).value(value.clone()))
     });
-    Form::new().section(subtitles).section(playback).section(cache).section(about)
+    Form::new().section(library_section(sources, notes)).section(subtitles).section(playback).section(cache).section(about)
+}
+
+/// A source's page: its facts, and the button that checks it again.
+fn source_form(i: u32, view: &SourceView) -> SettingsForm {
+    let mut facts: Vec<(&str, String)> = Vec::new();
+    match &view.source.place {
+        Place::Folder(path) => facts.push((msg::settings_library_location(), path.display().to_string())),
+        Place::Share(share) => {
+            facts.push((msg::settings_library_location(), share.uri.clone()));
+            let user = share.user.clone().unwrap_or_else(|| msg::settings_library_user_anonymous().to_owned());
+            facts.push((msg::settings_library_user(), user));
+        }
+    }
+    facts.push((msg::settings_library_status(), status_text(view).to_owned()));
+    match (&view.status, &view.source.place) {
+        (Status::Ready(at), Place::Share(_)) => facts.push((msg::settings_library_mounted_at(), at.display().to_string())),
+        (Status::Failed(why), _) => facts.push((msg::settings_library_reason(), why.clone())),
+        _ => {}
+    }
+    let rows = facts.into_iter().enumerate().fold(SettingsSection::new(""), |s, (n, (label, value))| {
+        s.item(SetRow::Fact(n as u32), RowKind::Button, Act::Nothing, Row::new(label).value(value))
+    });
+    let again = match view.source.place {
+        Place::Share(_) => msg::settings_library_reconnect(),
+        Place::Folder(_) => msg::settings_library_check(),
+    };
+    let busy = view.status == Status::Checking;
+    Form::new().section(rows.item(SetRow::Reconnect, RowKind::Button, Act::Reconnect(i), Row::new(again)).disabled(busy))
 }
 
 /// A picker: one checked row per option.
@@ -233,13 +340,16 @@ fn about_facts() -> Vec<(String, String)> {
 pub struct SettingsScreen {
     entry: EntryId,
     instance: InstanceId,
-    /// The picker showing, `None` on the root.
-    page: Option<Pick>,
-    form: FormTable<SetRow, Act, Pick>,
-    /// The settings revision the form was last built at: a change made elsewhere (the player's
-    /// Style page) re-reads the root's values.
-    built_at: Option<u64>,
+    /// The page showing, `None` on the root.
+    page: Option<Page>,
+    form: FormTable<SetRow, Act, Page>,
+    /// The settings and library revisions the form was last built at: a change made elsewhere (the
+    /// player's Style page, a share connecting) re-reads the values.
+    built_at: Option<(u64, u64)>,
     about: Vec<(String, String)>,
+    /// The library's sources and notes as last read, so a page is built from one snapshot.
+    sources: Vec<SourceView>,
+    notes: LibraryNotes,
     tab_seat: super::tabs::TabSeat,
 }
 
@@ -252,12 +362,14 @@ impl SettingsScreen {
             form: FormTable::new(crate::registry::BAND),
             built_at: None,
             about: Vec::new(),
+            sources: Vec::new(),
+            notes: LibraryNotes::default(),
             tab_seat: Default::default(),
         }
     }
 
     /// The page showing.
-    pub fn page(&self) -> Option<Pick> {
+    pub fn page(&self) -> Option<Page> {
         self.page
     }
 
@@ -265,7 +377,26 @@ impl SettingsScreen {
         let layout = RouteLayout::screen();
         match self.page {
             None => Header::new(layout, None, msg::settings_title(), msg::settings_root_copy()),
-            Some(p) => Header::new(layout, Some(msg::settings_title()), p.label(), p.copy()),
+            Some(Page::Pick(p)) => Header::new(layout, Some(msg::settings_title()), p.label(), p.copy()),
+            Some(Page::Source(i)) => {
+                let Some(v) = self.sources.get(i as usize) else {
+                    return Header::new(layout, Some(msg::settings_title()), msg::settings_library_section(), "");
+                };
+                let copy = match v.source.place {
+                    Place::Folder(_) => msg::settings_library_folder_copy(),
+                    Place::Share(_) => msg::settings_library_share_copy(),
+                };
+                Header::new(layout, Some(msg::settings_title()), &v.source.name, copy)
+            }
+        }
+    }
+
+    /// Whether the subtitle preview stands under the copy: on the root and the subtitle pickers.
+    fn previews(&self) -> bool {
+        match self.page {
+            None => true,
+            Some(Page::Pick(p)) => p.previews(),
+            Some(Page::Source(_)) => false,
         }
     }
 
@@ -276,16 +407,29 @@ impl SettingsScreen {
 
     /// Build the page showing, keeping the cursor on `keep` when it is one of its rows.
     fn build(&mut self, keep: Option<SetRow>) {
+        self.sources = library::sources();
+        self.notes = LibraryNotes::now();
+        // a source a rescan removed has no page left: back to the root, on Rescan
+        if let Some(Page::Source(i)) = self.page {
+            if i as usize >= self.sources.len() {
+                self.page = None;
+            }
+        }
         let form = match self.page {
-            None => root_form(&self.about),
-            Some(p) => pick_form(p),
+            None => root_form(&self.about, &self.sources, &self.notes),
+            Some(Page::Pick(p)) => pick_form(p),
+            Some(Page::Source(i)) => source_form(i, &self.sources[i as usize]),
         };
         self.form.set(form, keep.as_ref());
-        self.built_at = Some(settings::revision());
+        self.built_at = Some(Self::revisions());
+    }
+
+    fn revisions() -> (u64, u64) {
+        (settings::revision(), library::revision())
     }
 
     /// Show `page` with the focus on `row`.
-    fn go<H: ContentLike>(&mut self, page: Option<Pick>, row: SetRow, fx: &mut Effects<'_, H>) {
+    fn go<H: ContentLike>(&mut self, page: Option<Page>, row: SetRow, fx: &mut Effects<'_, H>) {
         self.page = page;
         self.build(Some(row));
         let focus = FocusKey { entry: self.entry, elem: row.key().0 };
@@ -293,10 +437,14 @@ impl SettingsScreen {
         fx.invalidate(Provenance::Input);
     }
 
-    /// Back to the root, on the row of the picker that was open.
+    /// Back to the root, on the row of the page that was open.
     fn back<H: ContentLike>(&mut self, fx: &mut Effects<'_, H>) -> bool {
-        let Some(p) = self.page else { return false };
-        self.go(None, SetRow::Open(p), fx);
+        let row = match self.page {
+            None => return false,
+            Some(Page::Pick(p)) => SetRow::Open(p),
+            Some(Page::Source(i)) => SetRow::Source(i),
+        };
+        self.go(None, row, fx);
         true
     }
 
@@ -307,11 +455,15 @@ impl SettingsScreen {
         }
         let Some(i) = self.form.index_of_key(RowKey(elem)) else { return };
         match self.form.activate(i) {
-            Some(Activation::Push(p)) => self.go(Some(p), SetRow::Option(p.current() as u32), fx),
+            Some(Activation::Push(Page::Pick(p))) => self.go(Some(Page::Pick(p)), SetRow::Option(p.current() as u32), fx),
+            Some(Activation::Push(Page::Source(i))) => self.go(Some(Page::Source(i)), SetRow::Reconnect, fx),
             Some(Activation::Action(Act::Choose(p, i))) => {
                 p.apply(i as usize);
                 self.go(None, SetRow::Open(p), fx);
             }
+            // both land through `library::revision`, which the tick rebuilds on
+            Some(Activation::Action(Act::Rescan)) => library::rescan(),
+            Some(Activation::Action(Act::Reconnect(i))) => library::reconnect(i as usize),
             Some(Activation::Action(Act::Nothing)) | None => {}
         }
     }
@@ -322,7 +474,11 @@ plx_ui::focusable_via_view!(SettingsScreen, H: [ContentLike], view);
 impl LogicalState for SettingsScreen {
     fn write(&self, c: &mut Canon) {
         c.u32(self.entry.0)
-            .u32(self.page.map_or(0, |p| 1 + Pick::ALL.iter().position(|&q| q == p).unwrap_or(0) as u32))
+            .u32(match self.page {
+                None => 0,
+                Some(Page::Pick(p)) => 1 + Pick::ALL.iter().position(|&q| q == p).unwrap_or(0) as u32,
+                Some(Page::Source(i)) => 100 + i,
+            })
             .u32(self.form.table.sel as u32);
     }
     fn probe(&self, out: &mut String) {
@@ -341,7 +497,7 @@ impl<H: ContentLike> Machine<H> for SettingsScreen {
                 Handled::Yes
             }
             ScreenEvent::Tick(tick) => {
-                if self.built_at != Some(settings::revision()) {
+                if self.built_at != Some(Self::revisions()) {
                     let keep = self.form.selected_id().copied();
                     self.build(keep);
                     fx.invalidate(Provenance::Landing(fx.from()));
@@ -406,7 +562,7 @@ impl<H: ContentLike> Screen<H> for SettingsScreen {
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>) {
         let p = f.painter.alpha(f.page_alpha);
         p.rrect(Rect::FULL, 0.0, 0.0, theme::SURFACE_APP);
-        if self.page.is_none_or(Pick::previews) {
+        if self.previews() {
             // the preview stands at the foot of the narrative column, under the copy
             let col = self.header().layout.narrative;
             let h = col.w * 9.0 / 16.0;
@@ -472,15 +628,53 @@ mod tests {
     #[test]
     fn the_root_reads_out_every_settings_value_and_a_picker_checks_the_current_option() {
         let _g = plx_base::testlock::serial();
-        let mut t: FormTable<SetRow, Act, Pick> = FormTable::new(crate::registry::BAND);
-        t.set(root_form(&[("Version".into(), "1.0".into())]), None);
+        let mut t: FormTable<SetRow, Act, Page> = FormTable::new(crate::registry::BAND);
+        t.set(root_form(&[("Version".into(), "1.0".into())], &[], &LibraryNotes::default()), None);
         for p in Pick::ALL {
             let i = t.index_of(&SetRow::Open(p)).unwrap_or_else(|| panic!("{p:?} has a row"));
-            assert_eq!(t.activate(i), Some(Activation::Push(p)), "{p:?} drills in");
+            assert_eq!(t.activate(i), Some(Activation::Push(Page::Pick(p))), "{p:?} drills in");
         }
         t.set(pick_form(Pick::Size), None);
         let current = Pick::Size.current() as u32;
         let i = t.index_of(&SetRow::Option(current)).unwrap();
         assert_eq!(t.activate(i), Some(Activation::Action(Act::Choose(Pick::Size, current))));
+    }
+
+    fn share_view(status: Status) -> SourceView {
+        let share = plx_data::library::Share { uri: "smb://nas/media".into(), user: None, domain: None, password: None };
+        SourceView { source: plx_data::library::Source { name: "NAS".into(), place: Place::Share(share) }, status }
+    }
+
+    #[test]
+    fn the_library_lists_each_source_with_its_status_then_rescan() {
+        let folder = SourceView {
+            source: plx_data::library::Source { name: "Films".into(), place: Place::Folder("/srv/Films".into()) },
+            status: Status::Ready("/srv/Films".into()),
+        };
+        let sources = [folder, share_view(Status::Failed("Connection refused".into()))];
+        let notes = LibraryNotes { lines: vec!["Folders and shares are listed in ~/x.".into()] };
+        let mut t: FormTable<SetRow, Act, Page> = FormTable::new(crate::registry::BAND);
+        t.set(root_form(&[], &sources, &notes), None);
+        let films = t.index_of(&SetRow::Source(0)).unwrap();
+        assert!(t.index_of(&SetRow::Source(1)).unwrap() > films);
+        assert_eq!(t.activate(films), Some(Activation::Push(Page::Source(0))));
+        assert_eq!(status_text(&sources[0]), msg::settings_library_status_ready());
+        assert_eq!(status_text(&sources[1]), msg::settings_library_status_failed());
+        let rescan = t.index_of(&SetRow::Rescan).unwrap();
+        assert_eq!(t.activate(rescan), Some(Activation::Action(Act::Rescan)));
+        assert!(t.index_of(&SetRow::Open(Pick::Tone)).unwrap() > rescan, "Library comes first");
+    }
+
+    #[test]
+    fn a_share_page_says_why_it_failed_and_offers_reconnect_unless_it_is_busy() {
+        let mut t: FormTable<SetRow, Act, Page> = FormTable::new(crate::registry::BAND);
+        t.set(source_form(1, &share_view(Status::Failed("Connection refused".into()))), None);
+        let reconnect = t.index_of(&SetRow::Reconnect).unwrap();
+        assert_eq!(t.activate(reconnect), Some(Activation::Action(Act::Reconnect(1))));
+        assert!(t.index_of(&SetRow::Fact(3)).is_some(), "location, user, status, reason");
+
+        t.set(source_form(1, &share_view(Status::Checking)), None);
+        let reconnect = t.index_of(&SetRow::Reconnect).unwrap();
+        assert_eq!(t.activate(reconnect), None, "no second mount while one is running");
     }
 }

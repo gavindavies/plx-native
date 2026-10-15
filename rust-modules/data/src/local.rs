@@ -8,9 +8,9 @@
 //!
 //! # Roots
 //!
-//! The library's top level is a list of folders ([`roots`]): `PITV_MEDIA_DIRS`
-//! (`:`-separated, like `PATH`) when it is set, else `~/Videos`. A single root is shown as its own
-//! contents; several are shown as one folder each.
+//! The library's top level is a list of folders ([`roots`]): the sources `library` reads from
+//! (`PITV_MEDIA_DIRS`, else the config file's folders and mounted shares, else `~/Videos`) that are
+//! there now. A single root is shown as its own contents; several are shown as one folder each.
 //!
 //! # Listings are scanned off the frame
 //!
@@ -115,6 +115,8 @@ struct Scanned {
     listing: Listing,
     at: Instant,
     in_flight: bool,
+    /// Read again on the next request, however fresh ([`forget_listings`]).
+    stale: bool,
 }
 
 #[derive(Default)]
@@ -130,24 +132,34 @@ fn state() -> std::sync::MutexGuard<'static, State> {
     STATE.get_or_init(|| Mutex::new(State::default())).lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The library's top-level folders. Read once: the environment does not change under a process.
-pub fn roots() -> &'static [PathBuf] {
-    static ROOTS: OnceLock<Vec<PathBuf>> = OnceLock::new();
-    ROOTS.get_or_init(|| {
-        let roots = roots_from(std::env::var_os("PITV_MEDIA_DIRS"), std::env::var_os("HOME"));
-        plx_base::eventlog::log(&format!("local: {} library folder(s)", roots.len()));
-        roots
-    })
+/// The library's top-level folders: [`crate::library::roots`], which change as shares connect.
+pub fn roots() -> Arc<[PathBuf]> {
+    crate::library::roots()
 }
 
-fn roots_from(env: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> Vec<PathBuf> {
-    if let Some(list) = env {
-        let roots: Vec<PathBuf> = std::env::split_paths(&list).filter(|p| p.is_absolute()).collect();
-        if !roots.is_empty() {
-            return roots;
-        }
+/// The label a top-level folder goes by: the config's section name, else the folder's own name.
+pub fn root_name(root: &Path) -> String {
+    crate::library::name_of(root)
+        .unwrap_or_else(|| root.file_name().map_or_else(|| root.display().to_string(), |n| n.to_string_lossy().into_owned()))
+}
+
+/// A folder's name as the library shows it: a top-level folder's label ([`root_name`] — a share's
+/// mount point is named `smb-share:server=…`), else the folder's own name.
+pub fn folder_name(path: &Path) -> String {
+    if roots().iter().any(|r| r == path) {
+        return root_name(path);
     }
-    home.map(|h| vec![PathBuf::from(h).join("Videos")]).unwrap_or_default()
+    path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
+}
+
+/// Read every folder afresh the next time it is asked for (the library was rescanned). The old
+/// listings keep showing until the new ones land.
+pub fn forget_listings() {
+    let mut st = state();
+    for s in st.dirs.values_mut() {
+        s.stale = true;
+    }
+    st.revision += 1;
 }
 
 /// The library's top level as a listing: the single root's own contents, or one folder per root.
@@ -161,7 +173,7 @@ pub fn top_level() -> Option<Arc<Vec<Entry>>> {
         .iter()
         .map(|root| {
             Entry::new(
-                root.file_name().map_or_else(|| root.display().to_string(), |n| n.to_string_lossy().into_owned()),
+                root_name(root),
                 root.clone(),
                 EntryKind::Folder,
                 folder_art(root).map(|p| art_token(&p)),
@@ -172,9 +184,11 @@ pub fn top_level() -> Option<Arc<Vec<Entry>>> {
     Some(Arc::new(entries))
 }
 
-/// Moves whenever any listing lands; a page compares it to decide whether to re-read.
+/// Moves whenever any listing lands or the library's sources change (a share connecting adds a
+/// root); a page compares it to decide whether to re-read. Both counters only grow, so their sum
+/// moves when either does.
 pub fn revision() -> u64 {
-    state().revision
+    state().revision + crate::library::revision()
 }
 
 /// What is known of `dir` now. Does not start a scan — [`request`] does.
@@ -205,12 +219,12 @@ pub fn entry_for(path: &Path) -> Option<Entry> {
 pub fn request(dir: &Path) {
     {
         let mut st = state();
-        let fresh = |s: &Scanned| s.in_flight || (s.at.elapsed() < RESCAN_AFTER && s.listing != Listing::Loading);
+        let fresh = |s: &Scanned| s.in_flight || (!s.stale && s.at.elapsed() < RESCAN_AFTER && s.listing != Listing::Loading);
         match st.dirs.get_mut(dir) {
             Some(s) if fresh(s) => return,
             Some(s) => s.in_flight = true,
             None => {
-                st.dirs.insert(dir.to_path_buf(), Scanned { listing: Listing::Loading, at: Instant::now(), in_flight: true });
+                st.dirs.insert(dir.to_path_buf(), Scanned { listing: Listing::Loading, at: Instant::now(), in_flight: true, stale: false });
             }
         }
     }
@@ -224,7 +238,7 @@ pub fn request(dir: &Path) {
             }
         };
         let mut st = state();
-        st.dirs.insert(owned, Scanned { listing, at: Instant::now(), in_flight: false });
+        st.dirs.insert(owned, Scanned { listing, at: Instant::now(), in_flight: false, stale: false });
         st.revision += 1;
         drop(st);
         plx_machine::idle::invalidate();
@@ -649,12 +663,5 @@ mod tests {
         for no in ["Seasonal", "Season", "Sintel", "S", "Extras"] {
             assert!(!is_season_folder(no), "{no}");
         }
-    }
-
-    #[test]
-    fn roots_come_from_the_environment_or_default_to_videos() {
-        assert_eq!(roots_from(Some("/a:/b:relative".into()), Some("/home/u".into())), [PathBuf::from("/a"), PathBuf::from("/b")]);
-        assert_eq!(roots_from(None, Some("/home/u".into())), [PathBuf::from("/home/u/Videos")]);
-        assert_eq!(roots_from(Some("".into()), Some("/home/u".into())), [PathBuf::from("/home/u/Videos")]);
     }
 }

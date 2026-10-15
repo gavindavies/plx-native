@@ -41,6 +41,7 @@ linux: $(FFMPEG_PREFIX)/lib/libavformat-plx.so.63 $(LIBASS_LIB)
 	mkdir -p $(DIST)
 	install -m 0755 rust-modules/target/release/pitv $(DIST)/pitv-bin
 	install -m 0755 tools/linux/pitv $(DIST)/pitv
+	install -m 0644 tools/linux/library.conf.example $(DIST)/
 	for f in $(FFMPEG_LIBS); do install -m 0644 $(FFMPEG_PREFIX)/lib/$$f $(DIST)/$$f; done
 	install -m 0644 $(LIBASS_LIB) $(DIST)/
 	install -m 0644 $(ASSETS) $(DIST)/

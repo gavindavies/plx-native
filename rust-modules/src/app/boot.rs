@@ -198,6 +198,8 @@ pub(crate) unsafe fn boot(
     super::adapters::poster::init();
     // The player preferences (`settings.json`), before anything can draw a subtitle.
     plx_data::settings::load();
+    // The library's sources (`library.conf`): its shares start mounting now, off the frame.
+    plx_data::library::load();
     #[cfg(not(test))]
     plx_platform::i18n::initialize();
     let bridge = super::bridge::Bridge::new(plx_base::diag::heartbeat::now_us);
