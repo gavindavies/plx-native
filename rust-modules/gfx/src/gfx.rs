@@ -2088,9 +2088,13 @@ pub mod tex_ledger {
 
     /// `tex` was (re)specified at `w`×`h`: a re-spec of a known name replaces its size.
     pub fn specified(tex: c_uint, w: c_int, h: c_int) {
+        specified_bytes(tex, w.max(0) as u64 * h.max(0) as u64 * 4);
+    }
+
+    /// `tex` was (re)specified holding `bytes` — a texture that is not RGBA8 (a video plane).
+    pub fn specified_bytes(tex: c_uint, bytes: u64) {
         #[cfg(any(test, feature = "test-support"))]
         note_mutation();
-        let bytes = w.max(0) as u64 * h.max(0) as u64 * 4;
         LIVE.with(|m| {
             let revision=REVISION.with(|n| { let next=n.get().wrapping_add(1); n.set(next); next });
             m.borrow_mut().insert(tex, (bytes,revision));
@@ -2650,16 +2654,16 @@ pub fn draw_tex_uv(
     );
 }
 
-/// **Simulator only: composite `tex` UNDER everything drawn so far this frame** — the television
+/// **Composite what `draw` draws UNDER everything drawn so far this frame** — the television
 /// compositor's arithmetic for its hardware video plane beneath our UI plane. The UI plane holds
 /// premultiplied colour over a transparent clear (see the blend note in the GL setup above), so
-/// the panel shows `ui.rgb + video.rgb * (1 - ui.a)`; drawing the picture with
-/// `(ONE_MINUS_DST_ALPHA, ONE)` computes exactly that, and leaves the surface opaque. Used by
-/// `player::sim_video` for the screenshot pipeline's player figure; restores the app's blend.
-pub fn draw_under(tex: c_uint, x: f32, y: f32, w: f32, h: f32) {
+/// the panel shows `ui.rgb + video.rgb * (1 - ui.a)`; drawing an opaque picture with
+/// `(ONE_MINUS_DST_ALPHA, ONE)` computes exactly that, and leaves the surface opaque. The player's
+/// picture (`video::VideoTex::draw_under`) is drawn this way; the app's blend is restored after.
+pub fn draw_under(draw: impl FnOnce()) {
     unsafe {
         glBlendFuncSeparate(GL_ONE_MINUS_DST_ALPHA, GL_ONE, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
-        draw_tex(tex, x, y, w, h, 0.0, [1.0f32; 4].as_ptr());
+        draw();
         glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     }
 }

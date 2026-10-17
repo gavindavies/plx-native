@@ -1,11 +1,12 @@
 # PiTV
 
 A lightweight 4K player for the films and shows in your own folders — on the machine's disk or on
-an SMB share mounted from a NAS — built for the living room: a Raspberry Pi 5 under the TV, driven
-by a remote or the arrow keys. 4K HEVC and H.264 in MKV or MP4, lossless audio, styled subtitles.
+an SMB share mounted from a NAS — built for the living room: a laptop connected to the TV (a
+Lenovo ThinkPad X1 Yoga, 20FRS02N1K, running Ubuntu), driven by a remote or the arrow keys. 4K HEVC
+and H.264 in MKV or MP4, lossless audio, styled subtitles.
 
 The interface is drawn straight on the GPU, and video is decoded by the machine's own GStreamer
-(the Pi 5's V4L2 HEVC decoder; VA-API on a PC) and composited under the UI.
+(VA-API on the Intel GPU), converted and scaled on the GPU and composited under the UI.
 
 ![The library](design/screenshots/linux/01-library.jpg)
 
@@ -33,14 +34,21 @@ The screenshots show the demo library below; its artwork is credited in
 ## Building
 
 Linux only. You need a nightly Rust toolchain, a C compiler, SDL2 and SDL2_ttf, and GStreamer with
-its base, good, bad and libav plugin sets. On Debian, Ubuntu or Raspberry Pi OS:
+its base, good, bad and libav plugin sets. On Debian or Ubuntu:
 
 ```sh
 sudo apt install build-essential pkg-config cmake nasm curl libsdl2-dev libsdl2-ttf-dev \
     libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-    gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
+    gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav \
+    intel-media-va-driver vainfo
 rustup toolchain install nightly
 ```
+
+Hardware decoding goes through VA-API: `intel-media-va-driver` is the Intel GPU's driver and
+GStreamer's `va` decoders come with `gstreamer1.0-plugins-bad`. `vainfo` lists what the GPU decodes;
+the HD Graphics 520 in the ThinkPad decodes H.264 and 8-bit HEVC, so 10-bit HEVC (most 4K HDR
+files) is decoded in software, which a dual-core CPU cannot keep up with at 4K. The event log names
+the decoder each film used (`video decoded by …`).
 
 Then:
 
@@ -77,7 +85,7 @@ path = /srv/media/Films
 
 [TV Shows]
 share = smb://nas.local/media/TV Shows
-user = pi
+user = media
 password-file = ~/.config/pitv/nas.password
 ```
 

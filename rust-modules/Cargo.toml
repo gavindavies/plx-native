@@ -21,7 +21,7 @@ name = "plxnative-modules"
 version = "0.8.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "PiTV — a 4K video player for a Raspberry Pi 5: local folders and mounted SMB shares."
+description = "PiTV — a 4K video player for a laptop under the TV: local folders and mounted SMB shares."
 
 [lib]
 name = "plxnative_modules"

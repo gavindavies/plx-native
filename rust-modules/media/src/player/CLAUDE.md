@@ -3,10 +3,11 @@
 The engine demuxes a local file (or a file on a mounted SMB share) to access units with the
 bundled FFmpeg (`../ff.rs`), queues them per lane with byte-cap backpressure (`../aq.rs`) and
 feeds them to a **video sink** (`sink.rs`'s `VideoSink`). The product sink is `gst_sink.rs`: one
-`appsrc` per lane, the codec's parser, `decodebin` (a V4L2 hardware decoder on a Raspberry Pi 5,
-VA-API on a PC), video converted to RGBA into an `appsink` that the render thread composites
-UNDER the finished UI, audio decoded to PCM into the system audio sink. Read `gst_sink.rs`'s `//!`
-before changing it.
+`appsrc` per lane, the codec's parser, `decodebin` (VA-API hardware decode on the laptop's Intel
+GPU, FFmpeg's software decoders otherwise), video as NV12 or I420 into an `appsink` whose pictures
+the render thread chooses by timestamp (`frame_pacing.rs`), converts to RGB on the GPU
+(`plx_gfx::video`) and composites UNDER the finished UI, audio decoded to PCM into the system audio
+sink. Read `gst_sink.rs`'s `//!` before changing it.
 
 The engine was written against a television's buffer-feed media API, and its verbs still have
 that shape: a JSON Load payload, `feed`, an event callback (`sf_on_event`: type 0 = position,
@@ -21,6 +22,8 @@ fresh pipeline.
 - `threads.rs` — `load_thread` (the sink's Load, off the main thread by design) and the timeline
   worker. The demux thread body is `ff::demux`: open the file, read and convert packets, push AUs
   to the two lanes, and service seeks between two `av_read_frame` calls.
+- `frame_pacing.rs` — which decoded picture the next swap shows: the queue the sink releases
+  pictures into ahead of time, and the vblank estimate they are chosen against.
 - `shared.rs` — the engine's cross-thread transport, callback and clock state. Put new state under
   the owner whose invariant it belongs to; never smuggle it through a raw static.
 - `ass*.rs`, `sidecar.rs` — subtitles: the bundled libass facade (`src/ass.c`) for ASS/SSA, image

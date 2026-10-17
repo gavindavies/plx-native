@@ -1,13 +1,13 @@
 //! plx_gfx: what the PlxNative application core draws with.
 //!
-//! The GLES2 renderer (`gfx`: the shader programs, the draw primitives, the live-backdrop walk,
-//! the design tokens and the draw-phase instruments), the boot-time EGL probe (`egl`), text
-//! rasterization over SDL2_ttf (`text`), image decoding (`img`), the runtime SVG rasterizer's FFI
-//! (`svg`, which calls into `src/svg.c`), and the GPU instruments: the async timer queries
-//! (`gpu_timer`), the Mali counter reader (`hwcnt`) and the per-draw-class overdraw ledger
-//! (`overdraw`, which lived in `ui` until the split). It is the `gfx` layer of
-//! `ci/module-layers.ini`: it uses `base` and `machine` (and may use `platform`, which nothing
-//! here names today).
+//! The GLES2 renderer (`gfx`: the shader programs, the draw primitives, the live-backdrop walk, the
+//! design tokens and the draw-phase instruments), the boot-time EGL probe (`egl`), text
+//! rasterization over SDL2_ttf (`text`), image decoding (`img`), the player's picture (`video`),
+//! the runtime SVG rasterizer's FFI (`svg`, which calls into `src/svg.c`), and the GPU instruments:
+//! the async timer queries (`gpu_timer`), the Mali counter reader (`hwcnt`) and the per-draw-class
+//! overdraw ledger (`overdraw`, which lived in `ui` until the split). It is the `gfx` layer of
+//! `ci/module-layers.ini`: it uses `base` and `machine` (and may use `platform`, which nothing here
+//! names today).
 //!
 //! The crate declares the `extern "C"` blocks (GLES2, EGL, SDL2_ttf, nanosvg) but links nothing on
 //! the television: the final link stays the Makefile's. On the host, the application crate's build
@@ -27,3 +27,4 @@ pub mod img;
 pub mod overdraw; // dev-only DRAW-CLASS ledger + mask — the attribution instrument (docs/backdrop-blur-profiling.md Part 5)
 pub mod svg; // runtime SVG rasterizer FFI (src/svg.c / nanosvg) — vector icon assets
 pub mod text;
+pub mod video; // the player's picture: Y'CbCr planes converted to RGB in a shader

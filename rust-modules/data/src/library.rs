@@ -552,7 +552,7 @@ share = "smb://nas/clips"
 
     #[test]
     fn the_shipped_example_config_reads_cleanly() {
-        let parsed = parse(include_str!("../../../tools/linux/library.conf.example"), Some(Path::new("/home/pi")));
+        let parsed = parse(include_str!("../../../tools/linux/library.conf.example"), Some(Path::new("/home/media")));
         assert_eq!(parsed.problems, Vec::<String>::new());
         let names: Vec<&str> = parsed.sources.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names, ["Films", "TV Shows"]);
