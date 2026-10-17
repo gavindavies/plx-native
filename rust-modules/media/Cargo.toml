@@ -26,6 +26,7 @@ serde_json = { version = "1", default-features = false, features = ["alloc", "st
 gstreamer = { version = "0.25" }
 gstreamer-app = { version = "0.25" }
 gstreamer-base = { version = "0.25" }
+gstreamer-video = { version = "0.25" }
 
 [dev-dependencies]
 plx_media = { path = ".", features = ["devtriggers"] }

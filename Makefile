@@ -1,4 +1,4 @@
-# PiTV — a 4K video player for a Raspberry Pi 5 (Linux): local folders and mounted SMB shares.
+# PiTV — a 4K video player for a laptop under the TV (Linux): local folders and mounted SMB shares.
 #
 #   make            the app, staged into dist/linux/pitv (run dist/linux/pitv/pitv)
 #   make check      the host test suite (every crate) and the shipping-feature check

@@ -786,7 +786,7 @@ enum Link {
 }
 const CHAIN: [Link; 2] = [Link::Base, Link::Sys];
 
-/// System fallback faces, in preference order (Debian/Raspberry Pi OS package paths).
+/// System fallback faces, in preference order (Debian/Ubuntu package paths).
 const SYS_FALLBACKS: [&str; 3] = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",

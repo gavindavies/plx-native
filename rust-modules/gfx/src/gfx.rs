@@ -265,17 +265,6 @@ extern "C" {
         ty: c_uint,
         pixels: *const c_void,
     );
-    fn glTexSubImage2D(
-        target: c_uint,
-        level: c_int,
-        x: c_int,
-        y: c_int,
-        w: c_int,
-        h: c_int,
-        format: c_uint,
-        ty: c_uint,
-        pixels: *const c_void,
-    );
     fn glTexParameteri(target: c_uint, pname: c_uint, param: c_int);
     // UI self-capture (the "cap_*" section at the bottom of this file)
     fn glGenFramebuffers(n: c_int, ids: *mut c_uint);
@@ -2077,17 +2066,6 @@ pub fn upload_rgba(prev: c_uint, w: c_int, h: c_int, pixels: *const u8) -> c_uin
     }
 }
 
-/// Overwrite the pixels of a texture [`upload_rgba`] specified at exactly `w`×`h`, keeping its
-/// storage. The video picture's per-frame upload: re-specifying would have the driver allocate a
-/// fresh 8 MB image for every decoded frame. Main-thread only.
-pub fn replace_rgba(tex: c_uint, w: c_int, h: c_int, pixels: *const u8) {
-    unsafe {
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels as *const c_void);
-    }
-}
-
 /// **Every texture [`upload_rgba`] specifies, counted until [`delete_tex`] frees it** — the live
 /// count and the bytes the driver holds for them (RGBA8, level 0). `VmRSS` on this driver
 /// includes GPU memory, so a stress bench that watches RSS grow cannot tell texture churn from a
@@ -2110,9 +2088,13 @@ pub mod tex_ledger {
 
     /// `tex` was (re)specified at `w`×`h`: a re-spec of a known name replaces its size.
     pub fn specified(tex: c_uint, w: c_int, h: c_int) {
+        specified_bytes(tex, w.max(0) as u64 * h.max(0) as u64 * 4);
+    }
+
+    /// `tex` was (re)specified holding `bytes` — a texture that is not RGBA8 (a video plane).
+    pub fn specified_bytes(tex: c_uint, bytes: u64) {
         #[cfg(any(test, feature = "test-support"))]
         note_mutation();
-        let bytes = w.max(0) as u64 * h.max(0) as u64 * 4;
         LIVE.with(|m| {
             let revision=REVISION.with(|n| { let next=n.get().wrapping_add(1); n.set(next); next });
             m.borrow_mut().insert(tex, (bytes,revision));
@@ -2672,16 +2654,16 @@ pub fn draw_tex_uv(
     );
 }
 
-/// **Simulator only: composite `tex` UNDER everything drawn so far this frame** — the television
+/// **Composite what `draw` draws UNDER everything drawn so far this frame** — the television
 /// compositor's arithmetic for its hardware video plane beneath our UI plane. The UI plane holds
 /// premultiplied colour over a transparent clear (see the blend note in the GL setup above), so
-/// the panel shows `ui.rgb + video.rgb * (1 - ui.a)`; drawing the picture with
-/// `(ONE_MINUS_DST_ALPHA, ONE)` computes exactly that, and leaves the surface opaque. Used by
-/// `player::sim_video` for the screenshot pipeline's player figure; restores the app's blend.
-pub fn draw_under(tex: c_uint, x: f32, y: f32, w: f32, h: f32) {
+/// the panel shows `ui.rgb + video.rgb * (1 - ui.a)`; drawing an opaque picture with
+/// `(ONE_MINUS_DST_ALPHA, ONE)` computes exactly that, and leaves the surface opaque. The player's
+/// picture (`video::VideoTex::draw_under`) is drawn this way; the app's blend is restored after.
+pub fn draw_under(draw: impl FnOnce()) {
     unsafe {
         glBlendFuncSeparate(GL_ONE_MINUS_DST_ALPHA, GL_ONE, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
-        draw_tex(tex, x, y, w, h, 0.0, [1.0f32; 4].as_ptr());
+        draw();
         glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     }
 }

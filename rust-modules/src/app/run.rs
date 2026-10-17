@@ -465,7 +465,7 @@ unsafe fn ingest_sdl_event(app: &mut App, _fr: &mut Frame) {
     if et == SDL_QUIT {
         app.running = false;
     } else if et == 0x103 || et == 0x104 {
-        // WILL/DID ENTER BACKGROUND. A desktop or a Raspberry Pi does not take the screen away
+        // WILL/DID ENTER BACKGROUND. A Linux desktop does not take the screen away
         // from a running app, so playback carries on; the TREE still hears it, as
         // `ScreenEvent::Suspend` down every mounted body at this frame's NAV COMMIT.
         log("LIFECYCLE: background");

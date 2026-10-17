@@ -3,10 +3,12 @@
 ## Project
 
 PiTV is a lightweight 4K video player (HEVC/H.264 in MKV/MP4, lossless audio, ASS and image
-subtitles) for a **Raspberry Pi 5** under the TV, playing the files in local folders and mounted
-SMB shares, driven by a remote or the arrow keys. It is Linux only. The interface is drawn with
-GLES2 through SDL2; video is demuxed by a bundled FFmpeg and decoded by the system GStreamer (V4L2
-hardware decode on the Pi), composited under the UI.
+subtitles) for **a Lenovo ThinkPad X1 Yoga (20FRS02N1K: dual-core Intel Skylake, HD Graphics 520)
+running Ubuntu**, connected to the TV, playing the files in local folders and mounted SMB shares,
+driven by a remote or the arrow keys. It is Linux only. The interface is drawn with GLES2-level
+calls through SDL2 (a desktop GL core context); video is demuxed by a bundled FFmpeg, decoded by the
+system GStreamer (VA-API hardware decode on the Intel GPU) and converted, scaled and composited
+under the UI on the GPU.
 
 It began as PlxNative, a Plex client for LG webOS TVs; the Plex client and the webOS port are gone.
 Crate names keep the old `plx_` prefix. Keep changes properly factored and finished.
@@ -21,7 +23,7 @@ crate names only crates below it:
 | `plx_base` | `base/` | event log, paths, spawn discipline, dlopen, font coverage, dev triggers |
 | `plx_machine` | `machine/` | the machine/effect contract, present gate, idle wake, motion springs |
 | `plx_platform` | `platform/` | the English string catalog (`i18n::msg`, from `locales/en`) and the artwork cache |
-| `plx_gfx` | `gfx/` | GLES2 renderer, text (SDL2_ttf), images, SVG icons (`src/svg.c`, nanosvg) |
+| `plx_gfx` | `gfx/` | GLES2 renderer, text (SDL2_ttf), images, SVG icons (`src/svg.c`, nanosvg), the video picture (`video.rs`) |
 | `plx_ui` | `ui/` | the UI library: theme, widgets, cards, tables/forms, focus, containers, dispatcher |
 | `plx_data` | `data/` | the local library, `.nfo` metadata, watch progress, player settings |
 | `plx_media` | `media/` | FFmpeg demuxer (`ff.rs`), the player engine and its GStreamer sink, thumbnails |

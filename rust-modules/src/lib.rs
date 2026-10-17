@@ -1,4 +1,4 @@
-//! PiTV — a lightweight 4K video player for a Raspberry Pi 5: the files in local folders and
+//! PiTV — a lightweight 4K video player for a laptop under the TV: the files in local folders and
 //! mounted SMB shares, played with GStreamer.
 //! Licensed under GPL-3.0-or-later; see LICENSE at the repository root, and THIRD-PARTY-NOTICES.md
 //! for the components this links or redistributes.

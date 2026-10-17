@@ -3,13 +3,14 @@
 //! The television hands the demuxer's access units to LG's StarfishMediaAPIs, which is itself a
 //! GStreamer pipeline behind a buffer-feed API. This is the same shape built in the open: one
 //! `appsrc` per lane (`es_data` 1 = video, 2 = audio), the codec's parser, `decodebin` (which
-//! ranks a hardware decoder — V4L2 on a Raspberry Pi, VA-API on a PC — above software when the
+//! ranks a hardware decoder — VA-API on the Intel laptop PiTV runs on — above software when the
 //! machine has one), then
 //!
-//! * video → `videoconvert ! videoscale` to straight RGBA no larger than 1920x1080 → an `appsink`
-//!   synced to the pipeline clock but released [`EARLY_NS`] ahead of each picture's due time into
-//!   a queue; the render thread picks the picture due by the vblank its swap lands on
-//!   (`frame_pacing`), uploads it and composites it UNDER the finished UI with the same
+//! * video → the decoder's own NV12 or I420 (`videoconvert` only converts what is neither, such
+//!   as a 10-bit stream) → an `appsink` synced to the pipeline clock but released [`EARLY_NS`]
+//!   ahead of each picture's due time into a queue; the render thread picks the picture due by the
+//!   vblank its swap lands on (`frame_pacing`), uploads its planes, converts and scales them to RGB
+//!   on the GPU (`plx_gfx::video`) and composites them UNDER the finished UI with the same
 //!   `(ONE_MINUS_DST_ALPHA, ONE)` arithmetic the television's compositor applies to its video
 //!   plane ([`composite_under`]);
 //! * audio → decoded to PCM (LG's four codecs by name; FLAC, Opus, Vorbis, TrueHD, MP3/MP2 and PCM
@@ -49,6 +50,8 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_base::prelude::*;
+use gstreamer_video as gst_video;
+use gstreamer_video::prelude::*;
 
 const FEED_OK: c_char = b'O' as c_char;
 const FEED_FULL: c_char = b'B' as c_char;
@@ -60,10 +63,6 @@ const TICK_MS: u64 = 200;
 /// queues upstream are the real reserve, these only keep the decoder fed.
 const VIDEO_QUEUE_BYTES: u64 = 24 * 1024 * 1024;
 const AUDIO_QUEUE_BYTES: u64 = 2 * 1024 * 1024;
-/// The largest picture handed to the render thread. A 4K source is scaled here, in the pipeline,
-/// rather than uploaded at 33 MB a frame.
-const MAX_W: i32 = 1920;
-const MAX_H: i32 = 1080;
 
 /// One Load's pipeline.
 struct Session {
@@ -396,9 +395,8 @@ fn described_caps(p: &AudioParams) -> Result<gst::Caps, String> {
 fn describe(video: (&str, &str), audio: Option<AudioLane>, audio_sink: &str) -> String {
     let mut d = format!(
         "appsrc name=v format=time is-live=false stream-type=stream block=false max-bytes={VIDEO_QUEUE_BYTES} caps=\"{}\" \
-         ! {} ! decodebin ! videoconvert ! videoscale add-borders=true \
-         ! video/x-raw,format=RGBA,pixel-aspect-ratio=1/1,width=[1,{MAX_W}],height=[1,{MAX_H}] \
-         ! appsink name=vsink sync=true ts-offset=-{EARLY_NS} max-buffers=2 drop=false",
+         ! {} ! decodebin ! videoconvert \
+         ! appsink name=vsink caps=\"video/x-raw,format={{NV12,I420}}\" sync=true ts-offset=-{EARLY_NS} max-buffers=2 drop=false",
         video.0, video.1
     );
     let head = format!("appsrc name=a format=time is-live=false stream-type=stream block=false max-bytes={AUDIO_QUEUE_BYTES}");
@@ -421,11 +419,9 @@ fn audio_sink_description() -> String {
 
 // ---- frames for the render thread -------------------------------------------------------------
 
-/// A decoded picture as GStreamer handed it over — held, not copied: `w`x`h` straight RGBA,
-/// tightly packed (a width in whole pixels already rounds RGBA's stride to 4).
+/// A decoded picture as GStreamer handed it over — held, not copied — and its layout.
 struct Picture {
-    w: i32,
-    h: i32,
+    info: gst_video::VideoInfo,
     sample: gst::Sample,
 }
 
@@ -448,12 +444,12 @@ fn frames() -> std::sync::MutexGuard<'static, FrameQueue<Picture>> {
 /// `sync=true` sink without the early release would have handed it over.
 fn queue_frame(sink: &gst_app::AppSink, sample: gst::Sample) -> Result<(), gst::FlowError> {
     let caps = sample.caps().ok_or(gst::FlowError::Error)?;
-    let s = caps.structure(0).ok_or(gst::FlowError::Error)?;
-    let (w, h) = (s.get::<i32>("width").map_err(|_| gst::FlowError::Error)?, s.get::<i32>("height").map_err(|_| gst::FlowError::Error)?);
-    let buffer = sample.buffer().ok_or(gst::FlowError::Error)?;
-    if w <= 0 || h <= 0 || buffer.size() < (w as usize) * (h as usize) * 4 {
-        return Err(gst::FlowError::Error);
+    let info = gst_video::VideoInfo::from_caps(caps).map_err(|_| gst::FlowError::Error)?;
+    if chroma(info.format()).is_none() {
+        return Err(gst::FlowError::NotNegotiated);
     }
+    let (w, h) = (info.width(), info.height());
+    let buffer = sample.buffer().ok_or(gst::FlowError::Error)?;
     let due = buffer
         .pts()
         .and_then(|pts| sample.segment()?.downcast_ref::<gst::ClockTime>()?.to_running_time(pts))
@@ -463,7 +459,7 @@ fn queue_frame(sink: &gst_app::AppSink, sample: gst::Sample) -> Result<(), gst::
             (running + latency).nseconds()
         });
     let seq = FRAME_SEQ.fetch_add(1, Relaxed) + 1;
-    frames().push(Pending { seq, due, item: Picture { w, h, sample } });
+    frames().push(Pending { seq, due, item: Picture { info, sample } });
     if !PRESENTED.swap(true, Relaxed) {
         log(&format!("first picture {w}x{h}"));
     }
@@ -476,14 +472,15 @@ fn clear_picture() {
     plx_machine::idle::invalidate();
 }
 
-/// `(x, y, w, h)` of a `fw`x`fh` picture fitted, aspect kept, inside the `dst` rectangle.
-fn letterbox(fw: i32, fh: i32, dst: [i32; 4]) -> (f32, f32, f32, f32) {
+/// `(x, y, w, h)` of a picture `fw` wide and `fh` high on screen (its pixel aspect applied)
+/// fitted, aspect kept, inside the `dst` rectangle.
+fn letterbox(fw: f32, fh: f32, dst: [i32; 4]) -> (f32, f32, f32, f32) {
     let [dx, dy, dw, dh] = dst.map(|v| v as f32);
-    if fw <= 0 || fh <= 0 || dw <= 0.0 || dh <= 0.0 {
+    if fw <= 0.0 || fh <= 0.0 || dw <= 0.0 || dh <= 0.0 {
         return (dx, dy, dw, dh);
     }
-    let scale = (dw / fw as f32).min(dh / fh as f32);
-    let (w, h) = (fw as f32 * scale, fh as f32 * scale);
+    let scale = (dw / fw).min(dh / fh);
+    let (w, h) = (fw * scale, fh * scale);
     (dx + (dw - w) / 2.0, dy + (dh - h) / 2.0, w, h)
 }
 
@@ -500,42 +497,83 @@ fn due_by(pipeline: &gst::Pipeline, vsync: &Vsync) -> Option<u64> {
     Some(running.nseconds() + ahead)
 }
 
-/// The render thread's half: choose the picture due by the coming vblank, upload it if it changed
-/// and composite it under what the UI drew this frame. Called once per presented frame while the
-/// player is up, just before the swap.
+/// The layouts the GPU converts ([`plx_gfx::video`]); the `appsink` accepts only these.
+fn chroma(format: gst_video::VideoFormat) -> Option<plx_gfx::video::Chroma> {
+    match format {
+        gst_video::VideoFormat::Nv12 => Some(plx_gfx::video::Chroma::Nv12),
+        gst_video::VideoFormat::I420 => Some(plx_gfx::video::Chroma::I420),
+        _ => None,
+    }
+}
+
+/// The conversion the stream declares. A stream that declares no matrix gets the one its size
+/// implies (BT.709 from 720 lines up, else BT.601); no range means limited, as broadcast and
+/// disc video always is.
+fn conversion(info: &gst_video::VideoInfo) -> [[f32; 4]; 3] {
+    use gst_video::{VideoColorMatrix as M, VideoColorRange as R};
+    use plx_gfx::video::Matrix;
+    let c = info.colorimetry();
+    let matrix = match c.matrix() {
+        M::Bt709 => Matrix::Bt709,
+        M::Bt2020 => Matrix::Bt2020,
+        M::Bt601 | M::Smpte240m | M::Fcc => Matrix::Bt601,
+        _ if info.height() >= 720 => Matrix::Bt709,
+        _ => Matrix::Bt601,
+    };
+    plx_gfx::video::yuv_rows(matrix, c.range() == R::Range0_255)
+}
+
+/// The render thread's half: choose the picture due by the coming vblank, upload its planes if it
+/// changed and composite it under what the UI drew this frame. Called once per presented frame
+/// while the player is up, just before the swap.
 pub fn composite_under() {
     thread_local! {
-        /// `(texture, frame number it holds, its width, its height)`.
-        static TEX: std::cell::Cell<(c_uint, u64, i32, i32)> = const { std::cell::Cell::new((0, 0, 0, 0)) };
+        /// The planes' textures, the frame number they hold and that picture's conversion and
+        /// on-screen size.
+        static TEX: std::cell::RefCell<(plx_gfx::video::VideoTex, u64, [[f32; 4]; 3], (f32, f32))> =
+            const { std::cell::RefCell::new((plx_gfx::video::VideoTex::new(), 0, [[0.0; 4]; 3], (0.0, 0.0))) };
     }
     let target = with_session(|s| s.pipeline.clone()).and_then(|p| VSYNC.with(|v| due_by(&p, &v.borrow())));
     let (shown, waiting) = {
         let mut q = frames();
-        let shown = q.select(target).map(|f| (f.seq, f.item.w, f.item.h, f.item.sample.clone()));
+        let shown = q.select(target).map(|f| (f.seq, f.item.info.clone(), f.item.sample.clone()));
         (shown, q.has_pending())
     };
     if waiting && target.is_some() {
         // A playing picture is due at a later vblank: keep presenting until it is shown.
         plx_machine::idle::invalidate();
     }
-    let Some((seq, w, h, sample)) = shown else { return };
+    let Some((seq, info, sample)) = shown else { return };
     let mut dst = *DST.lock().unwrap_or_else(|e| e.into_inner());
     if dst[2] <= 0 || dst[3] <= 0 {
         dst = [0, 0, 1920, 1080];
     }
     TEX.with(|t| {
-        let (mut tex, held, tw, th) = t.get();
-        if held != seq {
-            let Some(map) = sample.buffer().and_then(|b| b.map_readable().ok()) else { return };
-            if tex != 0 && (tw, th) == (w, h) {
-                plx_gfx::gfx::replace_rgba(tex, w, h, map.as_ptr());
-            } else {
-                tex = plx_gfx::gfx::upload_rgba(tex, w, h, map.as_ptr());
-            }
-            t.set((tex, seq, w, h));
+        let (tex, held, rows, size) = &mut *t.borrow_mut();
+        if *held != seq {
+            let Some(chroma) = chroma(info.format()) else { return };
+            let Some(frame) = sample.buffer().and_then(|b| gst_video::VideoFrameRef::from_buffer_ref_readable(b, &info).ok()) else { return };
+            let planes: Vec<plx_gfx::video::Plane> = (0..frame.n_planes())
+                .filter_map(|i| {
+                    // Plane `i` starts with component `i` (Y', Cb, Cr) in both layouts; NV12's
+                    // second plane carries Cr beside Cb at the same size.
+                    let data = frame.plane_data(i).ok()?;
+                    Some(plx_gfx::video::Plane {
+                        data: data.as_ptr(),
+                        stride: frame.plane_stride()[i as usize],
+                        w: frame.comp_width(i) as i32,
+                        h: frame.comp_height(i) as i32,
+                    })
+                })
+                .collect();
+            tex.upload(chroma, &planes);
+            *held = seq;
+            *rows = conversion(&info);
+            let par = info.par();
+            *size = (info.width() as f32 * par.numer() as f32 / par.denom().max(1) as f32, info.height() as f32);
         }
-        let (x, y, dw, dh) = letterbox(w, h, dst);
-        plx_gfx::gfx::draw_under(tex, x, y, dw, dh);
+        let (x, y, dw, dh) = letterbox(size.0, size.1, dst);
+        tex.draw_under(rows, x, y, dw, dh);
     });
 }
 
@@ -631,7 +669,7 @@ fn log_audio_decoder(pipeline: &gst::Pipeline) -> bool {
     true
 }
 
-/// Say once which decoder GStreamer chose for the video — a hardware one (V4L2, VA-API) or
+/// Say once which decoder GStreamer chose for the video — a hardware one (VA-API) or
 /// software — and what it hands `videoconvert`. `true` once said.
 fn log_video_decoder(pipeline: &gst::Pipeline) -> bool {
     let Some(decoder) = decoder_in(pipeline.upcast_ref(), "Video") else { return false };
@@ -1064,11 +1102,13 @@ mod tests {
 
     #[test]
     fn the_picture_is_letterboxed_into_its_rectangle() {
-        assert_eq!(letterbox(1920, 1080, [0, 0, 1920, 1080]), (0.0, 0.0, 1920.0, 1080.0));
+        assert_eq!(letterbox(1920.0, 1080.0, [0, 0, 1920, 1080]), (0.0, 0.0, 1920.0, 1080.0));
         // 4:3 pillarboxed on a 16:9 screen.
-        assert_eq!(letterbox(1440, 1080, [0, 0, 1920, 1080]), (240.0, 0.0, 1440.0, 1080.0));
+        assert_eq!(letterbox(1440.0, 1080.0, [0, 0, 1920, 1080]), (240.0, 0.0, 1440.0, 1080.0));
+        // A 4K picture scales down into the same rectangle.
+        assert_eq!(letterbox(3840.0, 2160.0, [0, 0, 1920, 1080]), (0.0, 0.0, 1920.0, 1080.0));
         // Scope 2.39:1 letterboxed.
-        let (x, y, w, h) = letterbox(1920, 804, [0, 0, 1920, 1080]);
+        let (x, y, w, h) = letterbox(1920.0, 804.0, [0, 0, 1920, 1080]);
         assert_eq!((x, w), (0.0, 1920.0));
         assert!((y - 138.0).abs() < 0.01 && (h - 804.0).abs() < 0.01);
     }
