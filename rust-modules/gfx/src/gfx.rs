@@ -265,6 +265,17 @@ extern "C" {
         ty: c_uint,
         pixels: *const c_void,
     );
+    fn glTexSubImage2D(
+        target: c_uint,
+        level: c_int,
+        x: c_int,
+        y: c_int,
+        w: c_int,
+        h: c_int,
+        format: c_uint,
+        ty: c_uint,
+        pixels: *const c_void,
+    );
     fn glTexParameteri(target: c_uint, pname: c_uint, param: c_int);
     // UI self-capture (the "cap_*" section at the bottom of this file)
     fn glGenFramebuffers(n: c_int, ids: *mut c_uint);
@@ -2063,6 +2074,17 @@ pub fn upload_rgba(prev: c_uint, w: c_int, h: c_int, pixels: *const u8) -> c_uin
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         tex
+    }
+}
+
+/// Overwrite the pixels of a texture [`upload_rgba`] specified at exactly `w`×`h`, keeping its
+/// storage. The video picture's per-frame upload: re-specifying would have the driver allocate a
+/// fresh 8 MB image for every decoded frame. Main-thread only.
+pub fn replace_rgba(tex: c_uint, w: c_int, h: c_int, pixels: *const u8) {
+    unsafe {
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels as *const c_void);
     }
 }
 

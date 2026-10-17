@@ -7,9 +7,11 @@
 //! machine has one), then
 //!
 //! * video → `videoconvert ! videoscale` to straight RGBA no larger than 1920x1080 → an `appsink`
-//!   synced to the pipeline clock, whose frames the render thread uploads and composites UNDER
-//!   the finished UI with the same `(ONE_MINUS_DST_ALPHA, ONE)` arithmetic the television's
-//!   compositor applies to its video plane ([`composite_under`]);
+//!   synced to the pipeline clock but released [`EARLY_NS`] ahead of each picture's due time into
+//!   a queue; the render thread picks the picture due by the vblank its swap lands on
+//!   (`frame_pacing`), uploads it and composites it UNDER the finished UI with the same
+//!   `(ONE_MINUS_DST_ALPHA, ONE)` arithmetic the television's compositor applies to its video
+//!   plane ([`composite_under`]);
 //! * audio → decoded to PCM (LG's four codecs by name; FLAC, Opus, Vorbis, TrueHD, MP3/MP2 and PCM
 //!   from the parameters the demuxer reports, [`note_audio`]) → `audioconvert ! audioresample` →
 //!   the system audio sink
@@ -36,6 +38,7 @@
 //! byte budget answers the feed with `'B'`, and the pump retries the same access unit later.
 
 use plx_base::task::MainThread;
+use super::frame_pacing::{FrameQueue, Pending, Vsync, EARLY_NS};
 use super::sink::VideoSink;
 use std::ffi::{c_uint, CStr};
 use std::os::raw::{c_char, c_int, c_long};
@@ -45,6 +48,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
+use gstreamer_base::prelude::*;
 
 const FEED_OK: c_char = b'O' as c_char;
 const FEED_FULL: c_char = b'B' as c_char;
@@ -394,7 +398,7 @@ fn describe(video: (&str, &str), audio: Option<AudioLane>, audio_sink: &str) -> 
         "appsrc name=v format=time is-live=false stream-type=stream block=false max-bytes={VIDEO_QUEUE_BYTES} caps=\"{}\" \
          ! {} ! decodebin ! videoconvert ! videoscale add-borders=true \
          ! video/x-raw,format=RGBA,pixel-aspect-ratio=1/1,width=[1,{MAX_W}],height=[1,{MAX_H}] \
-         ! appsink name=vsink sync=true max-buffers=2 drop=false",
+         ! appsink name=vsink sync=true ts-offset=-{EARLY_NS} max-buffers=2 drop=false",
         video.0, video.1
     );
     let head = format!("appsrc name=a format=time is-live=false stream-type=stream block=false max-bytes={AUDIO_QUEUE_BYTES}");
@@ -417,30 +421,49 @@ fn audio_sink_description() -> String {
 
 // ---- frames for the render thread -------------------------------------------------------------
 
-struct Frame {
-    seq: u64,
+/// A decoded picture as GStreamer handed it over — held, not copied: `w`x`h` straight RGBA,
+/// tightly packed (a width in whole pixels already rounds RGBA's stride to 4).
+struct Picture {
     w: i32,
     h: i32,
-    rgba: Arc<Vec<u8>>,
+    sample: gst::Sample,
 }
 
-static LATEST: Mutex<Option<Frame>> = Mutex::new(None);
+static FRAMES: Mutex<FrameQueue<Picture>> = Mutex::new(FrameQueue::new());
 static FRAME_SEQ: AtomicU64 = AtomicU64::new(0);
 /// Where the engine placed the video (`place_window`), in UI pixels; all zero = the whole screen.
 static DST: Mutex<[i32; 4]> = Mutex::new([0; 4]);
 
-fn publish_frame(sample: &gst::Sample) -> Result<(), gst::FlowError> {
+thread_local! {
+    /// The display's vblank grid, fed by the render thread's swaps ([`swapped`]).
+    static VSYNC: std::cell::RefCell<Vsync> = const { std::cell::RefCell::new(Vsync::new()) };
+}
+
+fn frames() -> std::sync::MutexGuard<'static, FrameQueue<Picture>> {
+    FRAMES.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Queue a picture the `appsink` released, with the pipeline running time it is due at: its
+/// timestamp in running time plus the latency the sink was configured with — the moment a
+/// `sync=true` sink without the early release would have handed it over.
+fn queue_frame(sink: &gst_app::AppSink, sample: gst::Sample) -> Result<(), gst::FlowError> {
     let caps = sample.caps().ok_or(gst::FlowError::Error)?;
     let s = caps.structure(0).ok_or(gst::FlowError::Error)?;
     let (w, h) = (s.get::<i32>("width").map_err(|_| gst::FlowError::Error)?, s.get::<i32>("height").map_err(|_| gst::FlowError::Error)?);
     let buffer = sample.buffer().ok_or(gst::FlowError::Error)?;
-    let map = buffer.map_readable().map_err(|_| gst::FlowError::Error)?;
-    let need = (w as usize) * (h as usize) * 4;
-    if map.len() < need {
+    if w <= 0 || h <= 0 || buffer.size() < (w as usize) * (h as usize) * 4 {
         return Err(gst::FlowError::Error);
     }
+    let due = buffer
+        .pts()
+        .and_then(|pts| sample.segment()?.downcast_ref::<gst::ClockTime>()?.to_running_time(pts))
+        .map(|running| {
+            // `AppSink` is a `GstBaseSink` underneath; the binding only declares it an element.
+            let latency = sink.dynamic_cast_ref::<gstreamer_base::BaseSink>().map_or(gst::ClockTime::ZERO, |b| b.latency());
+            (running + latency).nseconds()
+        });
     let seq = FRAME_SEQ.fetch_add(1, Relaxed) + 1;
-    *LATEST.lock().unwrap_or_else(|e| e.into_inner()) = Some(Frame { seq, w, h, rgba: Arc::new(map[..need].to_vec()) });
+    frames().push(Pending { seq, due, item: Picture { w, h, sample } });
     if !PRESENTED.swap(true, Relaxed) {
         log(&format!("first picture {w}x{h}"));
     }
@@ -449,7 +472,7 @@ fn publish_frame(sample: &gst::Sample) -> Result<(), gst::FlowError> {
 }
 
 fn clear_picture() {
-    *LATEST.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    frames().clear();
     plx_machine::idle::invalidate();
 }
 
@@ -464,30 +487,62 @@ fn letterbox(fw: i32, fh: i32, dst: [i32; 4]) -> (f32, f32, f32, f32) {
     (dx + (dw - w) / 2.0, dy + (dh - h) / 2.0, w, h)
 }
 
-/// The render thread's half: upload the newest decoded picture if it changed and composite it
-/// under what the UI drew this frame. Called once per presented frame while the player is up.
+/// The pipeline running time of the vblank the coming swap is shown at: the pipeline's clock now,
+/// plus how far off that vblank is. `None` while the pipeline is not playing — the picture on
+/// screen then stays.
+fn due_by(pipeline: &gst::Pipeline, vsync: &Vsync) -> Option<u64> {
+    if pipeline.current_state() != gst::State::Playing {
+        return None;
+    }
+    let running = pipeline.clock()?.time().checked_sub(pipeline.base_time()?)?;
+    let now = mono_ns();
+    let ahead = vsync.next_vblank(now).map_or(0, |v| v.saturating_sub(now));
+    Some(running.nseconds() + ahead)
+}
+
+/// The render thread's half: choose the picture due by the coming vblank, upload it if it changed
+/// and composite it under what the UI drew this frame. Called once per presented frame while the
+/// player is up, just before the swap.
 pub fn composite_under() {
     thread_local! {
-        /// `(texture, frame number it holds)`.
-        static TEX: std::cell::Cell<(c_uint, u64)> = const { std::cell::Cell::new((0, 0)) };
+        /// `(texture, frame number it holds, its width, its height)`.
+        static TEX: std::cell::Cell<(c_uint, u64, i32, i32)> = const { std::cell::Cell::new((0, 0, 0, 0)) };
     }
-    let guard = LATEST.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(frame) = guard.as_ref() else { return };
-    let (seq, w, h, rgba) = (frame.seq, frame.w, frame.h, Arc::clone(&frame.rgba));
-    drop(guard);
+    let target = with_session(|s| s.pipeline.clone()).and_then(|p| VSYNC.with(|v| due_by(&p, &v.borrow())));
+    let (shown, waiting) = {
+        let mut q = frames();
+        let shown = q.select(target).map(|f| (f.seq, f.item.w, f.item.h, f.item.sample.clone()));
+        (shown, q.has_pending())
+    };
+    if waiting && target.is_some() {
+        // A playing picture is due at a later vblank: keep presenting until it is shown.
+        plx_machine::idle::invalidate();
+    }
+    let Some((seq, w, h, sample)) = shown else { return };
     let mut dst = *DST.lock().unwrap_or_else(|e| e.into_inner());
     if dst[2] <= 0 || dst[3] <= 0 {
         dst = [0, 0, 1920, 1080];
     }
     TEX.with(|t| {
-        let (mut tex, held) = t.get();
+        let (mut tex, held, tw, th) = t.get();
         if held != seq {
-            tex = plx_gfx::gfx::upload_rgba(tex, w, h, rgba.as_ptr());
-            t.set((tex, seq));
+            let Some(map) = sample.buffer().and_then(|b| b.map_readable().ok()) else { return };
+            if tex != 0 && (tw, th) == (w, h) {
+                plx_gfx::gfx::replace_rgba(tex, w, h, map.as_ptr());
+            } else {
+                tex = plx_gfx::gfx::upload_rgba(tex, w, h, map.as_ptr());
+            }
+            t.set((tex, seq, w, h));
         }
         let (x, y, dw, dh) = letterbox(w, h, dst);
         plx_gfx::gfx::draw_under(tex, x, y, dw, dh);
     });
+}
+
+/// The render thread swapped a frame that [`composite_under`] drew into: one more point on the
+/// vblank grid the next picture is chosen against.
+pub fn swapped() {
+    VSYNC.with(|v| v.borrow_mut().note_swap(mono_ns()));
 }
 
 // ---- the session ------------------------------------------------------------------------------
@@ -520,14 +575,14 @@ fn build_session(payload: &str) -> Result<Session, String> {
         gst_app::AppSinkCallbacks::builder()
             .new_sample(|sink| {
                 let sample = sink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
-                publish_frame(&sample)?;
+                queue_frame(sink, sample)?;
                 Ok(gst::FlowSuccess::Ok)
             })
             .new_preroll(|sink| {
                 // The paused picture: a Load that has not been told to Play yet still shows its
                 // first frame, as the television does once its pipeline has prerolled.
                 if let Ok(sample) = sink.pull_preroll() {
-                    let _ = publish_frame(&sample);
+                    let _ = queue_frame(sink, sample);
                 }
                 Ok(gst::FlowSuccess::Ok)
             })
@@ -548,6 +603,18 @@ fn build_session(payload: &str) -> Result<Session, String> {
 }
 
 /// The session's own thread: the 5 Hz position report and the bus.
+/// The decoder GStreamer plugged into `bin` for `kind` (`"Audio"`, `"Video"`).
+fn decoder_in(bin: &gst::Bin, kind: &str) -> Option<gst::Element> {
+    bin.iterate_recurse().into_iter().flatten().find(|e| {
+        e.factory()
+            .is_some_and(|f| f.metadata("klass").is_some_and(|k| k.contains("Decoder") && k.contains(kind)))
+    })
+}
+
+fn factory_name(e: &gst::Element) -> String {
+    e.factory().map_or_else(|| e.name().to_string(), |f| f.name().to_string())
+}
+
 /// Say once which decoder GStreamer chose for the audio and what it produced — the format and
 /// channel count that reach the speakers (a DTS-HD MA track decodes losslessly to its own channel
 /// count, its core to at most 5.1). `true` once said, or when there is no audio lane.
@@ -557,14 +624,19 @@ fn log_audio_decoder(pipeline: &gst::Pipeline) -> bool {
     let decoder = pipeline
         .by_name("adecbin")
         .and_then(|b| b.downcast::<gst::Bin>().ok())
-        .and_then(|bin| {
-            bin.iterate_recurse().into_iter().flatten().find_map(|e| {
-                let factory = e.factory()?;
-                factory.metadata("klass").is_some_and(|k| k.contains("Decoder") && k.contains("Audio")).then(|| factory.name().to_string())
-            })
-        })
+        .and_then(|bin| decoder_in(&bin, "Audio"))
+        .map(|d| factory_name(&d))
         .unwrap_or_else(|| "none (raw PCM)".to_owned());
     log(&format!("audio decoded by {decoder}: {caps}"));
+    true
+}
+
+/// Say once which decoder GStreamer chose for the video — a hardware one (V4L2, VA-API) or
+/// software — and what it hands `videoconvert`. `true` once said.
+fn log_video_decoder(pipeline: &gst::Pipeline) -> bool {
+    let Some(decoder) = decoder_in(pipeline.upcast_ref(), "Video") else { return false };
+    let Some(caps) = decoder.static_pad("src").and_then(|p| p.current_caps()) else { return false };
+    log(&format!("video decoded by {}: {caps}", factory_name(&decoder)));
     true
 }
 
@@ -575,6 +647,7 @@ fn start_ticker(pipeline: gst::Pipeline, base: Arc<AtomicI64>, generation: u64) 
             None => return,
         };
         let mut audio_logged = false;
+        let mut video_logged = false;
         while GENERATION.load(Relaxed) == generation {
             let wait = gst::ClockTime::from_mseconds(TICK_MS);
             if let Some(msg) = bus.timed_pop_filtered(wait, &[gst::MessageType::Error, gst::MessageType::Eos, gst::MessageType::Warning]) {
@@ -611,6 +684,9 @@ fn start_ticker(pipeline: gst::Pipeline, base: Arc<AtomicI64>, generation: u64) 
             }
             if !audio_logged {
                 audio_logged = log_audio_decoder(&pipeline);
+            }
+            if !video_logged {
+                video_logged = log_video_decoder(&pipeline);
             }
             end_drained_audio(generation, position);
         }
@@ -730,6 +806,8 @@ unsafe fn sf_flush() -> c_int {
     with_session(|s| {
         let flushed = s.pipeline.send_event(gst::event::FlushStart::new()) && s.pipeline.send_event(gst::event::FlushStop::new(true));
         s.base.store(i64::MIN, Relaxed);
+        // The queued pictures belong to the old timeline; the one on screen stays until the next.
+        frames().drop_pending();
         c_int::from(flushed)
     })
     .unwrap_or(0)
@@ -749,10 +827,15 @@ unsafe fn sf_push_eos() -> c_int {
     .unwrap_or(0)
 }
 
-/// Milliseconds on a monotonic clock private to this module.
-fn now_ms() -> u64 {
+/// Nanoseconds on a monotonic clock private to this module.
+fn mono_ns() -> u64 {
     static START: OnceLock<std::time::Instant> = OnceLock::new();
-    START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
+    START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+}
+
+/// [`mono_ns`] in milliseconds.
+fn now_ms() -> u64 {
+    mono_ns() / 1_000_000
 }
 
 /// How long the audio feed must be quiet before an ending audio lane is ended.

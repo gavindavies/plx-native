@@ -23,6 +23,7 @@ pub mod engine;
 pub mod lifecycle;
 pub mod machine;
 pub mod ffi_host;
+mod frame_pacing; // which decoded picture the next swap shows (the GStreamer sink's queue)
 pub mod gst_sink; // the Linux build's player: the fed AUs decoded by the system GStreamer
 mod pump;
 mod shared;

@@ -329,6 +329,10 @@ unsafe fn present_and_swap(
             plx_base::surface::present_supersampled();
             SDL_GL_SwapWindow(app.win);
         }
+        // The swap's completion is a point on the vblank grid the next picture is chosen against.
+        if fr.player {
+            plx_media::player::gst_sink::swapped();
+        }
         app.window_activity.presented();
         #[cfg(feature = "devtools")]
         {

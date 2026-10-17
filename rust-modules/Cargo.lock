@@ -777,6 +777,7 @@ version = "0.0.0"
 dependencies = [
  "gstreamer",
  "gstreamer-app",
+ "gstreamer-base",
  "libc",
  "plx_base",
  "plx_data",
