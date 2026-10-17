@@ -233,6 +233,8 @@ pub(crate) struct App {
     pub(crate) prev: u32,
     ev: [u8; 128],
     remote: Option<crate::remote::Remote>,
+    /// The TV's remote over HDMI-CEC (`crate::cec`); `None` with no adapter or `PITV_CEC=0`.
+    cec: Option<crate::cec::Cec>,
     /// The SDL window (`SDL_CreateWindow`), for the swap.
     win: *mut c_void,
     /// WSLg accepts swap interval 1 on X11/GLX without pacing the compositor. This boot-scoped

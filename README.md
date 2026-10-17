@@ -74,6 +74,27 @@ Arrows move, Enter is OK, holding Enter opens a title's menu (play from the star
 watched), and Escape (or Q) goes back. In the player, OK pauses and resumes, Left and Right seek,
 and Up reaches the subtitle and audio buttons; a remote's media keys work too. Logs and the per-file progress live in `~/.local/state/pitv`.
 
+## The TV's remote (HDMI-CEC)
+
+With the laptop on the TV's HDMI input, the TV's own remote drives PiTV over HDMI-CEC (LG calls it
+SIMPLINK; turn it on in the TV's settings): the arrows, OK, Back and the play, pause, stop, rewind
+and fast-forward buttons. The Magic Remote's pointer does not travel over CEC; its buttons and
+wheel-click do. When PiTV starts it switches the TV to its input.
+
+A laptop's HDMI port has no CEC line, so this needs a CEC adapter the kernel exposes as
+`/dev/cec0`: a USB-CEC adapter (Pulse-Eight's, attached with
+`inputattach --daemon --pulse8-cec /dev/ttyACM0`), or a USB-C or DisplayPort to HDMI adapter that
+carries CEC. The user running PiTV needs access to it:
+
+```sh
+sudo usermod -aG video $USER      # then log in again
+sudo apt install v4l-utils        # cec-ctl, to check the adapter
+cec-ctl -d /dev/cec0 --playback -S   # lists the TV and what it sees
+```
+
+The event log says which adapter PiTV opened and every button it received (`cec: …`).
+`PITV_CEC_DEVICE=/dev/cec1` picks another adapter and `PITV_CEC=0` turns CEC off.
+
 ## Library folders and SMB shares
 
 The library is configured in a file, not on screen: `~/.config/pitv/library.conf` (or

@@ -256,6 +256,8 @@ pub(crate) unsafe fn boot(
         // dev/testing remote: tokens written to the `pitv-remote` FIFO become synthetic key
         // events, consumed by the ONE real key handler.
         remote: crate::remote::Remote::open(),
+        // The TV's remote over HDMI-CEC: its buttons become the same synthetic key edges.
+        cec: crate::cec::Cec::start(),
         win,
         wslg_frame_pacing,
         t0: last_input,

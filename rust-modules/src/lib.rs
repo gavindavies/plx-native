@@ -6,6 +6,7 @@
 //! plxnative-modules — the application crate: the event loop (`app`), the headless test harness
 //! (`remote`, `shot`) and the dev trigger surface (`dev`). `src/bin/pitv.rs` is the binary.
 mod app; // run_application — the app core / event loop
+mod cec; // HDMI-CEC: the TV's remote, through the kernel's CEC adapter, as synthetic SDL keys
 mod dev; // the runtime-dir trigger surface, behind one `devtriggers` feature — read it before adding a trigger
 mod remote; // the remote-control channel: a FIFO the loop drains into synthetic SDL keys
 mod shot; // screenshots: read the frame back and write a PNG (see the module doc)

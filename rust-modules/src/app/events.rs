@@ -339,6 +339,18 @@ pub(crate) fn remote_synth_key_repeat(sym: c_uint, wcode: c_uint) {
     unsafe { SDL_PushEvent(ev.as_ptr() as *const c_void) };
 }
 
+/// One key edge of the TV's remote over HDMI-CEC (`crate::cec`): its button's token resolved as
+/// the FIFO resolves it, pushed as the press, the hardware repeat or the release it was.
+pub(crate) fn synth_cec_key(edge: crate::cec::KeyEdge) {
+    let Some((sym, wcode)) = remote_token_key(edge.token) else { return };
+    log(&format!("cec: {} {:?}", edge.token, edge.kind));
+    match edge.kind {
+        crate::cec::EdgeKind::Down => remote_synth_key_edge(sym, wcode, true),
+        crate::cec::EdgeKind::Repeat => remote_synth_key_repeat(sym, wcode),
+        crate::cec::EdgeKind::Up => remote_synth_key_edge(sym, wcode, false),
+    }
+}
+
 /// Synthesize one Magic-Remote scroll-wheel tick — item 13's `wheel:<dy>` FIFO token, so a script
 /// can drive the wheel with no mouse in the room. Encoded in the plain, real-SDL2 shape
 /// (`Sint32 y` at `+20`) unconditionally: it is the READING side that has to branch by platform

@@ -389,6 +389,9 @@ pub(crate) unsafe fn ingest(app: &mut App, fr: &mut Frame) {
     for tok in toks {
         let _ = ingress_token(app, fr, &tok);
     }
+    if let Some(cec) = app.cec.as_ref() {
+        cec.drain(super::events::synth_cec_key);
+    }
     drain_sdl(app, fr);
 }
 
